@@ -3,7 +3,7 @@ maya_dynamic_parent_pivot.py
 
 Combined Maya animation workflow tool with Dynamic Parenting, Hand / Foot Hold,
 Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter (Face and Body), Control Picker,
-Animators Pencil, Onion Skin, Rotation Doctor, Character Skinning, Rig Scale, Video Reference, and Timeline Notes tabs.
+Animators Pencil, Onion Skin, Rotation Doctor, Character Skinning, Rig Scale, Video Reference, Timeline Notes, and Customization tabs.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -31,6 +31,8 @@ import maya_skinning_cleanup
 import maya_rig_scale_export
 import maya_timeline_notes
 import maya_video_reference_tool
+import maya_aminate_customization
+import maya_smear_frames
 
 try:
     import maya.cmds as cmds
@@ -69,16 +71,19 @@ WINDOW_OBJECT_NAME = "mayaAnimWorkflowToolsWindow"
 DOCK_HOST_OBJECT_NAME = WINDOW_OBJECT_NAME + "DockHost"
 WORKSPACE_CONTROL_NAME = WINDOW_OBJECT_NAME + "WorkspaceControl"
 LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
+DOCKED_WORKFLOW_MIN_WIDTH = 360
+DOCKED_WORKFLOW_MIN_HEIGHT = 240
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.2"
+VERSION_LABEL = "Version 0.3.4"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
 SHELF_ICON_FILE_NAME = "maya_anim_workflow_tools_icon.png"
-SHELF_ICON_OVERLAY_LABEL = "AMN"
+SHELF_ICON_OVERLAY_LABEL = ""
+AMINATE_ENABLE_APP_KEY_FILTER = "AMINATE_ENABLE_APP_KEY_FILTER"
 ROOT_GROUP_NAME = "amirDynamicTools_GRP"
 PARENTING_GROUP_NAME = "amirDynamicParenting_GRP"
 PIVOT_GROUP_NAME = "amirDynamicPivot_GRP"
@@ -107,6 +112,8 @@ TAB_SKIN = "Character Skinning"
 TAB_RIG_SCALE = "Rig Scale"
 TAB_VIDEO = "Video Reference"
 TAB_TIMELINE = "Timeline Notes"
+TAB_SMEAR_FRAMES = "Smear Frames"
+TAB_CUSTOMIZATION = "Customization"
 TAB_GUIDE = "Quick Start"
 TAB_STUDENT_CORE = "Toolkit Bar"
 TAB_TIMING = "Scene Helpers"
@@ -345,6 +352,8 @@ TAB_HELP_TEXT = {
     TAB_RIG_SCALE: "Use this when you need a safely scaled export copy of a character for game-engine export.",
     TAB_VIDEO: "Use this when you want video or image reference in the scene for tracing, timing, and annotation.",
     TAB_TIMELINE: "Use this when you want readable colored notes directly on the timeline so you can scrub and review shot notes.",
+    TAB_SMEAR_FRAMES: "Use this when you want a quick static smear mesh for a fast motion accent. The first slice creates clean Unreal-friendly mesh geometry on the current frame without touching the rig.",
+    TAB_CUSTOMIZATION: "Use this when you want one place for Aminate animation colors: timeline highlight, note ranges, keyframe emphasis, and Graph Editor tangent or curve accents where Maya exposes those native color slots.",
 }
 LEGACY_WORKFLOW_SHELF_DOC_TAGS = (
     maya_onion_skin.SHELF_BUTTON_DOC_TAG,
@@ -753,11 +762,6 @@ def _cleanup_duplicate_workflow_widgets(keep_widget=None):
             widget.deleteLater()
         except Exception:
             pass
-        try:
-            if shiboken and widget.objectName() in (WINDOW_OBJECT_NAME, DOCK_HOST_OBJECT_NAME) and shiboken.isValid(widget):
-                shiboken.delete(widget)
-        except Exception:
-            pass
     try:
         QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
     except Exception:
@@ -778,6 +782,9 @@ def _close_existing_window():
     global GLOBAL_DOCK_HOST
     if GLOBAL_WINDOW is not None:
         try:
+            hide_extras = getattr(GLOBAL_WINDOW, "_hide_toolbar_extras_if_needed", None)
+            if hide_extras:
+                hide_extras()
             GLOBAL_WINDOW.close()
             GLOBAL_WINDOW.deleteLater()
         except Exception:
@@ -1640,6 +1647,8 @@ class MayaAnimWorkflowController(object):
         self.rig_scale_controller = maya_rig_scale_export.MayaRigScaleExportController() if MAYA_AVAILABLE else None
         self.video_reference_controller = maya_video_reference_tool.MayaVideoReferenceController() if MAYA_AVAILABLE else None
         self.timeline_notes_controller = maya_timeline_notes.MayaTimelineNotesController() if MAYA_AVAILABLE else None
+        self.smear_frame_controller = maya_smear_frames.SmearFrameController() if MAYA_AVAILABLE else None
+        self.customization_controller = maya_aminate_customization.AminateCustomizationController() if MAYA_AVAILABLE else None
         self.reference_manager_controller = maya_reference_manager.ReferencePackageController() if MAYA_AVAILABLE else None
         self.face_retarget_controller = maya_face_retarget.FaceRetargetController() if MAYA_AVAILABLE else None
         self.status_callback = None
@@ -1720,6 +1729,16 @@ class MayaAnimWorkflowController(object):
         if self.timeline_notes_controller:
             try:
                 self.timeline_notes_controller.shutdown()
+            except Exception:
+                pass
+        if self.customization_controller:
+            try:
+                self.customization_controller.shutdown()
+            except Exception:
+                pass
+        if self.smear_frame_controller:
+            try:
+                self.smear_frame_controller.shutdown()
             except Exception:
                 pass
         if self.face_retarget_controller:
@@ -2279,17 +2298,25 @@ if QtWidgets:
         def __init__(self, controller, parent=None, initial_tab=0):
             super(MayaAnimWorkflowWindow, self).__init__(parent)
             self.controller = controller
+            self._toolbar_extras_hidden_for_close = False
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Aminate")
-            self.setMinimumSize(160, 120)
-            start_width, start_height = _screen_limited_size(1180, 860, min_width=160, min_height=120)
+            self.setMinimumSize(DOCKED_WORKFLOW_MIN_WIDTH, DOCKED_WORKFLOW_MIN_HEIGHT)
+            start_width, start_height = _screen_limited_size(
+                1180,
+                860,
+                min_width=DOCKED_WORKFLOW_MIN_WIDTH,
+                min_height=DOCKED_WORKFLOW_MIN_HEIGHT,
+            )
             self.resize(start_width, start_height)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
             self._build_ui()
             self._populate_profile_names()
             self._set_initial_tab(initial_tab)
-            self._install_key_passthrough_filter()
+            self._key_filter_installed = False
+            if os.environ.get(AMINATE_ENABLE_APP_KEY_FILTER) == "1":
+                self._install_key_passthrough_filter()
 
         def _install_key_passthrough_filter(self):
             app = QtWidgets.QApplication.instance()
@@ -2297,6 +2324,7 @@ if QtWidgets:
                 return
             try:
                 app.installEventFilter(self)
+                self._key_filter_installed = True
             except Exception:
                 pass
 
@@ -2306,6 +2334,7 @@ if QtWidgets:
                 return
             try:
                 app.removeEventFilter(self)
+                self._key_filter_installed = False
             except Exception:
                 pass
 
@@ -2415,6 +2444,8 @@ if QtWidgets:
             self.rig_scale_page, self.rig_scale_tab = self._make_scroll_tab()
             self.video_page, self.video_tab = self._make_scroll_tab()
             self.timeline_page, self.timeline_tab = self._make_scroll_tab()
+            self.smear_frames_page, self.smear_frames_tab = self._make_scroll_tab()
+            self.customization_page, self.customization_tab = self._make_scroll_tab()
             self.guide_page, self.guide_tab = self._make_scroll_tab()
             self.student_core_page, self.student_core_tab = self._make_scroll_tab()
             self.timing_page, self.timing_tab = self._make_scroll_tab()
@@ -2440,30 +2471,39 @@ if QtWidgets:
             self.tab_widget.addTab(self.rig_scale_tab, TAB_RIG_SCALE)
             self.tab_widget.addTab(self.video_tab, TAB_VIDEO)
             self.tab_widget.addTab(self.timeline_tab, TAB_TIMELINE)
+            self.tab_widget.addTab(self.smear_frames_tab, TAB_SMEAR_FRAMES)
+            self.tab_widget.addTab(self.customization_tab, TAB_CUSTOMIZATION)
             self._refresh_tab_tooltips()
             self.tab_intro_labels = {}
-            self._build_parenting_tab()
-            self._build_contact_hold_tab()
-            self._build_surface_contact_tab()
-            self._build_pivot_tab()
-            self._build_ikfk_tab()
-            self._build_face_retarget_tab()
-            self._build_control_picker_tab()
-            self._build_animators_pencil_tab()
-            self._build_animation_assistant_tab()
-            self._build_animation_styling_tab()
-            self._build_history_timeline_tab()
-            self._build_onion_tab()
-            self._build_rotation_tab()
-            self._build_skin_tab()
-            self._build_rig_scale_tab()
-            self._build_video_tab()
-            self._build_timeline_tab()
-            self._build_guide_tab()
-            self._build_student_core_tab()
-            self._build_timing_tab()
-            self._build_reference_manager_tab()
+            self._built_tab_names = set()
+            self._tab_builders = {
+                TAB_GUIDE: self._build_guide_tab,
+                TAB_STUDENT_CORE: self._build_student_core_tab,
+                TAB_TIMING: self._build_timing_tab,
+                TAB_REFERENCE_MANAGER: self._build_reference_manager_tab,
+                TAB_PARENTING: self._build_parenting_tab,
+                TAB_CONTACT_HOLD: self._build_contact_hold_tab,
+                TAB_SURFACE_CONTACT: self._build_surface_contact_tab,
+                TAB_PIVOT: self._build_pivot_tab,
+                TAB_IKFK: self._build_ikfk_tab,
+                TAB_FACE_RETARGET: self._build_face_retarget_tab,
+                TAB_CONTROL_PICKER: self._build_control_picker_tab,
+                TAB_ANIMATORS_PENCIL: self._build_animators_pencil_tab,
+                TAB_ANIMATION_ASSISTANT: self._build_animation_assistant_tab,
+                TAB_ANIMATION_STYLING: self._build_animation_styling_tab,
+                TAB_HISTORY_TIMELINE: self._build_history_timeline_tab,
+                TAB_ONION: self._build_onion_tab,
+                TAB_ROTATION: self._build_rotation_tab,
+                TAB_SKIN: self._build_skin_tab,
+                TAB_RIG_SCALE: self._build_rig_scale_tab,
+                TAB_VIDEO: self._build_video_tab,
+                TAB_TIMELINE: self._build_timeline_tab,
+                TAB_SMEAR_FRAMES: self._build_smear_frames_tab,
+                TAB_CUSTOMIZATION: self._build_customization_tab,
+            }
+            self._ensure_tab_content(self.tab_widget.currentIndex())
             self.tab_widget.currentChanged.connect(self._update_tab_navigation_buttons)
+            self.tab_widget.currentChanged.connect(self._ensure_tab_content)
             self._update_tab_navigation_buttons()
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setObjectName("mayaAnimWorkflowStatusLabel")
@@ -2491,6 +2531,27 @@ if QtWidgets:
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+
+        def _ensure_tab_content(self, index):
+            if not hasattr(self, "tab_widget") or index is None or index < 0:
+                return
+            tab_name = self.tab_widget.tabText(index)
+            if tab_name in getattr(self, "_built_tab_names", set()):
+                return
+            builder = getattr(self, "_tab_builders", {}).get(tab_name)
+            if not builder:
+                return
+            try:
+                builder()
+                self._built_tab_names.add(tab_name)
+            except Exception as exc:
+                page = self.tab_widget.widget(index)
+                if page and not page.layout():
+                    layout = QtWidgets.QVBoxLayout(page)
+                    label = QtWidgets.QLabel("Could not open this Aminate tab: {0}".format(exc))
+                    label.setWordWrap(True)
+                    layout.addWidget(label)
+                _warning("Could not build Aminate tab {0}: {1}".format(tab_name, exc))
 
         def _configure_main_tab_bar(self):
             tab_bar = self.tab_widget.tabBar() if self.tab_widget else None
@@ -2926,6 +2987,34 @@ if QtWidgets:
             )
             layout.addWidget(self.timeline_panel, 1)
 
+        def _build_smear_frames_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.smear_frames_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_SMEAR_FRAMES))
+            self.smear_frames_panel = self._embed_tool_panel(
+                maya_smear_frames.SmearFrameWindow(
+                    self.controller.smear_frame_controller,
+                    parent=self.smear_frames_page,
+                    show_footer=False,
+                ),
+                self.smear_frames_page,
+            )
+            layout.addWidget(self.smear_frames_panel, 1)
+
+        def _build_customization_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.customization_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_CUSTOMIZATION))
+            self.customization_panel = self._embed_tool_panel(
+                maya_aminate_customization.AminateCustomizationWindow(
+                    self.controller.customization_controller,
+                    parent=self.customization_page,
+                    show_footer=False,
+                ),
+                self.customization_page,
+            )
+            layout.addWidget(self.customization_panel, 1)
+
         def _build_guide_tab(self):
             layout = QtWidgets.QVBoxLayout(self.guide_page)
             layout.addWidget(self._build_tab_intro(TAB_GUIDE))
@@ -3082,6 +3171,7 @@ if QtWidgets:
                 "Special Thanks\n"
                 "- Brogan Bowen, for helping test the Controls Retargeter.\n"
                 "- Alex Potter, for helping test Character Skinning reset.\n"
+                "- Alex Lee, for the idea behind Tween Machine.\n"
                 "- V Gerrard Lawless, for the idea behind the frozen character skinning system.\n"
                 "- Wiktor Wisniewski, for the idea behind Dynamic Parenting."
             )
@@ -3113,8 +3203,8 @@ if QtWidgets:
             )
             help_box.setMaximumHeight(135)
             layout.addWidget(help_box)
-            open_button = QtWidgets.QPushButton("Open Docked Toolkit Bar")
-            open_button.setToolTip("Restore the small docked Toolkit Bar above Maya's timeline.")
+            open_button = QtWidgets.QPushButton("Open Bottom Toolkit Bar")
+            open_button.setToolTip("Dock the small Toolkit Bar into the bottom of Maya near the native timeline.")
             open_button.clicked.connect(self._open_student_core_toolbar)
             layout.addWidget(open_button)
             layout.addStretch(1)
@@ -3126,7 +3216,7 @@ if QtWidgets:
                     controller=self.controller.timing_controller,
                     status_callback=self._set_status,
                 )
-                self._set_status("Toolkit Bar is docked above Maya's timeline.", True)
+                self._set_status("Toolkit Bar docked to the bottom of Maya.", True)
             except Exception as exc:
                 self._set_status("Could not open Toolkit Bar: {0}".format(exc), False)
 
@@ -3241,6 +3331,13 @@ if QtWidgets:
                 "timeline": "timeline_notes",
                 "timeline_notes": "timeline_notes",
                 "notes": "timeline_notes",
+                "smear": "smear_frames",
+                "smears": "smear_frames",
+                "smear_frames": "smear_frames",
+                "customization": "customization",
+                "customize": "customization",
+                "colors": "customization",
+                "colours": "customization",
             }
             target_key = lookup.get(self._tab_key(tab_name), self._tab_key(tab_name))
             for index in range(self.tab_widget.count()):
@@ -3252,6 +3349,7 @@ if QtWidgets:
             if isinstance(initial_tab, str):
                 found_index = self._find_tab_index(initial_tab)
                 self.tab_widget.setCurrentIndex(0 if found_index is None else found_index)
+                self._ensure_tab_content(self.tab_widget.currentIndex())
                 return
             try:
                 initial_index = int(initial_tab)
@@ -3259,6 +3357,7 @@ if QtWidgets:
                 initial_index = 0
             initial_index = max(0, min(initial_index, self.tab_widget.count() - 1))
             self.tab_widget.setCurrentIndex(initial_index)
+            self._ensure_tab_content(self.tab_widget.currentIndex())
 
         def _set_status(self, message, success=True):
             if not hasattr(self, "status_label"):
@@ -3353,6 +3452,8 @@ if QtWidgets:
             self.match_nodes_line.setText(", ".join(profile.get("match_nodes", [])))
 
         def _populate_profile_names(self):
+            if not hasattr(self, "profile_combo"):
+                return
             current = self.profile_combo.currentText()
             self.profile_combo.blockSignals(True)
             self.profile_combo.clear()
@@ -3510,6 +3611,45 @@ if QtWidgets:
             else:
                 self._set_status("Could not open the Donate link from this Maya session.", False)
 
+        def _keep_toolbar_extras_on_hide(self):
+            timing_controller = getattr(self.controller, "timing_controller", None)
+            return bool(getattr(timing_controller, "keep_toolbar_extras_on_hide", False))
+
+        def _hide_extra_qt_widgets_by_name(self):
+            app = QtWidgets.QApplication.instance()
+            if not app:
+                return 0
+            extra_names = {
+                "studentCoreTimelineButtonBarWindow",
+                "toolkitBarTweenMachinePopup",
+                "aminateFloatingChannelBoxWindow",
+                "aminateFloatingGraphEditorWindow",
+            }
+            hidden = 0
+            for widget in list(app.allWidgets()):
+                try:
+                    if widget is self or self._is_widget_inside_window(widget):
+                        continue
+                    if widget.objectName() not in extra_names:
+                        continue
+                    if widget.isVisible():
+                        hidden += 1
+                    widget.close()
+                except Exception:
+                    pass
+            return hidden
+
+        def _hide_toolbar_extras_if_needed(self):
+            if self._toolbar_extras_hidden_for_close:
+                return
+            self._toolbar_extras_hidden_for_close = True
+            if self._keep_toolbar_extras_on_hide():
+                return
+            hidden_count = maya_timing_tools.hide_aminate_toolbar_extras()
+            hidden_count += self._hide_extra_qt_widgets_by_name()
+            if hidden_count:
+                self._set_status("Aminate hidden. Cleared toolbar extras.", True)
+
         def _open_tutorials_docs(self):
             docs_path = _tutorials_index_path()
             if _open_local_file(docs_path):
@@ -3517,7 +3657,30 @@ if QtWidgets:
             else:
                 self._set_status("Could not open Aminate tutorials: {0}".format(docs_path), False)
 
+        def hideEvent(self, event):
+            self._hide_toolbar_extras_if_needed()
+            try:
+                super(MayaAnimWorkflowWindow, self).hideEvent(event)
+            except TypeError:
+                QtWidgets.QDialog.hideEvent(self, event)
+
+        def showEvent(self, event):
+            self._toolbar_extras_hidden_for_close = False
+            try:
+                super(MayaAnimWorkflowWindow, self).showEvent(event)
+            except TypeError:
+                QtWidgets.QDialog.showEvent(self, event)
+
+        def setVisible(self, visible):
+            if not bool(visible):
+                self._hide_toolbar_extras_if_needed()
+            try:
+                super(MayaAnimWorkflowWindow, self).setVisible(visible)
+            except TypeError:
+                QtWidgets.QDialog.setVisible(self, visible)
+
         def closeEvent(self, event):
+            self._hide_toolbar_extras_if_needed()
             self._remove_key_passthrough_filter()
             try:
                 self.controller.shutdown()
@@ -3564,6 +3727,11 @@ def _dock_workspace_control(name=WORKSPACE_CONTROL_NAME, area="right", tab=False
     try:
         cmds.workspaceControl(name, edit=True, dockToMainWindow=(area, bool(tab)))
         cmds.workspaceControl(name, edit=True, restore=True)
+        for flag in ("minimumWidth", "initialWidth", "width", "resizeWidth"):
+            try:
+                cmds.workspaceControl(name, edit=True, **{flag: DOCKED_WORKFLOW_MIN_WIDTH})
+            except Exception:
+                pass
         _process_qt_events()
         floating = bool(cmds.workspaceControl(name, query=True, floating=True))
     except Exception as exc:
@@ -3575,7 +3743,6 @@ def _dock_workspace_control(name=WORKSPACE_CONTROL_NAME, area="right", tab=False
 
 def _shelf_button_command(repo_path):
     return (
-        "import importlib\n"
         "import sys\n"
         "repo_path = r\"{0}\"\n"
         "for _aminate_module_name in ('maya_dynamic_parent_pivot', 'maya_anim_workflow_tools'):\n"
@@ -3591,10 +3758,6 @@ def _shelf_button_command(repo_path):
         "while repo_path in sys.path:\n"
         "    sys.path.remove(repo_path)\n"
         "sys.path.insert(0, repo_path)\n"
-        "for module_name in list(sys.modules):\n"
-        "    if module_name == 'maya_anim_workflow_tools' or module_name.startswith('maya_'):\n"
-        "        sys.modules.pop(module_name, None)\n"
-        "importlib.invalidate_caches()\n"
         "import maya_anim_workflow_tools\n"
         "maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True)\n"
     ).format(repo_path.replace("\\", "\\\\"))
@@ -3627,7 +3790,7 @@ def install_maya_dynamic_parent_pivot_shelf_button(shelf_name=DEFAULT_SHELF_NAME
     return metadata["button"]
 
 
-def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
+def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
     global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
     global GLOBAL_DOCK_HOST
@@ -3635,6 +3798,24 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
         raise RuntimeError("maya_dynamic_parent_pivot.launch_maya_dynamic_parent_pivot() must run inside Autodesk Maya.")
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
+    if GLOBAL_WINDOW is not None:
+        try:
+            if dock and _workspace_control_exists(WORKSPACE_CONTROL_NAME):
+                cmds.workspaceControl(WORKSPACE_CONTROL_NAME, edit=True, visible=True)
+                _dock_workspace_control(WORKSPACE_CONTROL_NAME, area="right", tab=False)
+                GLOBAL_WINDOW.show()
+                _process_qt_events()
+                if hasattr(GLOBAL_WINDOW, "_set_initial_tab"):
+                    GLOBAL_WINDOW._set_initial_tab(initial_tab)
+                return GLOBAL_WINDOW
+            if not dock:
+                GLOBAL_WINDOW.show()
+                _process_qt_events()
+                if hasattr(GLOBAL_WINDOW, "_set_initial_tab"):
+                    GLOBAL_WINDOW._set_initial_tab(initial_tab)
+                return GLOBAL_WINDOW
+        except Exception:
+            pass
     _close_existing_window()
     app = QtWidgets.QApplication.instance()
     _process_qt_events()
@@ -3647,14 +3828,15 @@ def launch_maya_dynamic_parent_pivot(dock=False, initial_tab="quick_start"):
     success, _message = _show_window_dockable(GLOBAL_WINDOW, floating=not bool(dock), area="right")
     if dock and success:
         _dock_workspace_control(WORKSPACE_CONTROL_NAME, area="right", tab=False)
-        try:
-            maya_timing_tools.launch_student_timeline_button_bar(
-                dock=True,
-                controller=GLOBAL_CONTROLLER.timing_controller,
-                status_callback=GLOBAL_WINDOW._set_status,
-            )
-        except Exception as exc:
-            _warning("Could not open Toolkit Bar: {0}".format(exc))
+        if os.environ.get("AMINATE_AUTO_OPEN_TOOLKIT_BAR") == "1":
+            try:
+                maya_timing_tools.launch_student_timeline_button_bar(
+                    dock=True,
+                    controller=GLOBAL_CONTROLLER.timing_controller,
+                    status_callback=GLOBAL_WINDOW._set_status,
+                )
+            except Exception as exc:
+                _warning("Could not open Toolkit Bar: {0}".format(exc))
     elif not success:
         GLOBAL_WINDOW.show()
         _process_qt_events()

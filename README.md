@@ -4,6 +4,12 @@ By Amir Mansaray
 
 A tabbed Maya toolset for animation workflow helpers.
 
+## Docs And Wiki
+
+- [Searchable local docs](docs/index.html) cover tutorials, screenshots, GIFs, and button help.
+- [Tracked feature wiki](docs/wiki/README.md) is the canonical full feature map for the private repo, public repo, and release package.
+- Public mirror: [AmirMDEV/aminate-public](https://github.com/AmirMDEV/aminate-public).
+
 ## Sections In Use
 
 The sections in regular use in this beta are:
@@ -24,9 +30,24 @@ The sections in regular use in this beta are:
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
-`Version 0.3.2`
+`Version 0.3.4`
 
-## What Is New In 0.3.2
+## What Is New In 0.3.4
+
+- `Timeline Notes` now draw colored note ranges directly over Maya's time slider, with customizable range-bar height.
+- Timeline note hovers now use a translucent Aminate bubble that fades in and shows the full formatted note, title, and frame range.
+- Added a `Customize` tab to Timeline Notes for overlay visibility, hover opacity, range bar size, and default new-note color.
+
+## What Was New In 0.3.3
+
+- `Scene Text Notes` now create a selectable viewport resize box. Scale the box in Maya to change wrapping width and height without typing exact values.
+- `Controls Retargeter (Face and Body)` now copies source channel values directly by default, keeps target offset as an explicit option, and auto-maps left-to-left, right-to-right, and center-to-center before mirrored fallback matching.
+- `Character Skinning` exact-copy wording now explains one-source-to-many-targets and many-source-to-many-targets workflows more clearly.
+- `Control Picker` now groups hand and finger controls under Body as left/right hand-finger subgroups so body selections include the expected sub-controls.
+- `History Timeline` suppresses trusted-rig Maya Safe Mode / Trust Center prompts before snapshot save and restore operations.
+- Added Amanda/Magpie preflight and feature-contract smoke checks used for heavier rig validation.
+
+## What Was New In 0.3.2
 
 - `Tween Machine` opens beside the cursor as a compact dark Aminate popup, shows the live percentage while dragging, uses a single-key Backquote default hotkey, can be resized for smaller screens, and toggles on/off instead of stacking duplicate windows.
 - Local `Open Tutorials` documentation is included with the Maya install, with searchable tool sections, a button index, and GIF demos for Tween Machine, Character Skinning frozen-transform cleanup, and Scene Helpers feedback text.
@@ -57,7 +78,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 ## Install
 
-1. Download `Aminate_v0.3.2.zip` from the latest release.
+1. Download `Aminate_v0.3.4.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
