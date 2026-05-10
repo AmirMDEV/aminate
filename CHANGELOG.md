@@ -2,6 +2,7 @@
 
 ## Version 0.3.4 - 2026-05-08
 
+- Re-tested Smear Frames against the installed Aminate runtime, not just the repo modules. The verifier now supports `--module-root`, the suite forwards it, the installed Amanda GUI proof moves selected target vertices after Edit Target In Viewport, isolates the active morph/VAT target, confirms repo/package/installed runtime hash parity, and avoids parallel Maya GUI sessions after an Autodesk ADP crash event was caught when testing beside an open Maya session.
 - Improved Smear Frames editability: selected mesh vertices now become the smear mask, generated smears store that vertex set, Edit Target In Viewport unlocks the editable target and selects those vertices for direct component editing, and VAT editing hides non-active target frames so only the active smeared frame is visible.
 - Added a step-by-step Smear Frames Amanda rig test. It runs in a sacrificial Maya GUI session, duplicates Amanda's `body_geo` as the disposable animated source, then proves Static Mesh, Unreal Morph Target, Unreal Morph Sequence/VAT, viewport edit handoff, cleanup, and crash-health status step by step.
 - Fixed a dock-width regression where Aminate could technically dock into Maya but collapse to a 160px strip, making the docked UI unusable while animating.
