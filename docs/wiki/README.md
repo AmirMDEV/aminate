@@ -97,7 +97,17 @@ Adds title/body notes to frames or ranges, draws colored note ranges on Maya's t
 
 ### Smear Frames
 
-Creates interactive smear-frame geometry from selected meshes. It supports static mesh output, Unreal morph targets, Unreal morph sequence/VAT style output, selecting the last smear, viewport editing, visibility keys, and cleanup.
+Creates interactive smear-frame geometry from selected meshes. It supports static mesh output, Unreal morph targets, Unreal morph sequence/VAT style output, selected-vertex smear masks, selecting the last smear, viewport editing, visibility keys, and cleanup.
+
+Step-by-step Amanda test:
+
+1. Run `run_aminate_smear_frames_amanda_step_test.ps1`.
+2. The test opens a sacrificial Maya GUI session with Amanda.
+3. Step `bootstrap` opens Aminate to Smear Frames and duplicates Amanda `body_geo` as a disposable animated source.
+4. Step `static_smear` creates a selected-vertex static smear mesh and checks matching topology, stored vertex metadata, component edit selection, and visibility keys.
+5. Step `morph_smear` creates an Unreal morph-target smear and checks the edit target is unlocked, visible, and selected by component for viewport manipulation.
+6. Step `vat_smear_cleanup` creates an Unreal morph-sequence/VAT smear, checks frame targets `1, 2, 3`, selects frame 3 vertices for editing, hides the non-active targets, then deletes the temporary verifier group.
+7. The harness checks Maya process health and Windows crash events after the run.
 
 ### Customization
 
