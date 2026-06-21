@@ -1307,16 +1307,7 @@ class MayaSurfaceContactController(object):
 
 
 if QtWidgets:
-    try:
-        from maya.OpenMayaUI import MQtUtil
-        from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
-
-        if MQtUtil.mainWindow() is not None:
-            _WindowBase = type("MayaSurfaceContactWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
-        else:
-            _WindowBase = type("MayaSurfaceContactWindowBase", (QtWidgets.QDialog,), {})
-    except Exception:
-        _WindowBase = type("MayaSurfaceContactWindowBase", (QtWidgets.QDialog,), {})
+    _WindowBase = type("MayaSurfaceContactWindowBase", (QtWidgets.QDialog,), {})
 
 
     class MayaSurfaceContactWindow(_WindowBase):

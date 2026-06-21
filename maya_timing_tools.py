@@ -7088,9 +7088,10 @@ if QtWidgets:
 
         def eventFilter(self, obj, event):
             try:
+                maya_floating_channel_box._track_text_entry_focus(obj, event)
                 if not self._event_matches(event):
                     return False
-                if maya_floating_channel_box._is_text_entry_widget(QtWidgets.QApplication.focusWidget()):
+                if maya_floating_channel_box._has_text_entry_focus():
                     return False
                 now = time.time()
                 if now - self._last_trigger_time < 0.2:

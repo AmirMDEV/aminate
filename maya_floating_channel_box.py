@@ -545,6 +545,29 @@ def _is_text_entry_widget(widget):
     return isinstance(widget, text_widgets)
 
 
+_TEXT_ENTRY_FOCUS_ACTIVE = False
+
+
+def _track_text_entry_focus(obj, event):
+    global _TEXT_ENTRY_FOCUS_ACTIVE
+    if not QtCore or event is None:
+        return
+    try:
+        event_type = event.type()
+    except Exception:
+        return
+    if event_type == QtCore.QEvent.FocusIn and _is_text_entry_widget(obj):
+        _TEXT_ENTRY_FOCUS_ACTIVE = True
+    elif event_type == QtCore.QEvent.FocusOut and _is_text_entry_widget(obj):
+        _TEXT_ENTRY_FOCUS_ACTIVE = False
+
+
+def _has_text_entry_focus():
+    if not QtWidgets:
+        return False
+    return bool(_TEXT_ENTRY_FOCUS_ACTIVE or _is_text_entry_widget(QtWidgets.QApplication.focusWidget()))
+
+
 def _selected_nodes():
     if not MAYA_AVAILABLE or not cmds:
         return []
@@ -1952,9 +1975,10 @@ if QtWidgets:
 
         def eventFilter(self, obj, event):
             try:
+                _track_text_entry_focus(obj, event)
                 matched_channel = self._event_matches(event, self.hotkey_parts)
                 if matched_channel:
-                    if _is_text_entry_widget(QtWidgets.QApplication.focusWidget()):
+                    if _has_text_entry_focus():
                         return False
                     now = time.time()
                     if now - self._last_trigger_time < 0.2:
@@ -1964,7 +1988,7 @@ if QtWidgets:
                     return True
                 matched_graph = self._event_matches(event, self.graph_hotkey_parts)
                 if matched_graph:
-                    if _is_text_entry_widget(QtWidgets.QApplication.focusWidget()):
+                    if _has_text_entry_focus():
                         return False
                     now = time.time()
                     if now - self._last_trigger_time < 0.2:

@@ -2,10 +2,19 @@
 
 ## Unreleased
 
-- Hardened Video Reference window cleanup so relaunching the tool uses Qt validity checks and clears Maya-owned workspace controls before deleting Python widgets.
-- Added a Surface Contact callback mute around solver writes to reduce self-triggered live callback storms during contact updates.
-- Kept native Maya bottom docking for the Toolkit Bar behind an extra crash-risk opt-in, so normal opens stay on the safer bottom-positioned window path.
-- Removed an unused Toolkit Bar evaluation/GPU transition helper that could have changed global Maya state if reused.
+- Refreshed the 0.3.5 build with extra Maya 2026 stability hardening for Aminate's docked windows and Toolkit Bar workflows.
+- Fixed Scene Helpers global hotkeys so Floating Channel Box, Graph Editor, and Tween Machine shortcuts do not fire while typing into text fields.
+- Simplified Surface Contact window hosting so embedded and standalone opens avoid a risky extra Maya dockable-wrapper layer.
+- Rebuilt the 0.3.5 package and synced the Maya 2026 `Aminate` runtime with these stability fixes.
+- Hardened the repo-wide Maya crash audit after the Toolkit Bar crash by adding static guards for unsafe verifier patterns, Video Reference Qt/workspace teardown, Surface Contact live-callback self-triggering, native Toolkit Bar dock opt-in, destructive crash verifiers, and release/completion evidence health.
+- Made old installed open-idle verification route through the startup-safe verifier so Maya UI startup no longer depends on command-port response parsing after the tool opens.
+- Removed live workspace deletion and module purging from the installed bridge open-idle verifier.
+- Blocked `--connect-only` action GUI verifiers so action paths cannot mutate the user's open Maya session without host crash-health proof.
+- Changed the action verifier suite cleanup so broad process cleanup is off by default and only new `maya.exe` processes are eligible when explicitly requested, leaving Autodesk crash reporter evidence intact.
+- Tightened the completion gate and report index so stale or crash-health-missing GUI evidence no longer looks release-ready.
+- Fixed Video Reference window and annotation teardown with Qt validity checks, workspace-first cleanup, and deferred-delete flushing.
+- Added a Surface Contact live-callback mute window around solver writes to avoid callback storms from its own DG edits.
+- Removed an unused Toolkit Bar evaluator/GPU transition helper and required an explicit crash-risk env var before the diagnostic native bottom Toolkit Bar dock can run.
 - Made the bottom Toolkit Bar open by default shortly after Aminate docks, with `AMINATE_AUTO_OPEN_TOOLKIT_BAR=0` left as a diagnostic opt-out.
 - Changed default Toolkit Bar opens to a crash-safe bottom-positioned window; Maya's native bottom workspace dock is now diagnostic opt-in through `AMINATE_ENABLE_NATIVE_BOTTOM_TOOLKIT_DOCK=1`.
 - Changed the default Scene Helpers preference so Aminate keeps the Toolkit Bar visible when Maya hides or restores the main dock wrapper during startup.
