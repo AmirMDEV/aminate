@@ -10,6 +10,7 @@ from __future__ import absolute_import, division, print_function
 import json
 import math
 import os
+import time
 import uuid
 
 import maya_contact_hold as hold_utils
@@ -748,6 +749,7 @@ class MayaSurfaceContactController(object):
         self._live_solve_pending = False
         self._live_solve_force = False
         self._solving = False
+        self._live_callback_muted_until = 0.0
         self._shutdown_requested = False
         if MAYA_AVAILABLE:
             self._refresh_live_callbacks()
@@ -823,6 +825,12 @@ class MayaSurfaceContactController(object):
             except Exception:
                 pass
         self.live_callback_ids = []
+
+    def _mute_live_callbacks(self, seconds=0.75):
+        self._live_callback_muted_until = max(self._live_callback_muted_until, time.time() + float(seconds))
+
+    def _live_callbacks_muted(self):
+        return time.time() < self._live_callback_muted_until
 
     def _schedule_live_solve(self, force=False):
         if not MAYA_AVAILABLE or self._shutdown_requested or self._solving:
@@ -913,6 +921,8 @@ class MayaSurfaceContactController(object):
             pass
 
     def _on_node_attribute_changed(self, *_args):
+        if self._live_callbacks_muted():
+            return
         try:
             self._schedule_live_solve(force=False)
         except Exception:
@@ -1113,6 +1123,7 @@ class MayaSurfaceContactController(object):
                 current_payload = _contact_payload(target_record)
                 if not current_payload:
                     return False, "The surface contact record could not be reloaded."
+                self._mute_live_callbacks()
                 solved, message = _apply_to_record_payload(current_payload, force=True)
                 if not solved:
                     return False, message
@@ -1285,11 +1296,13 @@ class MayaSurfaceContactController(object):
                 control_node = payload.get("control", "")
                 surface_node = payload.get("surface", "")
                 record_node = payload.get("record", "")
+                self._mute_live_callbacks()
                 _apply_to_record_payload(payload, force=bool(force))
             if force:
                 self.analyze_setup()
             return True
         finally:
+            self._mute_live_callbacks(0.25)
             self._solving = False
 
 

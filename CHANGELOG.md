@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened Video Reference window cleanup so relaunching the tool uses Qt validity checks and clears Maya-owned workspace controls before deleting Python widgets.
+- Added a Surface Contact callback mute around solver writes to reduce self-triggered live callback storms during contact updates.
+- Kept native Maya bottom docking for the Toolkit Bar behind an extra crash-risk opt-in, so normal opens stay on the safer bottom-positioned window path.
+- Removed an unused Toolkit Bar evaluation/GPU transition helper that could have changed global Maya state if reused.
 - Made the bottom Toolkit Bar open by default shortly after Aminate docks, with `AMINATE_AUTO_OPEN_TOOLKIT_BAR=0` left as a diagnostic opt-out.
 - Changed default Toolkit Bar opens to a crash-safe bottom-positioned window; Maya's native bottom workspace dock is now diagnostic opt-in through `AMINATE_ENABLE_NATIVE_BOTTOM_TOOLKIT_DOCK=1`.
 - Changed the default Scene Helpers preference so Aminate keeps the Toolkit Bar visible when Maya hides or restores the main dock wrapper during startup.

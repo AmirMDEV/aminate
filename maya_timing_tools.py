@@ -4180,60 +4180,6 @@ def _set_game_mode_button_glow(button, enabled):
         pass
 
 
-def _stabilize_toolkit_workspace_transition():
-    state = {"evaluation_mode": None, "gpu_override_enabled": None}
-    if not MAYA_AVAILABLE or not cmds:
-        return state
-    try:
-        state["evaluation_mode"] = cmds.evaluationManager(query=True, mode=True)
-    except Exception:
-        pass
-    try:
-        state["gpu_override_enabled"] = cmds.evaluator(name="gpuOverride", query=True, enable=True)
-    except Exception:
-        pass
-    try:
-        cmds.evaluationManager(mode="serial")
-    except Exception:
-        pass
-    try:
-        cmds.evaluator(name="gpuOverride", enable=False)
-    except Exception:
-        pass
-    try:
-        cmds.refresh(suspend=True)
-    except Exception:
-        pass
-    return state
-
-
-def _resume_toolkit_workspace_transition_refresh(state=None):
-    if not MAYA_AVAILABLE or not cmds:
-        return
-    try:
-        cmds.refresh(suspend=False)
-    except Exception:
-        pass
-    state = state or {}
-    prior_mode = state.get("evaluation_mode")
-    if prior_mode:
-        try:
-            if isinstance(prior_mode, (list, tuple)):
-                prior_mode = prior_mode[0] if prior_mode else None
-            if prior_mode:
-                cmds.evaluationManager(mode=prior_mode)
-        except Exception:
-            pass
-    prior_gpu = state.get("gpu_override_enabled")
-    if prior_gpu is not None:
-        try:
-            if isinstance(prior_gpu, (list, tuple)):
-                prior_gpu = prior_gpu[0] if prior_gpu else False
-            cmds.evaluator(name="gpuOverride", enable=bool(prior_gpu))
-        except Exception:
-            pass
-
-
 def _open_workflow_tab(tab_alias):
     if not MAYA_AVAILABLE:
         return False, "Workflow tabs only open inside Maya."
@@ -8844,7 +8790,13 @@ def _timeline_bar_workspace_exists():
 
 
 def _native_timeline_bar_dock_enabled():
-    return os.environ.get("AMINATE_ENABLE_NATIVE_BOTTOM_TOOLKIT_DOCK") == "1"
+    enabled = os.environ.get("AMINATE_ENABLE_NATIVE_BOTTOM_TOOLKIT_DOCK") == "1"
+    danger_accepted = os.environ.get("AMINATE_ALLOW_NATIVE_BOTTOM_TOOLKIT_DOCK_CRASH_RISK") == "1"
+    if enabled and not danger_accepted:
+        _warn_timeline_bar_docking(
+            "Native bottom Toolkit Bar docking is disabled unless AMINATE_ALLOW_NATIVE_BOTTOM_TOOLKIT_DOCK_CRASH_RISK=1 is also set."
+        )
+    return bool(enabled and danger_accepted)
 
 
 def _position_timeline_bar_near_maya_bottom(window):

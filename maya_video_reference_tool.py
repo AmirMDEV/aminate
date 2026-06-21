@@ -87,6 +87,45 @@ _maya_main_window = skin_cleanup._maya_main_window
 _short_name = skin_cleanup._short_name
 
 
+def _qt_object_valid(widget):
+    if widget is None:
+        return False
+    if shiboken is not None and hasattr(shiboken, "isValid"):
+        try:
+            return bool(shiboken.isValid(widget))
+        except Exception:
+            return False
+    return True
+
+
+def _flush_qt_deferred_delete():
+    if not QtWidgets or not QtCore:
+        return
+    app = QtWidgets.QApplication.instance()
+    if not app:
+        return
+    try:
+        app.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    except Exception:
+        pass
+
+
+def _safe_close_qt_widget(widget):
+    if not _qt_object_valid(widget):
+        return
+    try:
+        widget.close()
+    except Exception:
+        pass
+    if not _qt_object_valid(widget):
+        return
+    try:
+        widget.deleteLater()
+    except Exception:
+        pass
+    _flush_qt_deferred_delete()
+
+
 def _debug(message):
     if MAYA_AVAILABLE and om:
         om.MGlobal.displayInfo("[Maya Video Reference] {0}".format(message))
@@ -1019,12 +1058,7 @@ class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
 
 def _close_existing_annotation_window():
     global GLOBAL_ANNOTATION_WINDOW
-    if GLOBAL_ANNOTATION_WINDOW is not None:
-        try:
-            GLOBAL_ANNOTATION_WINDOW.close()
-            GLOBAL_ANNOTATION_WINDOW.deleteLater()
-        except Exception:
-            pass
+    _safe_close_qt_widget(GLOBAL_ANNOTATION_WINDOW)
     GLOBAL_ANNOTATION_WINDOW = None
     if not QtWidgets:
         return
@@ -1033,9 +1067,8 @@ def _close_existing_annotation_window():
         return
     for widget in app.topLevelWidgets():
         try:
-            if widget.objectName() == ANNOTATION_WINDOW_OBJECT_NAME:
-                widget.close()
-                widget.deleteLater()
+            if widget.objectName() == ANNOTATION_WINDOW_OBJECT_NAME and _qt_object_valid(widget):
+                _safe_close_qt_widget(widget)
         except Exception:
             pass
 
@@ -1452,13 +1485,15 @@ if QtWidgets:
 
 
 def _close_existing_window():
-    global GLOBAL_WINDOW
-    if GLOBAL_WINDOW is not None:
+    global GLOBAL_CONTROLLER, GLOBAL_WINDOW
+    _delete_workspace_control(WORKSPACE_CONTROL_NAME)
+    if GLOBAL_CONTROLLER is not None:
         try:
-            GLOBAL_WINDOW.close()
-            GLOBAL_WINDOW.deleteLater()
+            GLOBAL_CONTROLLER.shutdown()
         except Exception:
             pass
+    GLOBAL_CONTROLLER = None
+    _safe_close_qt_widget(GLOBAL_WINDOW)
     GLOBAL_WINDOW = None
     if not QtWidgets:
         return
@@ -1467,9 +1502,8 @@ def _close_existing_window():
         return
     for widget in app.topLevelWidgets():
         try:
-            if widget.objectName() == WINDOW_OBJECT_NAME:
-                widget.close()
-                widget.deleteLater()
+            if widget.objectName() == WINDOW_OBJECT_NAME and _qt_object_valid(widget):
+                _safe_close_qt_widget(widget)
         except Exception:
             pass
 
@@ -1486,8 +1520,6 @@ def launch_maya_video_reference(dock=False):
         raise RuntimeError("Maya Video Reference must be launched inside Maya with PySide available.")
 
     _close_existing_window()
-    if dock:
-        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
 
     GLOBAL_CONTROLLER = MayaVideoReferenceController()
     GLOBAL_WINDOW = MayaVideoReferenceWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())
