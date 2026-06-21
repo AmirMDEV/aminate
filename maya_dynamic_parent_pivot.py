@@ -695,6 +695,40 @@ def _maya_main_window():
     return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
 
 
+def _qt_object_valid(widget):
+    if widget is None:
+        return False
+    if shiboken:
+        try:
+            return bool(shiboken.isValid(widget))
+        except Exception:
+            pass
+    try:
+        widget.objectName()
+        return True
+    except Exception:
+        return False
+
+
+def _safe_close_qt_widget(widget, delete_later=True):
+    if not _qt_object_valid(widget):
+        return
+    try:
+        widget.close()
+    except Exception:
+        pass
+    if not delete_later or not _qt_object_valid(widget):
+        return
+    try:
+        widget.setParent(None)
+    except Exception:
+        pass
+    try:
+        widget.deleteLater()
+    except Exception:
+        pass
+
+
 def _delete_workspace_control(name):
     if MAYA_AVAILABLE and cmds and name and cmds.workspaceControl(name, exists=True):
         try:
@@ -752,16 +786,13 @@ def _find_docked_workflow_widget():
 
 def _cleanup_duplicate_workflow_widgets(keep_widget=None):
     for widget in _workflow_widgets():
+        if not _qt_object_valid(widget):
+            continue
         if keep_widget is not None and widget is keep_widget:
             continue
         if keep_widget is not None and _widget_is_ancestor(widget, keep_widget):
             continue
-        try:
-            widget.close()
-            widget.setParent(None)
-            widget.deleteLater()
-        except Exception:
-            pass
+        _safe_close_qt_widget(widget)
     try:
         QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
     except Exception:
@@ -780,21 +811,24 @@ def _close_existing_window():
     global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
     global GLOBAL_DOCK_HOST
-    if GLOBAL_WINDOW is not None:
+    if GLOBAL_WINDOW is not None and _qt_object_valid(GLOBAL_WINDOW):
         try:
             hide_extras = getattr(GLOBAL_WINDOW, "_hide_toolbar_extras_if_needed", None)
             if hide_extras:
                 hide_extras()
-            GLOBAL_WINDOW.close()
-            GLOBAL_WINDOW.deleteLater()
         except Exception:
             pass
-    if GLOBAL_DOCK_HOST is not None:
-        try:
-            GLOBAL_DOCK_HOST.close()
-            GLOBAL_DOCK_HOST.deleteLater()
-        except Exception:
-            pass
+    docked_window = GLOBAL_WINDOW is not None and _qt_object_valid(GLOBAL_WINDOW) and _widget_has_ancestor_object_name(GLOBAL_WINDOW, WORKSPACE_CONTROL_NAME)
+    if docked_window or _workspace_control_exists(WORKSPACE_CONTROL_NAME):
+        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
+        _process_qt_events()
+    else:
+        _safe_close_qt_widget(GLOBAL_WINDOW)
+    if _workspace_control_exists(LEGACY_WORKSPACE_CONTROL_NAME):
+        _delete_workspace_control(LEGACY_WORKSPACE_CONTROL_NAME)
+        _process_qt_events()
+    else:
+        _safe_close_qt_widget(GLOBAL_DOCK_HOST)
     for module in (
         maya_contact_hold,
         maya_surface_contact,
@@ -817,8 +851,6 @@ def _close_existing_window():
     GLOBAL_WINDOW = None
     GLOBAL_DOCK_HOST = None
     GLOBAL_CONTROLLER = None
-    _delete_workspace_control(WORKSPACE_CONTROL_NAME)
-    _delete_workspace_control(LEGACY_WORKSPACE_CONTROL_NAME)
     if not QtWidgets:
         return
     app = QtWidgets.QApplication.instance()
@@ -1633,20 +1665,20 @@ class MayaAnimWorkflowController(object):
         self.bake_range = "playback"
         self.dynamic_parenting_controller = maya_dynamic_parenting_tool.MayaDynamicParentingController() if MAYA_AVAILABLE else None
         self.contact_hold_controller = maya_contact_hold.MayaContactHoldController() if MAYA_AVAILABLE else None
-        self.surface_contact_controller = maya_surface_contact.MayaSurfaceContactController() if MAYA_AVAILABLE else None
+        self.surface_contact_controller = None
         self.animators_pencil_controller = maya_animators_pencil.AnimatorsPencilController() if MAYA_AVAILABLE else None
-        self.animation_assistant_controller = maya_animation_assistant.AnimationAssistantController() if MAYA_AVAILABLE else None
-        self.animation_styling_controller = maya_animation_styling.AnimationStylingController() if MAYA_AVAILABLE else None
+        self.animation_assistant_controller = None
+        self.animation_styling_controller = None
         self.control_picker_controller = maya_control_picker.ControlPickerController() if MAYA_AVAILABLE else None
         self.history_timeline_controller = maya_history_timeline.MayaHistoryTimelineController() if MAYA_AVAILABLE else None
-        self.timing_controller = maya_timing_tools.MayaTimingToolsController() if MAYA_AVAILABLE else None
+        self.timing_controller = None
         self.onion_controller = maya_onion_skin.MayaOnionSkinController() if MAYA_AVAILABLE else None
         self.rotation_controller = maya_rotation_doctor.MayaRotationDoctorController() if MAYA_AVAILABLE else None
         self.skin_transfer_controller = maya_skin_transfer.MayaSkinTransferController() if MAYA_AVAILABLE else None
         self.skinning_controller = maya_skinning_cleanup.MayaSkinningCleanupController() if MAYA_AVAILABLE else None
         self.rig_scale_controller = maya_rig_scale_export.MayaRigScaleExportController() if MAYA_AVAILABLE else None
         self.video_reference_controller = maya_video_reference_tool.MayaVideoReferenceController() if MAYA_AVAILABLE else None
-        self.timeline_notes_controller = maya_timeline_notes.MayaTimelineNotesController() if MAYA_AVAILABLE else None
+        self.timeline_notes_controller = None
         self.smear_frame_controller = maya_smear_frames.SmearFrameController() if MAYA_AVAILABLE else None
         self.customization_controller = maya_aminate_customization.AminateCustomizationController() if MAYA_AVAILABLE else None
         self.reference_manager_controller = maya_reference_manager.ReferencePackageController() if MAYA_AVAILABLE else None
@@ -1658,6 +1690,28 @@ class MayaAnimWorkflowController(object):
         self.before_open_callback = None
         self.before_new_callback = None
         self._install_scene_callbacks()
+
+    def _controller(self, attribute_name, factory):
+        controller = getattr(self, attribute_name, None)
+        if controller is None and MAYA_AVAILABLE:
+            controller = factory()
+            setattr(self, attribute_name, controller)
+        return controller
+
+    def get_surface_contact_controller(self):
+        return self._controller("surface_contact_controller", maya_surface_contact.MayaSurfaceContactController)
+
+    def get_animation_assistant_controller(self):
+        return self._controller("animation_assistant_controller", maya_animation_assistant.AnimationAssistantController)
+
+    def get_animation_styling_controller(self):
+        return self._controller("animation_styling_controller", maya_animation_styling.AnimationStylingController)
+
+    def get_timing_controller(self):
+        return self._controller("timing_controller", maya_timing_tools.MayaTimingToolsController)
+
+    def get_timeline_notes_controller(self):
+        return self._controller("timeline_notes_controller", maya_timeline_notes.MayaTimelineNotesController)
 
     def set_status_callback(self, callback):
         self.status_callback = callback
@@ -2724,7 +2778,10 @@ if QtWidgets:
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_SURFACE_CONTACT))
             self.surface_contact_panel = self._embed_tool_panel(
-                maya_surface_contact.MayaSurfaceContactWindow(self.controller.surface_contact_controller, parent=self.surface_contact_page),
+                maya_surface_contact.MayaSurfaceContactWindow(
+                    self.controller.get_surface_contact_controller(),
+                    parent=self.surface_contact_page,
+                ),
                 self.surface_contact_page,
             )
             layout.addWidget(self.surface_contact_panel, 1)
@@ -2886,7 +2943,7 @@ if QtWidgets:
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_ANIMATION_ASSISTANT))
             self.animation_assistant_panel = maya_animation_assistant.AnimationAssistantPanel(
-                controller=self.controller.animation_assistant_controller,
+                controller=self.controller.get_animation_assistant_controller(),
                 parent=self.animation_assistant_page,
                 status_callback=self._set_status,
             )
@@ -2897,7 +2954,7 @@ if QtWidgets:
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_ANIMATION_STYLING))
             self.animation_styling_panel = maya_animation_styling.AnimationStylingPanel(
-                controller=self.controller.animation_styling_controller,
+                controller=self.controller.get_animation_styling_controller(),
                 parent=self.animation_styling_page,
                 status_callback=self._set_status,
             )
@@ -2982,7 +3039,10 @@ if QtWidgets:
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_TIMELINE))
             self.timeline_panel = self._embed_tool_panel(
-                maya_timeline_notes.MayaTimelineNotesWindow(self.controller.timeline_notes_controller, parent=self.timeline_page),
+                maya_timeline_notes.MayaTimelineNotesWindow(
+                    self.controller.get_timeline_notes_controller(),
+                    parent=self.timeline_page,
+                ),
                 self.timeline_page,
             )
             layout.addWidget(self.timeline_panel, 1)
@@ -3183,7 +3243,7 @@ if QtWidgets:
             layout.addWidget(self._build_tab_intro(TAB_STUDENT_CORE))
             self.student_core_panel = self._embed_tool_panel(
                 maya_timing_tools.StudentTimelineButtonBarWindow(
-                    self.controller.timing_controller,
+                    self.controller.get_timing_controller(),
                     self._set_status,
                     parent=self.student_core_page,
                     embedded=True,
@@ -3213,7 +3273,7 @@ if QtWidgets:
             try:
                 maya_timing_tools.launch_student_timeline_button_bar(
                     dock=True,
-                    controller=self.controller.timing_controller,
+                    controller=self.controller.get_timing_controller(),
                     status_callback=self._set_status,
                 )
                 self._set_status("Toolkit Bar docked to the bottom of Maya.", True)
@@ -3225,7 +3285,10 @@ if QtWidgets:
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_TIMING))
             self.timing_panel = self._embed_tool_panel(
-                maya_timing_tools.MayaTimingToolsWindow(self.controller.timing_controller, parent=self.timing_page),
+                maya_timing_tools.MayaTimingToolsWindow(
+                    self.controller.get_timing_controller(),
+                    parent=self.timing_page,
+                ),
                 self.timing_page,
             )
             layout.addWidget(self.timing_panel, 1)
@@ -3798,6 +3861,10 @@ def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
         raise RuntimeError("maya_dynamic_parent_pivot.launch_maya_dynamic_parent_pivot() must run inside Autodesk Maya.")
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
+    if GLOBAL_WINDOW is not None and not _qt_object_valid(GLOBAL_WINDOW):
+        GLOBAL_WINDOW = None
+    if GLOBAL_DOCK_HOST is not None and not _qt_object_valid(GLOBAL_DOCK_HOST):
+        GLOBAL_DOCK_HOST = None
     if GLOBAL_WINDOW is not None:
         try:
             if dock and _workspace_control_exists(WORKSPACE_CONTROL_NAME):
@@ -3828,15 +3895,38 @@ def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
     success, _message = _show_window_dockable(GLOBAL_WINDOW, floating=not bool(dock), area="right")
     if dock and success:
         _dock_workspace_control(WORKSPACE_CONTROL_NAME, area="right", tab=False)
-        if os.environ.get("AMINATE_AUTO_OPEN_TOOLKIT_BAR") == "1":
+        if os.environ.get("AMINATE_AUTO_OPEN_TOOLKIT_BAR", "1") != "0":
+            def _open_default_toolkit_bar():
+                try:
+                    if not _qt_object_valid(GLOBAL_WINDOW):
+                        return
+                    timing_controller = GLOBAL_CONTROLLER.get_timing_controller()
+                    try:
+                        timing_controller.set_keep_toolbar_extras_on_hide(True)
+                    except Exception:
+                        pass
+                    bar_window = maya_timing_tools.launch_student_timeline_button_bar(
+                        dock=True,
+                        controller=timing_controller,
+                        status_callback=GLOBAL_WINDOW._set_status,
+                    )
+                    def _reshow_default_toolkit_bar():
+                        try:
+                            if maya_timing_tools._qt_object_valid(bar_window):
+                                maya_timing_tools._show_timeline_bar_as_safe_window(bar_window)
+                        except Exception:
+                            pass
+                    try:
+                        QtCore.QTimer.singleShot(900, _reshow_default_toolkit_bar)
+                    except Exception:
+                        _reshow_default_toolkit_bar()
+                except Exception as exc:
+                    _warning("Could not open Toolkit Bar: {0}".format(exc))
+
             try:
-                maya_timing_tools.launch_student_timeline_button_bar(
-                    dock=True,
-                    controller=GLOBAL_CONTROLLER.timing_controller,
-                    status_callback=GLOBAL_WINDOW._set_status,
-                )
-            except Exception as exc:
-                _warning("Could not open Toolkit Bar: {0}".format(exc))
+                QtCore.QTimer.singleShot(1500, _open_default_toolkit_bar)
+            except Exception:
+                _open_default_toolkit_bar()
     elif not success:
         GLOBAL_WINDOW.show()
         _process_qt_events()

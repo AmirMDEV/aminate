@@ -531,6 +531,12 @@ class MayaTimelineNotesController(object):
                 pass
         self.tooltip_bubble = None
         if self.overlay_widget:
+            parent_widget = getattr(self.overlay_widget, "parent_widget", None)
+            if parent_widget:
+                try:
+                    parent_widget.removeEventFilter(self.overlay_widget)
+                except Exception:
+                    pass
             try:
                 self.overlay_widget.close()
                 self.overlay_widget.deleteLater()
@@ -860,6 +866,10 @@ if QtWidgets:
             try:
                 if hasattr(self, "note_auto_update_timer") and self.note_auto_update_timer:
                     self.note_auto_update_timer.stop()
+            except Exception:
+                pass
+            try:
+                self.controller.shutdown()
             except Exception:
                 pass
             super(MayaTimelineNotesWindow, self).closeEvent(event)
@@ -1475,7 +1485,14 @@ if QtWidgets:
 
 
 def _close_existing_window():
+    global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
+    if GLOBAL_CONTROLLER is not None:
+        try:
+            GLOBAL_CONTROLLER.shutdown()
+        except Exception:
+            pass
+        GLOBAL_CONTROLLER = None
     if GLOBAL_WINDOW is not None:
         try:
             GLOBAL_WINDOW.close()

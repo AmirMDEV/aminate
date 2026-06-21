@@ -59,6 +59,7 @@ SURFACE_CONTACT_CONTROL_ATTR = "surfaceContactControl"
 SURFACE_CONTACT_SURFACE_ATTR = "surfaceContactSurface"
 SURFACE_CONTACT_DATA_ATTR = "surfaceContactData"
 DEFAULT_FOLLOW_NORMAL = True
+LIVE_SOLVE_DELAY_MS = 100
 
 GLOBAL_CONTROLLER = None
 GLOBAL_WINDOW = None
@@ -279,12 +280,29 @@ def _surface_shape(surface_node):
     if not surface_node or not cmds.objExists(surface_node):
         return ""
     if cmds.nodeType(surface_node) == "mesh":
-        return _node_long_name(surface_node)
+        shape_node = _node_long_name(surface_node)
+        return shape_node if _surface_shape_is_sampleable(shape_node) else ""
     if cmds.nodeType(surface_node) in ("transform", "joint"):
         shapes = cmds.listRelatives(surface_node, shapes=True, fullPath=True, type="mesh") or []
-        if shapes:
-            return _node_long_name(shapes[0])
+        for shape_node in shapes:
+            shape_node = _node_long_name(shape_node)
+            if _surface_shape_is_sampleable(shape_node):
+                return shape_node
     return ""
+
+
+def _surface_shape_is_sampleable(shape_node):
+    if not shape_node or not cmds.objExists(shape_node):
+        return False
+    try:
+        if cmds.getAttr(shape_node + ".intermediateObject"):
+            return False
+    except Exception:
+        pass
+    try:
+        return int(cmds.polyEvaluate(shape_node, face=True) or 0) > 0
+    except Exception:
+        return False
 
 
 def _surface_transform(surface_node):
@@ -311,22 +329,28 @@ def _surface_dag_path(surface_node):
     shape_node = _surface_shape(surface_node)
     if not shape_node:
         return None
-    selection = om.MSelectionList()
-    selection.add(shape_node)
-    return selection.getDagPath(0)
+    try:
+        selection = om.MSelectionList()
+        selection.add(shape_node)
+        return selection.getDagPath(0)
+    except Exception:
+        return None
 
 
 def _closest_point_and_normal(surface_node, point_values):
     dag_path = _surface_dag_path(surface_node)
     if dag_path is None:
         return None, None, None
-    fn_mesh = om.MFnMesh(dag_path)
-    point = om.MPoint(float(point_values[0]), float(point_values[1]), float(point_values[2]))
     try:
+        fn_mesh = om.MFnMesh(dag_path)
+        point = om.MPoint(float(point_values[0]), float(point_values[1]), float(point_values[2]))
         closest_point, normal, face_index = fn_mesh.getClosestPointAndNormal(point, om.MSpace.kWorld)
     except Exception:
-        closest_point, face_index = fn_mesh.getClosestPoint(point, om.MSpace.kWorld)
-        normal, _ = fn_mesh.getClosestNormal(point, om.MSpace.kWorld)
+        try:
+            closest_point, face_index = fn_mesh.getClosestPoint(point, om.MSpace.kWorld)
+            normal, _ = fn_mesh.getClosestNormal(point, om.MSpace.kWorld)
+        except Exception:
+            return None, None, None
     return [closest_point.x, closest_point.y, closest_point.z], [normal.x, normal.y, normal.z], int(face_index)
 
 
@@ -724,10 +748,12 @@ class MayaSurfaceContactController(object):
         self._live_solve_pending = False
         self._live_solve_force = False
         self._solving = False
+        self._shutdown_requested = False
         if MAYA_AVAILABLE:
             self._refresh_live_callbacks()
 
     def shutdown(self):
+        self._shutdown_requested = True
         self._remove_time_callbacks()
         self._remove_live_callbacks()
         self._remove_idle_callback()
@@ -799,17 +825,17 @@ class MayaSurfaceContactController(object):
         self.live_callback_ids = []
 
     def _schedule_live_solve(self, force=False):
-        if not MAYA_AVAILABLE:
+        if not MAYA_AVAILABLE or self._shutdown_requested or self._solving:
             return
         if force:
             self._live_solve_force = True
         if self._live_solve_pending:
             return
         self._live_solve_pending = True
-        if self._solving:
-            return
         try:
-            if maya_utils and hasattr(maya_utils, "executeDeferred"):
+            if QtCore and QtWidgets and QtWidgets.QApplication.instance():
+                QtCore.QTimer.singleShot(LIVE_SOLVE_DELAY_MS, self._run_live_solve)
+            elif maya_utils and hasattr(maya_utils, "executeDeferred"):
                 maya_utils.executeDeferred(self._run_live_solve)
             else:
                 cmds.evalDeferred(self._run_live_solve)
@@ -822,7 +848,7 @@ class MayaSurfaceContactController(object):
                 pass
 
     def _run_live_solve(self):
-        if not MAYA_AVAILABLE or not self._live_solve_pending:
+        if not MAYA_AVAILABLE or self._shutdown_requested or not self._live_solve_pending:
             return
         if self._solving:
             return
@@ -863,7 +889,7 @@ class MayaSurfaceContactController(object):
             self._remove_idle_callback()
             return
         self._install_time_callbacks()
-        self._install_idle_callback()
+        self._remove_idle_callback()
         for node_name in live_nodes:
             mobject = _node_mobject(node_name)
             if mobject is None:

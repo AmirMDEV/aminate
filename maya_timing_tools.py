@@ -27,11 +27,14 @@ except Exception:
 
 try:
     from PySide2 import QtCore, QtGui, QtWidgets
+    import shiboken2 as shiboken
 except Exception:
     try:
         from PySide6 import QtCore, QtGui, QtWidgets
+        import shiboken6 as shiboken
     except Exception:
         QtCore = QtGui = QtWidgets = None
+        shiboken = None
 
 try:
     from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
@@ -57,6 +60,21 @@ def _qt_enum_int(value, default=0):
             return int(getattr(value, "value", default))
         except Exception:
             return int(default)
+
+
+def _qt_object_valid(widget):
+    if widget is None:
+        return False
+    if shiboken:
+        try:
+            return bool(shiboken.isValid(widget))
+        except Exception:
+            pass
+    try:
+        widget.objectName()
+        return True
+    except Exception:
+        return False
 
 
 def _qt_cursor(name):
@@ -177,7 +195,7 @@ _TWEEN_MACHINE_POPUP = None
 ANIMATION_LAYER_CUSTOM_COLOR_ATTR = "aminateLayerColor"
 DEFAULT_AUTO_SNAP = True
 DEFAULT_ANIMATION_LAYER_TINT = True
-DEFAULT_KEEP_TOOLBAR_EXTRAS_ON_HIDE = False
+DEFAULT_KEEP_TOOLBAR_EXTRAS_ON_HIDE = True
 DEFAULT_GAME_ANIMATION_MODE = False
 DEFAULT_TIME_UNIT = "ntsc"
 DEFAULT_PLAYBACK_SPEED = 1.0
@@ -216,7 +234,7 @@ GAME_ANIMATION_MODE_ACTIONS = collections.OrderedDict(
         ("playback_speed", ("Realtime", "Set playback speed to realtime.")),
         ("update_view_all", ("Update All Views", "Set Time Slider Update View to All.")),
         ("autosave", ("Autosave", "Enable autosave with five backups.")),
-        ("activate_viewports", ("Activate Viewports", "Mark all model panels as active views.")),
+        ("activate_viewports", ("Activate Focused Viewport", "Mark the focused model panel as the active view.")),
         ("load_textures", ("Load Textures", "Refresh and repath texture nodes.")),
         ("weighted_tangents", ("Weighted Tangents", "Convert all existing animation curves and future tangent defaults to weighted tangents.")),
     )
@@ -4163,8 +4181,17 @@ def _set_game_mode_button_glow(button, enabled):
 
 
 def _stabilize_toolkit_workspace_transition():
+    state = {"evaluation_mode": None, "gpu_override_enabled": None}
     if not MAYA_AVAILABLE or not cmds:
-        return
+        return state
+    try:
+        state["evaluation_mode"] = cmds.evaluationManager(query=True, mode=True)
+    except Exception:
+        pass
+    try:
+        state["gpu_override_enabled"] = cmds.evaluator(name="gpuOverride", query=True, enable=True)
+    except Exception:
+        pass
     try:
         cmds.evaluationManager(mode="serial")
     except Exception:
@@ -4177,15 +4204,34 @@ def _stabilize_toolkit_workspace_transition():
         cmds.refresh(suspend=True)
     except Exception:
         pass
+    return state
 
 
-def _resume_toolkit_workspace_transition_refresh():
+def _resume_toolkit_workspace_transition_refresh(state=None):
     if not MAYA_AVAILABLE or not cmds:
         return
     try:
         cmds.refresh(suspend=False)
     except Exception:
         pass
+    state = state or {}
+    prior_mode = state.get("evaluation_mode")
+    if prior_mode:
+        try:
+            if isinstance(prior_mode, (list, tuple)):
+                prior_mode = prior_mode[0] if prior_mode else None
+            if prior_mode:
+                cmds.evaluationManager(mode=prior_mode)
+        except Exception:
+            pass
+    prior_gpu = state.get("gpu_override_enabled")
+    if prior_gpu is not None:
+        try:
+            if isinstance(prior_gpu, (list, tuple)):
+                prior_gpu = prior_gpu[0] if prior_gpu else False
+            cmds.evaluator(name="gpuOverride", enable=bool(prior_gpu))
+        except Exception:
+            pass
 
 
 def _open_workflow_tab(tab_alias):
@@ -5991,7 +6037,12 @@ class MayaTimingToolsController(object):
         active_panels = 0
         if actions.get("activate_viewports", True):
             _ensure_cgab_blast_panel_opt_change_callback()
-            for panel_name in _all_model_panels():
+            if os.environ.get("AMINATE_GAME_MODE_ALL_VIEWPORTS") == "1":
+                panel_names = _all_model_panels()
+            else:
+                active_panel = _active_model_panel()
+                panel_names = [active_panel] if active_panel else []
+            for panel_name in panel_names:
                 try:
                     cmds.modelEditor(panel_name, edit=True, activeView=True)
                     active_panels += 1
@@ -7061,18 +7112,26 @@ if QtWidgets:
                     app.removeEventFilter(self)
                 except Exception:
                     pass
-            if self.popup:
+            if _qt_object_valid(self.popup):
                 try:
                     self.popup.close()
                 except Exception:
                     pass
+                try:
+                    self.popup.deleteLater()
+                except Exception:
+                    pass
             self.popup = None
-            if _TWEEN_MACHINE_POPUP is not None:
+            if _qt_object_valid(_TWEEN_MACHINE_POPUP):
                 try:
                     _TWEEN_MACHINE_POPUP.close()
                 except Exception:
                     pass
-                _TWEEN_MACHINE_POPUP = None
+                try:
+                    _TWEEN_MACHINE_POPUP.deleteLater()
+                except Exception:
+                    pass
+            _TWEEN_MACHINE_POPUP = None
 
         def _event_matches(self, event):
             if event.type() != QtCore.QEvent.KeyPress:
@@ -7508,7 +7567,7 @@ if QtWidgets:
             workspace = STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME
             if not _timeline_bar_workspace_exists():
                 if self.status_callback:
-                    self.status_callback("Toolkit Bar is already floating. Use Open Timeline Bar to dock a fresh safe copy.", True)
+                    self.status_callback("Toolkit Bar workspace is not available. Open Toolkit Bar again to let Maya create a fresh bottom dock.", True)
                 return
             docked, message = _dock_timeline_bar_workspace("bottom")
             if self.status_callback:
@@ -8784,6 +8843,43 @@ def _timeline_bar_workspace_exists():
     return bool(MAYA_AVAILABLE and cmds and cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, exists=True))
 
 
+def _native_timeline_bar_dock_enabled():
+    return os.environ.get("AMINATE_ENABLE_NATIVE_BOTTOM_TOOLKIT_DOCK") == "1"
+
+
+def _position_timeline_bar_near_maya_bottom(window):
+    if not QtWidgets or not _qt_object_valid(window):
+        return
+    try:
+        main_window = _maya_main_window()
+        if main_window and _qt_object_valid(main_window):
+            geometry = main_window.frameGeometry()
+        else:
+            geometry = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        width = min(max(int(geometry.width()) - 80, 760), 1500)
+        height = 124
+        x_pos = int(geometry.x()) + max(20, int((geometry.width() - width) / 2))
+        y_pos = int(geometry.y()) + max(20, int(geometry.height()) - height - 78)
+        window.resize(width, height)
+        window.move(x_pos, y_pos)
+    except Exception:
+        pass
+
+
+def _show_timeline_bar_as_safe_window(window):
+    try:
+        window.show(dockable=False)
+    except TypeError:
+        window.show()
+    except Exception:
+        window.show()
+    _position_timeline_bar_near_maya_bottom(window)
+    try:
+        window.raise_()
+    except Exception:
+        pass
+
+
 def _process_timeline_bar_events():
     if not QtWidgets:
         return
@@ -8828,32 +8924,12 @@ def _dock_timeline_bar_workspace(area="bottom"):
         except Exception:
             pass
         return True, "Toolkit Bar is already docked into Maya's {0} layout.".format(area)
-    last_error = ""
-    for _attempt in range(3):
-        try:
-            _stabilize_toolkit_workspace_transition()
-            cmds.workspaceControl(
-                STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME,
-                edit=True,
-                dockToMainWindow=(area, False),
-            )
-            cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, restore=True)
-            try:
-                cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, visible=True)
-            except Exception:
-                pass
-            _process_timeline_bar_events()
-            floating = _timeline_bar_workspace_floating()
-            if floating is False:
-                return True, "Toolkit Bar docked into Maya's {0} layout.".format(area)
-            last_error = "Maya kept the Toolkit Bar floating."
-        except Exception as exc:
-            last_error = str(exc)
-        finally:
-            _resume_toolkit_workspace_transition_refresh()
-        time.sleep(0.08)
-        _process_timeline_bar_events()
-    return False, "Could not dock Toolkit Bar into Maya's {0} layout: {1}".format(area, last_error or "unknown error")
+    try:
+        cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, visible=True)
+    except Exception:
+        pass
+    _process_timeline_bar_events()
+    return False, "Maya kept the Toolkit Bar floating, so Aminate left it open instead of forcing a risky re-dock."
 
 
 def _delete_timeline_bar_workspace():
@@ -8884,6 +8960,18 @@ def _close_existing_timeline_bar():
         GLOBAL_TIMELINE_BAR_WINDOW = None
 
 
+def _reset_stale_timeline_bar_workspace():
+    if not _timeline_bar_workspace_exists():
+        return True
+    try:
+        cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, visible=True)
+    except Exception:
+        pass
+    _delete_timeline_bar_workspace()
+    _process_timeline_bar_events()
+    return not _timeline_bar_workspace_exists()
+
+
 def launch_student_timeline_button_bar(dock=True, controller=None, status_callback=None):
     global GLOBAL_TIMELINE_BAR_CONTROLLER
     global GLOBAL_TIMELINE_BAR_WINDOW
@@ -8891,6 +8979,11 @@ def launch_student_timeline_button_bar(dock=True, controller=None, status_callba
         raise RuntimeError("launch_student_timeline_button_bar() must run inside Autodesk Maya.")
     if not QtWidgets:
         raise RuntimeError("launch_student_timeline_button_bar() needs PySide inside Maya.")
+    requested_native_dock = bool(dock and _native_timeline_bar_dock_enabled())
+    safe_bottom_window = bool(dock and not requested_native_dock)
+    dock = requested_native_dock
+    if GLOBAL_TIMELINE_BAR_WINDOW is not None and not _qt_object_valid(GLOBAL_TIMELINE_BAR_WINDOW):
+        GLOBAL_TIMELINE_BAR_WINDOW = None
     if GLOBAL_TIMELINE_BAR_WINDOW is not None:
         try:
             existing = GLOBAL_TIMELINE_BAR_WINDOW
@@ -8899,26 +8992,41 @@ def launch_student_timeline_button_bar(dock=True, controller=None, status_callba
                     cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, visible=True)
                 except Exception:
                     pass
-                docked, dock_message = _dock_timeline_bar_workspace("bottom")
-                if not docked:
-                    _warn_timeline_bar_docking(dock_message)
                 existing.show()
                 _process_timeline_bar_events()
+                if _timeline_bar_workspace_floating() is not False:
+                    _warn_timeline_bar_docking(
+                        "Maya kept the Toolkit Bar floating, so Aminate left it open instead of forcing a risky re-dock."
+                    )
                 return existing
             if not dock:
-                existing.show()
+                if safe_bottom_window:
+                    _show_timeline_bar_as_safe_window(existing)
+                else:
+                    existing.show()
                 _process_timeline_bar_events()
                 return existing
         except RuntimeError:
             GLOBAL_TIMELINE_BAR_WINDOW = None
+    if dock and GLOBAL_TIMELINE_BAR_WINDOW is None and _timeline_bar_workspace_exists():
+        if not _reset_stale_timeline_bar_workspace():
+            dock_message = "Maya kept a stale Toolkit Bar workspace open, so Aminate did not create a duplicate bottom bar."
+            _warn_timeline_bar_docking(dock_message)
+            raise RuntimeError(dock_message)
     owns_controller = controller is None
     GLOBAL_TIMELINE_BAR_CONTROLLER = controller or MayaTimingToolsController()
+    parent_widget = None if safe_bottom_window else _maya_main_window()
     GLOBAL_TIMELINE_BAR_WINDOW = StudentTimelineButtonBarWindow(
         GLOBAL_TIMELINE_BAR_CONTROLLER,
         status_callback=status_callback,
-        parent=_maya_main_window(),
+        parent=parent_widget,
         owns_controller=owns_controller,
     )
+    if safe_bottom_window:
+        try:
+            GLOBAL_TIMELINE_BAR_WINDOW.setWindowFlags(GLOBAL_TIMELINE_BAR_WINDOW.windowFlags() | QtCore.Qt.Tool)
+        except Exception:
+            pass
     if dock:
         try:
             GLOBAL_TIMELINE_BAR_WINDOW.show(dockable=True, floating=False, area="bottom")
@@ -8926,17 +9034,16 @@ def launch_student_timeline_button_bar(dock=True, controller=None, status_callba
         except Exception:
             GLOBAL_TIMELINE_BAR_WINDOW.show()
     else:
-        GLOBAL_TIMELINE_BAR_WINDOW.show()
+        if safe_bottom_window:
+            _show_timeline_bar_as_safe_window(GLOBAL_TIMELINE_BAR_WINDOW)
+        else:
+            GLOBAL_TIMELINE_BAR_WINDOW.show()
         _process_timeline_bar_events()
     if dock and _timeline_bar_workspace_exists():
-        docked, dock_message = _dock_timeline_bar_workspace("bottom")
-        if not docked:
-            _warn_timeline_bar_docking(dock_message)
-            try:
-                GLOBAL_TIMELINE_BAR_WINDOW.close()
-            except Exception:
-                pass
-            raise RuntimeError(dock_message)
+        if _timeline_bar_workspace_floating() is not False:
+            _warn_timeline_bar_docking(
+                "Maya kept the Toolkit Bar floating, so Aminate left it open instead of forcing a risky re-dock."
+            )
         try:
             cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, label="")
         except Exception:

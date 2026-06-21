@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Made the bottom Toolkit Bar open by default shortly after Aminate docks, with `AMINATE_AUTO_OPEN_TOOLKIT_BAR=0` left as a diagnostic opt-out.
+- Changed default Toolkit Bar opens to a crash-safe bottom-positioned window; Maya's native bottom workspace dock is now diagnostic opt-in through `AMINATE_ENABLE_NATIVE_BOTTOM_TOOLKIT_DOCK=1`.
+- Changed the default Scene Helpers preference so Aminate keeps the Toolkit Bar visible when Maya hides or restores the main dock wrapper during startup.
+- Removed the crash-prone forced Toolkit Bar re-dock loop from normal opens; if Maya reports the bar as floating, Aminate now leaves it visible instead of forcing `dockToMainWindow`.
+- Updated installed-runtime idle verifiers so they require the default Toolkit Bar workspace to exist, be visible in Maya's bottom dock, and only create the timing controller while other high-risk controllers stay lazy.
+- Added a startup idle verifier that writes its result from inside Maya, covering cases where Maya keeps running but command-port output goes silent after UI startup.
+- Hardened Aminate crash-risk surfaces found in the private audit: docked Qt teardown/reuse, Surface Contact live callbacks, Video Reference media import/proxying, Toolkit Bar evaluator restore, Game Animation Mode viewport activation, and floating Graph Editor teardown.
+- Added a private static Maya crash-risk gate and existing-Maya installed-runtime bridge verifier to keep those guardrails in the release audit and live install checks.
+- Hardened Aminate startup after a Maya 2026 access-violation crash by lazy-creating Surface Contact, Animation Assistant, Animation Styling, Scene Helpers, Toolkit Bar, and Timeline Notes controllers only when their tabs open.
+- Fixed Timeline Notes teardown so time-slider Qt filters, overlay widgets, and timers are removed when the panel closes or relaunches.
+- Added a static guard that fails release audit if high-risk Aminate controllers become eager startup controllers again.
+- Added an installed-runtime open-idle verifier that launches Maya 2026, opens Aminate from the installed scripts folder, checks risky controllers remain lazy, and waits for fresh crash events.
+- Added delayed post-run health checks to GUI action and command-port verifiers so native crashes immediately after report writing still fail the verifier.
+
 ## Version 0.3.5 - 2026-06-21
 
 - Bumped Aminate package metadata, UI labels, README install copy, and release ZIP naming to `Version 0.3.5` / `v0.3.5`.
@@ -7,7 +23,7 @@
 - Added the runtime package parity unit test to the static release audit so the ZIP payload hash guard is checked as part of release readiness.
 - Published the latest private Smear Frames, docking, Toolkit Bar, report-index, stale-evidence, release-audit, installed-runtime parity, and package ZIP parity work as the 0.3.5 public-facing update.
 - Fixed same-session Maya drag-and-drop updates by adding a versioned installer file name, keeping the legacy installer as a fallback, copying installer files into the installed runtime, and evicting the drop-file import cache after each run.
-- Tightened release parity checks so future packages block misplaced `manifest.json`, stale installer metadata, or a broken versioned drag-and-drop update package.
+- Added `AMINATE_RELEASE_PROCESS.md` and tightened parity checks so every future release blocks misplaced `manifest.json`, stale installer metadata, or a broken versioned drag-and-drop update package.
 
 ## Version 0.3.4 - 2026-05-08
 

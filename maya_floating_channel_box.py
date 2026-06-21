@@ -63,6 +63,21 @@ _GLOBAL_MANAGER = None
 _GRAPH_EDITOR_RESIZE_FILTER = None
 
 
+def _qt_object_valid(widget):
+    if widget is None:
+        return False
+    if shiboken:
+        try:
+            return bool(shiboken.isValid(widget))
+        except Exception:
+            pass
+    try:
+        widget.objectName()
+        return True
+    except Exception:
+        return False
+
+
 if QtCore:
     class _GraphEditorResizeFilter(QtCore.QObject):
         def eventFilter(self, watched, event):
@@ -1231,7 +1246,7 @@ def _delete_graph_editor_ui():
     if not cmds:
         return
     root_widget = _graph_editor_root_widget()
-    if root_widget is not None:
+    if _qt_object_valid(root_widget):
         try:
             root_widget.hide()
         except Exception:
@@ -1240,6 +1255,7 @@ def _delete_graph_editor_ui():
             root_widget.close()
         except Exception:
             pass
+    deleted_maya_ui = False
     for ui_name, kwargs in (
         (GRAPH_EDITOR_WORKSPACE_CONTROL_NAME, {"control": True}),
         (GRAPH_EDITOR_OUTLINER_PANEL_NAME, {"panel": True}),
@@ -1254,6 +1270,7 @@ def _delete_graph_editor_ui():
                     except Exception:
                         pass
                     cmds.deleteUI(ui_name, control=True)
+                    deleted_maya_ui = True
                     continue
             except Exception:
                 pass
@@ -1261,26 +1278,30 @@ def _delete_graph_editor_ui():
             try:
                 if cmds.outlinerPanel(ui_name, exists=True):
                     cmds.deleteUI(ui_name, panel=True)
+                    deleted_maya_ui = True
                     continue
             except Exception:
                 pass
         try:
             if cmds.scriptedPanel(ui_name, exists=True):
                 cmds.deleteUI(ui_name, panel=True)
+                deleted_maya_ui = True
                 continue
         except Exception:
             pass
         try:
             if cmds.window(ui_name, exists=True):
                 cmds.deleteUI(ui_name, window=True)
+                deleted_maya_ui = True
                 continue
         except Exception:
             pass
         try:
             cmds.deleteUI(ui_name, **kwargs)
+            deleted_maya_ui = True
         except Exception:
             pass
-    if root_widget is not None:
+    if root_widget is not None and not deleted_maya_ui and _qt_object_valid(root_widget):
         try:
             root_widget.setParent(None)
         except Exception:

@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 
 import maya_skinning_cleanup as skin_cleanup
 
@@ -63,6 +64,11 @@ ANNOTATION_SURFACE_MATERIAL = "amirVideoAnnotationSurface_MAT"
 ANNOTATION_WINDOW_OBJECT_NAME = "mayaVideoAnnotationManagerWindow"
 PROXY_CACHE_DIR_NAME = "amir_maya_video_reference"
 VIDEO_EXTENSIONS = {".mov", ".mp4", ".avi", ".m4v", ".mpg", ".mpeg", ".wmv", ".webm"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr", ".iff", ".bmp", ".gif"}
+QIMAGE_REQUIRED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"}
+MAX_PROXY_FRAME_COUNT = 1800
+MAX_MEDIA_BYTES = 1024 * 1024 * 1024
+PROCESS_TIMEOUT_SECONDS = 60
 SEQUENCE_PATTERN = re.compile(r"(.*?)(\d+)(\.[^.]+)$")
 PLACEMENT_MODE_ITEMS = [
     ("tracing_card", "Behind Picked Object"),
@@ -282,10 +288,50 @@ def _run_process(command):
     }
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    completed = subprocess.run(command, **kwargs)
+    try:
+        completed = subprocess.run(command, timeout=PROCESS_TIMEOUT_SECONDS, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Timed out preparing video media after {0} seconds.".format(PROCESS_TIMEOUT_SECONDS))
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout or "Command failed.").strip())
     return completed
+
+
+def _validate_image_plane_media(image_path):
+    if not image_path or not os.path.exists(image_path):
+        return False, "Maya could not find the prepared media frame."
+    extension = os.path.splitext(image_path)[1].lower()
+    if extension not in IMAGE_EXTENSIONS:
+        return False, "Maya image planes only accept prepared image files, not {0}.".format(extension or "unknown media")
+    try:
+        first_stat = os.stat(image_path)
+        if int(first_stat.st_size) <= 0:
+            return False, "The prepared media frame is empty."
+        time.sleep(0.05)
+        second_stat = os.stat(image_path)
+        if int(first_stat.st_size) != int(second_stat.st_size):
+            return False, "The prepared media frame is still being written."
+    except Exception as exc:
+        return False, "Could not read the prepared media frame: {0}".format(exc)
+    if QtGui and extension in QIMAGE_REQUIRED_EXTENSIONS:
+        try:
+            reader = QtGui.QImageReader(image_path)
+            if not reader.canRead():
+                return False, "Maya could not read the prepared media frame."
+            image_size = reader.size()
+            if not image_size.isValid() or image_size.width() <= 0 or image_size.height() <= 0:
+                return False, "The prepared media frame has no readable size."
+        except Exception as exc:
+            return False, "Could not validate the prepared media frame: {0}".format(exc)
+    return True, ""
+
+
+def _delete_created_node(node_name):
+    if node_name and cmds and cmds.objExists(node_name):
+        try:
+            cmds.delete(node_name)
+        except Exception:
+            pass
 
 
 def _image_aspect_ratio(image_path):
@@ -377,12 +423,20 @@ def _create_proxy_from_video(media_path, extract_audio, start_frame):
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         raise RuntimeError("ffmpeg was not found on this machine, so Maya cannot proxy this video yet.")
+    try:
+        if os.path.getsize(media_path) > MAX_MEDIA_BYTES:
+            raise RuntimeError("The video is too large for the Maya UI importer. Use a shorter clip under 1 GB.")
+    except OSError:
+        pass
 
     fps_value = _scene_fps()
     required_frame_count = _proxy_frame_count(start_frame)
+    if required_frame_count > MAX_PROXY_FRAME_COUNT:
+        raise RuntimeError("The playback range is too long for safe UI import. Use {0} frames or fewer.".format(MAX_PROXY_FRAME_COUNT))
     cache_dir = _safe_make_dir(os.path.join(_proxy_cache_root(), _hash_media_path(media_path, fps_value, required_frame_count)))
     manifest_path = os.path.join(cache_dir, "proxy_manifest.json")
     first_frame = os.path.join(cache_dir, "frame_000001.png")
+    last_frame = os.path.join(cache_dir, "frame_{0:06d}.png".format(int(required_frame_count)))
     audio_path = os.path.join(cache_dir, "audio.wav")
 
     if os.path.exists(manifest_path):
@@ -394,6 +448,7 @@ def _create_proxy_from_video(media_path, extract_audio, start_frame):
                 and abs(float(manifest.get("fps", 0.0)) - float(fps_value)) < 0.001
                 and int(manifest.get("frame_count", 0)) >= int(required_frame_count)
                 and os.path.exists(first_frame)
+                and os.path.exists(last_frame)
                 and (not extract_audio or not manifest.get("audio_path") or os.path.exists(manifest.get("audio_path")))
             )
             if manifest_ok:
@@ -443,8 +498,11 @@ def _create_proxy_from_video(media_path, extract_audio, start_frame):
         except Exception as exc:
             audio_error = str(exc)
 
-    if not os.path.exists(first_frame):
+    if not os.path.exists(first_frame) or not os.path.exists(last_frame):
         raise RuntimeError("The proxy frames were not created from the video.")
+    media_ok, media_error = _validate_image_plane_media(first_frame)
+    if not media_ok:
+        raise RuntimeError(media_error)
 
     manifest = {
         "media_path": os.path.abspath(media_path),
@@ -751,12 +809,17 @@ class MayaVideoReferenceController(object):
         camera_shape = _camera_shape(self.camera_name or _active_camera(require_focus=False))
         if not camera_shape:
             return False, "Click the viewport you want first, then click Use Active View."
-        image_plane = cmds.imagePlane(camera=camera_shape, fileName=resolved_media_path)
-        transform_name = _long_name(image_plane[0])
-        shape_name = _long_name(image_plane[1])
+        transform_name = ""
+        try:
+            image_plane = cmds.imagePlane(camera=camera_shape, fileName=resolved_media_path)
+            transform_name = _long_name(image_plane[0])
+            shape_name = _long_name(image_plane[1])
+            _apply_frame_settings(shape_name, self.start_frame, sequence_start_frame, self.opacity)
+        except Exception as exc:
+            _delete_created_node(transform_name)
+            return False, "Could not make the camera overlay: {0}".format(exc)
         self.last_transform = transform_name
         self.last_image_plane = shape_name
-        _apply_frame_settings(shape_name, self.start_frame, sequence_start_frame, self.opacity)
         return True, "Made a camera overlay on {0}.".format(_short_name(camera_shape))
 
     def _place_tracing_card(self, transform_name, shape_name, camera_name, target_name, sequence_start_frame):
@@ -858,8 +921,13 @@ class MayaVideoReferenceController(object):
         resolved_media_path = media_info.get("resolved_media_path") or self.media_path
         if not resolved_media_path or not os.path.exists(resolved_media_path):
             return False, "I could not prepare a Maya-friendly image sequence from that video."
+        media_ok, media_error = _validate_image_plane_media(resolved_media_path)
+        if not media_ok:
+            return False, media_error
 
         original_selection = cmds.ls(selection=True, long=True) or []
+        created_transform = ""
+        created_follow_group = ""
         cmds.undoInfo(openChunk=True, chunkName="MayaVideoReference")
         try:
             self.last_sound = ""
@@ -875,6 +943,7 @@ class MayaVideoReferenceController(object):
                 image_plane = cmds.imagePlane(fileName=resolved_media_path)
                 transform_name = _long_name(image_plane[0])
                 shape_name = _long_name(image_plane[1])
+                created_transform = transform_name
                 self.last_transform = transform_name
                 self.last_image_plane = shape_name
                 success, placement_message = self._place_tracing_card(
@@ -885,7 +954,9 @@ class MayaVideoReferenceController(object):
                     media_info.get("sequence_start_frame", 1),
                 )
                 if not success:
+                    _delete_created_node(created_transform)
                     return False, placement_message
+                created_follow_group = self.last_follow_group
 
             audio_path = self._audio_path_for_import(media_info)
             audio_error = media_info.get("audio_error") or ""
@@ -899,6 +970,8 @@ class MayaVideoReferenceController(object):
                 placement_message += " I could not pull audio from the video: {0}".format(audio_error)
             self._tag_reference_transform(self.last_transform, media_info, self.last_sound)
         except Exception as exc:
+            _delete_created_node(created_transform)
+            _delete_created_node(created_follow_group)
             return False, "Could not make the video reference: {0}".format(exc)
         finally:
             try:
