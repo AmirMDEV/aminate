@@ -12,7 +12,7 @@ A tabbed Maya toolset for animation workflow helpers.
 
 ## Sections In Use
 
-The sections in regular use in this beta are:
+The sections in regular use in this release are:
 
 - `Toolkit Bar` for the full dockable Toolkit Bar inside a tab, including History Timeline blocks, Animation Layer controls, timing buttons, Tween Machine, workflow icons, package zip, and Game Animation Mode
 - `Scene Helpers` for Animation Layer Tint, camera presets, render setup, texture loading, game animation mode, hotkey Floating Channel Box, hotkey Floating Graph Editor, text notes, and teacher demo tools
@@ -30,14 +30,14 @@ The sections in regular use in this beta are:
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
-`Version 0.3.5 Beta`
+`Version 0.3.5`
 
-## What Is New In 0.3.5 Beta
+## What Is New In 0.3.5
 
 - Release packaging now has stronger static audit coverage, including runtime package parity, installed Maya runtime checks, release ZIP payload hash checks, stale-evidence detection, and report indexing for Maya-family verification evidence.
 - Smear Frames were re-tested against the installed Aminate runtime on Amanda, not only repo modules. The edit handoff now proves selected target vertices can be moved in Maya, active morph/VAT targets isolate correctly, and installed package hashes match the release payload.
 - Aminate dock and Toolkit Bar stability were tightened for normal Maya use: Aminate docks at a usable width, the old global `S` key filter is opt-in, the Toolkit Bar docks to Maya's bottom layout, hover behavior uses safer native tooltips, and existing panels are reused instead of rebuilt where possible.
-- The package release process now tracks `Aminate_v0.3.5.zip` from the manifest tag so future beta releases do not keep stale ZIP names.
+- The package release process now tracks `Aminate_v0.3.5.zip` from the manifest tag so future releases do not keep stale ZIP names.
 - The drag-and-drop installer now includes a versioned file name, `Aminate_v0_3_5_drag_this_file_into_Maya.py`, so Maya does not reuse an older cached installer in the same Maya session.
 - The release process now blocks shipping unless the package keeps both manifest files, both installer files, and the versioned drag-and-drop update path.
 
@@ -180,7 +180,7 @@ Simple example:
 
 ### Onion Skin
 
-The dependable mode in the current beta is `3D Ghost`.
+The dependable mode in the current release is `3D Ghost`.
 
 Simple example:
 

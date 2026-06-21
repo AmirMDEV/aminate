@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function
 
 LICENSE_FILE_NAME = "LICENSE"
 MANIFEST_FILE_NAME = "manifest.json"
-RELEASE_VERSION_LABEL = "Version 0.3.5 Beta"
+RELEASE_VERSION_LABEL = "Version 0.3.5"
 RELEASE_TAG = "v0.3.5"
 RELEASE_TAG_FILE_SAFE = RELEASE_TAG.replace(".", "_").replace("-", "_")
 INSTALLER_RELEASE_NAME = "Aminate_{0}_drag_this_file_into_Maya.py".format(RELEASE_TAG_FILE_SAFE)

@@ -1,13 +1,13 @@
 # Changelog
 
-## Version 0.3.5 Beta - 2026-06-21
+## Version 0.3.5 - 2026-06-21
 
-- Bumped Aminate beta package metadata, UI labels, README install copy, and release ZIP naming to `Version 0.3.5 Beta` / `v0.3.5`.
+- Bumped Aminate package metadata, UI labels, README install copy, and release ZIP naming to `Version 0.3.5` / `v0.3.5`.
 - Made release ZIP paths derive from the manifest tag so future package parity checks, completion matrix evidence, and build outputs follow the current release automatically.
 - Added the runtime package parity unit test to the static release audit so the ZIP payload hash guard is checked as part of release readiness.
-- Published the latest private Smear Frames, docking, Toolkit Bar, report-index, stale-evidence, release-audit, installed-runtime parity, and package ZIP parity work as the 0.3.5 beta public-facing update.
+- Published the latest private Smear Frames, docking, Toolkit Bar, report-index, stale-evidence, release-audit, installed-runtime parity, and package ZIP parity work as the 0.3.5 public-facing update.
 - Fixed same-session Maya drag-and-drop updates by adding a versioned installer file name, keeping the legacy installer as a fallback, copying installer files into the installed runtime, and evicting the drop-file import cache after each run.
-- Tightened release parity checks so future release packages block misplaced `manifest.json`, stale installer metadata, or a broken versioned drag-and-drop update path.
+- Tightened release parity checks so future packages block misplaced `manifest.json`, stale installer metadata, or a broken versioned drag-and-drop update package.
 
 ## Version 0.3.4 - 2026-05-08
 
