@@ -31,6 +31,8 @@ import maya_skinning_cleanup as _skin  # noqa: F401
 import maya_rig_scale_export as _rig_scale  # noqa: F401
 import maya_video_reference_tool as _video_reference  # noqa: F401
 import maya_timeline_notes as _timeline_notes  # noqa: F401
+import maya_aminate_customization as _customization  # noqa: F401
+import maya_smear_frames as _smear_frames  # noqa: F401
 
 
 _WORKFLOW_MODULE_NAMES = (
@@ -54,6 +56,8 @@ _WORKFLOW_MODULE_NAMES = (
     "maya_rig_scale_export",
     "maya_video_reference_tool",
     "maya_timeline_notes",
+    "maya_aminate_customization",
+    "maya_smear_frames",
     "maya_dynamic_parent_pivot",
 )
 
@@ -82,12 +86,18 @@ def _force_own_root_first():
     importlib.invalidate_caches()
 
 
-def _refresh_modules():
+def _dev_reload_enabled():
+    return os.environ.get("AMINATE_DEV_RELOAD_MODULES") == "1"
+
+
+def _refresh_modules(force=False):
     global _parenting, _contact_hold, _animators_pencil, _animation_assistant, _animation_styling, _control_picker, _face_retarget, _floating_channel_box, _history_timeline, _reference_manager, _surface_contact
-    global _timing_tools, _onion, _rotation, _skin_transfer, _skin, _rig_scale, _video_reference, _timeline_notes
+    global _timing_tools, _onion, _rotation, _skin_transfer, _skin, _rig_scale, _video_reference, _timeline_notes, _customization, _smear_frames
     global _crash_recovery, _impl
-    _close_loaded_workflow_ui()
     _force_own_root_first()
+    if not (force or _dev_reload_enabled()):
+        return _impl
+    _close_loaded_workflow_ui()
     for module_name in _WORKFLOW_MODULE_NAMES:
         sys.modules.pop(module_name, None)
     _parenting = importlib.import_module("maya_dynamic_parenting_tool")
@@ -110,6 +120,8 @@ def _refresh_modules():
     _rig_scale = importlib.import_module("maya_rig_scale_export")
     _video_reference = importlib.import_module("maya_video_reference_tool")
     _timeline_notes = importlib.import_module("maya_timeline_notes")
+    _customization = importlib.import_module("maya_aminate_customization")
+    _smear_frames = importlib.import_module("maya_smear_frames")
     _impl = importlib.import_module("maya_dynamic_parent_pivot")
     global DEFAULT_SHELF_BUTTON_LABEL, DEFAULT_SHELF_NAME, DONATE_URL, FOLLOW_AMIR_URL
     global MayaAnimWorkflowController, MayaAnimWorkflowWindow, SHELF_BUTTON_DOC_TAG
@@ -136,7 +148,7 @@ MayaAnimWorkflowWindow = _impl.MayaAnimWorkflowWindow
 SHELF_BUTTON_DOC_TAG = _impl.SHELF_BUTTON_DOC_TAG
 
 
-def launch_maya_anim_workflow_tools(dock=False, initial_tab="quick_start"):
+def launch_maya_anim_workflow_tools(dock=True, initial_tab="quick_start"):
     impl = _reloaded_impl()
     try:
         _crash_recovery.bootstrap_crash_recovery(startup_prompt=False)

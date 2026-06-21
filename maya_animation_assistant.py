@@ -59,6 +59,21 @@ BADGE_OBJECT_NAME = "aminatePoseBalanceBadge"
 REFRESH_INTERVAL_MS = 33
 
 
+def _qt_object_valid(widget):
+    if widget is None:
+        return False
+    if shiboken is not None and hasattr(shiboken, "isValid"):
+        try:
+            return bool(shiboken.isValid(widget))
+        except Exception:
+            return False
+    try:
+        widget.objectName()
+        return True
+    except Exception:
+        return False
+
+
 def _option_var_bool(option_name, default):
     if not cmds or not cmds.optionVar(exists=option_name):
         return bool(default)
@@ -717,11 +732,19 @@ class ViewportBadgeManager(_QtObjectBase):
         payload = self._badges.get(panel_name) or {}
         widget = payload.get("host") or payload.get("widget")
         badge = payload.get("badge")
-        if widget is None or badge is None:
+        if not _qt_object_valid(widget) or not _qt_object_valid(badge):
+            payload = self._badges.pop(panel_name, None)
+            if payload:
+                self._release_payload(payload)
             return
-        x_pos = max(8, widget.width() - badge.width() - 12)
-        y_pos = max(8, widget.height() - badge.height() - 12)
-        badge.move(int(x_pos), int(y_pos))
+        try:
+            x_pos = max(8, widget.width() - badge.width() - 12)
+            y_pos = max(8, widget.height() - badge.height() - 12)
+            badge.move(int(x_pos), int(y_pos))
+        except RuntimeError:
+            payload = self._badges.pop(panel_name, None)
+            if payload:
+                self._release_payload(payload)
 
     def update_state(self, visible, balanced, label_text):
         active_panels = set(_model_panel_names())
@@ -735,6 +758,11 @@ class ViewportBadgeManager(_QtObjectBase):
                 continue
             payload = self._badges.get(panel_name) or {}
             host = payload.get("host") or payload.get("widget")
+            if not _qt_object_valid(host) or not _qt_object_valid(badge):
+                payload = self._badges.pop(panel_name, None)
+                if payload:
+                    self._release_payload(payload)
+                continue
             badge.set_balance_state(bool(balanced), label_text)
             self._position_badge(panel_name)
             if visible and host is not None and host.isVisible():

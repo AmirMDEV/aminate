@@ -1030,13 +1030,27 @@ if QtWidgets:
             items = self.report_tree.selectedItems()
             if not items:
                 return []
-            return sorted(
-                set(self.report_tree.indexOfTopLevelItem(item) for item in items if self.report_tree.indexOfTopLevelItem(item) >= 0)
-            )
+            user_role = _qt_flag("ItemDataRole", "UserRole", 0x0100)
+            indices = []
+            for item in items:
+                try:
+                    stored_index = item.data(0, user_role)
+                except Exception:
+                    stored_index = None
+                if stored_index is None:
+                    stored_index = self.report_tree.indexOfTopLevelItem(item)
+                try:
+                    stored_index = int(stored_index)
+                except Exception:
+                    continue
+                if stored_index >= 0:
+                    indices.append(stored_index)
+            return sorted(set(indices))
 
         def _refresh_preview(self):
             self.report_tree.clear()
-            for report in self.controller.reports:
+            user_role = _qt_flag("ItemDataRole", "UserRole", 0x0100)
+            for report_index, report in enumerate(self.controller.reports):
                 warning_text = "; ".join(report["warnings"][:2])
                 item = QtWidgets.QTreeWidgetItem(
                     [
@@ -1047,6 +1061,7 @@ if QtWidgets:
                         warning_text,
                     ]
                 )
+                item.setData(0, user_role, int(report_index))
                 item.setToolTip(4, warning_text)
                 self.report_tree.addTopLevelItem(item)
             self.report_tree.sortItems(0, _qt_flag("SortOrder", "AscendingOrder", 0))

@@ -204,7 +204,7 @@ def _set_curves_to_stepped(curves):
         if not curve_name or not cmds.objExists(curve_name):
             continue
         try:
-            cmds.keyTangent(curve_name, edit=True, inTangentType="step", outTangentType="step")
+            cmds.keyTangent(curve_name, edit=True, outTangentType="step")
             changed += 1
         except Exception:
             pass
@@ -384,6 +384,28 @@ class AnimationStylingController(object):
             message = "Stepped curves is off."
         self._emit_status(message, True)
         return True, message
+
+    def activate_spider_verse_preset(self, apply_current_key=True):
+        self.hold_frames = 2
+        self.step_all_curves = True
+        self.enabled = True
+        _save_option_var_int(HOLD_FRAMES_OPTION, self.hold_frames)
+        _save_option_var_bool(STEP_CURVES_OPTION, self.step_all_curves)
+        _save_option_var_bool(ENABLED_OPTION, self.enabled)
+        self.install_key_callback()
+        stepped = _set_curves_to_stepped(_scene_anim_curves())
+        applied = {"created": 0, "blocked": 0}
+        if apply_current_key:
+            curves = _selected_anim_curves()
+            current_frame = float(cmds.currentTime(query=True)) if cmds else 0.0
+            keyed_curves = [curve_name for curve_name in curves if _has_key_at(curve_name, current_frame)]
+            if keyed_curves:
+                _success, _message, applied = self.apply_hold_to_curves(keyed_curves, frames=[current_frame], quiet=True)
+        message = "Spider-Verse style is on: twos, stepped curves, and auto-hold are ready."
+        if applied.get("created", 0) or applied.get("blocked", 0):
+            message += " Created {0} held key(s), blocked {1} overlap(s).".format(applied.get("created", 0), applied.get("blocked", 0))
+        self._emit_status(message, True)
+        return True, message, {"hold_frames": self.hold_frames, "stepped": stepped, "created": applied.get("created", 0), "blocked": applied.get("blocked", 0)}
 
     def _on_keyframes_edited(self, curve_objects, _client_data=None):
         if not self.enabled or self._processing:
@@ -570,29 +592,40 @@ if QtWidgets:
 
             header = QtWidgets.QGroupBox("Spider-Verse Style Holds")
             header_layout = QtWidgets.QGridLayout(header)
+            self.spider_verse_button = QtWidgets.QPushButton("Spider-Verse")
+            self.spider_verse_button.setObjectName("aminateSpiderVersePresetButton")
+            self.spider_verse_button.setToolTip("Turn on the Spider-Verse preset: twos, stepped curves, auto-hold, and current-key hold when a keyed control is selected.")
+            header_layout.addWidget(self.spider_verse_button, 0, 0, 1, 2)
             self.enabled_check = QtWidgets.QCheckBox("Auto duplicate new keys")
+            self.enabled_check.setObjectName("aminateAnimationStylingAutoHoldCheck")
             self.enabled_check.setToolTip("When on, every new current-frame key gets copied forward by the hold length unless another key blocks it.")
-            header_layout.addWidget(self.enabled_check, 0, 0, 1, 2)
-            header_layout.addWidget(QtWidgets.QLabel("Hold Length"), 1, 0)
+            header_layout.addWidget(self.enabled_check, 1, 0, 1, 2)
+            header_layout.addWidget(QtWidgets.QLabel("Hold Length"), 2, 0)
             self.hold_spin = QtWidgets.QSpinBox()
+            self.hold_spin.setObjectName("aminateAnimationStylingHoldSpin")
             self.hold_spin.setRange(MIN_HOLD_FRAMES, MAX_HOLD_FRAMES)
             self.hold_spin.setSuffix(" frame(s)")
             self.hold_spin.setToolTip("Example: 2 means a key on frame 0 also gets copied to frame 2.")
-            header_layout.addWidget(self.hold_spin, 1, 1)
+            header_layout.addWidget(self.hold_spin, 2, 1)
             self.step_curves_check = QtWidgets.QCheckBox("Set all curves to stepped curves")
+            self.step_curves_check.setObjectName("aminateAnimationStylingStepCheck")
             self.step_curves_check.setToolTip("When on, Aminate converts scene animation curves to stepped tangents so held poses stay locked until the next key.")
-            header_layout.addWidget(self.step_curves_check, 2, 0, 1, 2)
+            header_layout.addWidget(self.step_curves_check, 3, 0, 1, 2)
             layout.addWidget(header)
 
             action_group = QtWidgets.QGroupBox("Apply / Check")
             action_layout = QtWidgets.QGridLayout(action_group)
             self.apply_current_button = QtWidgets.QPushButton("Hold Current Key")
+            self.apply_current_button.setObjectName("aminateAnimationStylingHoldCurrentButton")
             self.apply_current_button.setToolTip("Copy selected controls' current-frame key forward by the hold length.")
             self.apply_selected_button = QtWidgets.QPushButton("Hold Selected Existing Keys")
+            self.apply_selected_button.setObjectName("aminateAnimationStylingHoldSelectedButton")
             self.apply_selected_button.setToolTip("Copy every existing selected-control key forward where it does not overlap another key.")
             self.scan_button = QtWidgets.QPushButton("Scan Overlaps")
+            self.scan_button.setObjectName("aminateAnimationStylingScanButton")
             self.scan_button.setToolTip("Color blocked ranges on the timeline where a hold key would overlap a nearby key.")
             self.clear_button = QtWidgets.QPushButton("Clear Timeline Warnings")
+            self.clear_button.setObjectName("aminateAnimationStylingClearWarningsButton")
             self.clear_button.setToolTip("Remove Animation Styling blocked-range timeline markers.")
             action_layout.addWidget(self.apply_current_button, 0, 0)
             action_layout.addWidget(self.apply_selected_button, 0, 1)
@@ -601,15 +634,15 @@ if QtWidgets:
             layout.addWidget(action_group)
 
             self.help_box = QtWidgets.QPlainTextEdit()
+            self.help_box.setObjectName("aminateAnimationStylingGuideBox")
             self.help_box.setReadOnly(True)
             self.help_box.setMaximumHeight(120)
             self.help_box.setPlainText(
                 "How it works:\n"
-                "1. Set Hold Length to 2 for Spider-Verse style twos.\n"
-                "2. Turn Auto duplicate new keys on.\n"
-                "3. Turn Set all curves to stepped curves on if you want pose holds with hard jumps.\n"
-                "4. Set a key on frame 0. Aminate adds the same value on frame 2.\n"
-                "5. If a key already exists on frame 1 or 2, Aminate skips the duplicate and marks that blocked range red on the timeline."
+                "1. Press Spider-Verse.\n"
+                "2. Animate on twos with stepped curves.\n"
+                "3. When a keyed control is selected, Aminate can copy the current pose forward by two frames.\n"
+                "4. If another key blocks the hold, Aminate skips it and marks that blocked range red on the timeline."
             )
             layout.addWidget(self.help_box)
 
@@ -619,6 +652,7 @@ if QtWidgets:
             layout.addStretch(1)
 
             self.enabled_check.toggled.connect(self._toggle_enabled)
+            self.spider_verse_button.clicked.connect(self._activate_spider_verse)
             self.hold_spin.valueChanged.connect(self._set_hold_frames)
             self.step_curves_check.toggled.connect(self._toggle_step_curves)
             self.apply_current_button.clicked.connect(self._apply_current)
@@ -654,6 +688,11 @@ if QtWidgets:
 
         def _toggle_step_curves(self, enabled):
             success, message = self.controller.set_step_all_curves(enabled)
+            self._set_status(message, success)
+
+        def _activate_spider_verse(self):
+            success, message, _detail = self.controller.activate_spider_verse_preset(apply_current_key=True)
+            self._sync_from_controller()
             self._set_status(message, success)
 
         def _apply_current(self):

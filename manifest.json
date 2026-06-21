@@ -1,7 +1,7 @@
 {
   "package_name": "Aminate",
-  "version": "Version 0.3.2",
-  "release_tag": "v0.3.2",
+  "version": "Version 0.3.5 Beta",
+  "release_tag": "v0.3.5",
   "license": "Aminate Proprietary Source-Available License",
   "license_file": "LICENSE",
   "public_repository": "https://github.com/AmirMDEV/aminate-public",
@@ -15,6 +15,7 @@
     "maya_animation_assistant.py",
     "maya_animation_styling.py",
     "maya_animators_pencil.py",
+    "maya_aminate_customization.py",
     "maya_contact_hold.py",
     "maya_control_picker.py",
     "maya_crash_recovery.py",
@@ -30,15 +31,28 @@
     "maya_shelf_utils.py",
     "maya_skin_transfer.py",
     "maya_skinning_cleanup.py",
+    "maya_smear_frames.py",
     "maya_surface_contact.py",
     "maya_timeline_notes.py",
     "maya_timing_tools.py",
     "maya_universal_ikfk_switcher.py",
     "maya_video_reference_tool.py",
+    "combine_freeze_pivot_icon.png",
     "game_animation_mode_icon.png",
-    "maya_anim_workflow_tools_icon.png"
+    "maya_anim_workflow_tools_icon.png",
+    "toolkit_bake_twos_icon.png",
+    "toolkit_clean_static_icon.png",
+    "toolkit_cut_key_icon.png",
+    "toolkit_insert_inbetween_icon.png",
+    "toolkit_nudge_left_icon.png",
+    "toolkit_nudge_right_icon.png",
+    "toolkit_package_zip_icon.png",
+    "toolkit_reset_pose_icon.png",
+    "toolkit_select_animated_icon.png",
+    "toolkit_tween_machine_icon.png"
   ],
   "static_dirs": [
+    "branding",
     "docs"
   ]
 }

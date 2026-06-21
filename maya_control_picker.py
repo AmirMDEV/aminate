@@ -127,6 +127,8 @@ BODY_SUBGROUP_ORDER = (
     "COG",
     "Left Arm",
     "Right Arm",
+    "Left Hand / Fingers",
+    "Right Hand / Fingers",
     "Left Leg",
     "Right Leg",
     "Tail",
@@ -240,6 +242,10 @@ def _visual_group_name(record):
     text = _record_text(record)
     category = record.get("category") or "Other"
     side = _record_side(record)
+    if category == "Body":
+        list_group = _list_subgroup_name(record)
+        if list_group in ("Left Hand / Fingers", "Right Hand / Fingers"):
+            return list_group
 
     if category == "Face" or _contains_any(text, ("face", "jaw", "mouth", "lip", "brow", "eye", "eyelid", "lid", "tongue", "cheek", "nose", "teeth", "hair")):
         return "Face"
@@ -248,17 +254,17 @@ def _visual_group_name(record):
     if category == "Skeleton" or _contains_any(text, ("joint", "jnt", "bone", "skel", "skeleton")):
         return "Skeleton"
     if _contains_any(text, ("head", "neck")):
-        return "Head"
+        return "Head / Neck"
     if category == "FK/IK":
         return "FK/IK"
     if _contains_any(text, ("tail",)):
         return "Tail"
     if _contains_any(text, ("wing", "feather", "feath")):
         return "Wings"
-    if _contains_any(text, ("clav", "shoulder", "upperarm", "upper_arm", "lowerarm", "forearm", "elbow", "wrist", "arm")):
-        return "{0} Arm".format(side) if side in ("Left", "Right") else "Body / Core"
     if _contains_any(text, ("hand", "finger", "thumb", "index", "middle", "ring", "pinky")):
         return "{0} Hand / Fingers".format(side) if side in ("Left", "Right") else "Left Hand / Fingers"
+    if _contains_any(text, ("clav", "shoulder", "upperarm", "upper_arm", "lowerarm", "forearm", "elbow", "wrist", "arm")):
+        return "{0} Arm".format(side) if side in ("Left", "Right") else "Body / Core"
     if _contains_any(text, ("leg", "thigh", "shin", "calf", "knee", "ankle", "foot", "toe", "heel", "ball", "paw", "hoof")):
         if _contains_any(text, ("front", "fore")):
             return "{0} Front Leg".format(side if side in ("Left", "Right") else "Left")
@@ -402,18 +408,11 @@ def _looks_like_control(node_name):
 
 def _category_from_name(node_name):
     short_name = _short_name(node_name).lower()
-    if any(token in short_name for token in ("left", "_l", ".l", " l_", "lft")) and "hand" in short_name:
-        return "Left Hand"
-    if any(token in short_name for token in ("right", "_r", ".r", " r_", "rt")) and "hand" in short_name:
-        return "Right Hand"
+    if any(token in short_name for token in ("hand", "finger", "thumb", "index", "middle", "ring", "pinky", "digit")):
+        return "Body"
     for category_name, tokens in _CATEGORY_MATCHERS.items():
         if any(token in short_name for token in tokens):
             return category_name
-    if "hand" in short_name:
-        if any(token in short_name for token in ("left", "_l", ".l", " l_", "lft")):
-            return "Left Hand"
-        if any(token in short_name for token in ("right", "_r", ".r", " r_", "rt")):
-            return "Right Hand"
     return "Other"
 
 
@@ -524,7 +523,7 @@ def _list_subgroup_name(record):
     if category == "Body":
         if leaf_name in ("COG", "Core", "Spine", "Tail", "Wings", "Body Other"):
             return leaf_name
-        if leaf_name in ("Left Arm", "Right Arm", "Left Leg", "Right Leg"):
+        if leaf_name in ("Left Arm", "Right Arm", "Left Hand / Fingers", "Right Hand / Fingers", "Left Leg", "Right Leg"):
             return leaf_name
         return leaf_name
     return leaf_name or category
@@ -609,6 +608,10 @@ def _group_label_for_record(record):
             return "COG"
         if _contains_any(text, ("tail",)):
             return "Tail"
+        if _contains_any(text, ("hand", "finger", "thumb", "index", "middle", "ring", "pinky", "digit")):
+            if side in ("Left", "Right"):
+                return "{0} Hand / Fingers".format(side)
+            return "Core"
         if _contains_any(text, ("arm", "shoulder", "elbow", "wrist", "clav", "clavicle", "upperarm", "lowerarm", "forearm")):
             if side in ("Left", "Right"):
                 return "{0} Arm".format(side)
@@ -1611,10 +1614,20 @@ class ControlPickerPanel(QtWidgets.QWidget):
 
     def selected_visual_names(self):
         names = []
+        dead_buttons = []
         for maya_name in self.current_record_names():
             button = self.visual_buttons_by_maya_name.get(maya_name)
-            if button and button.isChecked() and maya_name not in names:
+            if not button:
+                continue
+            try:
+                checked = button.isChecked()
+            except RuntimeError:
+                dead_buttons.append(maya_name)
+                continue
+            if checked and maya_name not in names:
                 names.append(maya_name)
+        for maya_name in dead_buttons:
+            self.visual_buttons_by_maya_name.pop(maya_name, None)
         return names
 
     def _install_visual_marquee_filter(self, widget):
@@ -1725,12 +1738,20 @@ class ControlPickerPanel(QtWidgets.QWidget):
 
     def _sync_visual_selection(self, maya_names):
         names = set(maya_names or [])
+        dead_buttons = []
         for name, button in self.visual_buttons_by_maya_name.items():
-            button.blockSignals(True)
             try:
+                button.blockSignals(True)
                 button.setChecked(name in names)
+            except RuntimeError:
+                dead_buttons.append(name)
             finally:
-                button.blockSignals(False)
+                try:
+                    button.blockSignals(False)
+                except RuntimeError:
+                    pass
+        for name in dead_buttons:
+            self.visual_buttons_by_maya_name.pop(name, None)
 
     def sync_selection_from_maya(self):
         if self._syncing_selection or not MAYA_AVAILABLE or not cmds:
@@ -1916,6 +1937,10 @@ class ControlPickerPanel(QtWidgets.QWidget):
         self._visual_marquee_targets = set()
         self._reset_visual_marquee_state()
         for group_box in self.visual_canvas.findChildren(QtWidgets.QGroupBox):
+            try:
+                group_box.setParent(None)
+            except Exception:
+                pass
             group_box.deleteLater()
         self.visual_buttons_by_maya_name = {}
         grouped_records = {}
@@ -2098,6 +2123,7 @@ class ControlPickerPanel(QtWidgets.QWidget):
             return
         if any(_tree_item_kind(item) != "control" for item in selected_items):
             self.set_selected_maya_names(names, update_maya=True)
+            self._sync_visual_selection(names)
             return
         self.controller.select_in_maya()
         self._maya_selection_signature = tuple(names)

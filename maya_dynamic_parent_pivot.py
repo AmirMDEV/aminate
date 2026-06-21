@@ -76,7 +76,7 @@ DOCKED_WORKFLOW_MIN_HEIGHT = 240
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.4"
+VERSION_LABEL = "Version 0.3.5 Beta"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"

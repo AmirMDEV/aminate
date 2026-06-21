@@ -230,10 +230,16 @@ def normalize_hotkey(hotkey_text, default_value=DEFAULT_HOTKEY):
                 "`": "Backquote",
                 "\\": "Backslash",
                 "semi": "Semicolon",
+                "semicolon": "Semicolon",
+                "semicolonkey": "Semicolon",
                 "quote": "Apostrophe",
                 "singlequote": "Apostrophe",
+                "apostrophe": "Apostrophe",
                 "backtick": "Backquote",
+                "backquote": "Backquote",
                 "grave": "Backquote",
+                "graveaccent": "Backquote",
+                "backslash": "Backslash",
             }.get(low, part)
     for modifier in sorted(seen_modifiers, key=lambda value: modifier_order[value]):
         parts.append(modifier)
@@ -1972,6 +1978,35 @@ def shutdown_global_hotkey():
     _GLOBAL_MANAGER = None
 
 
+def hide_floating_channel_box_and_graph_editor():
+    hidden = 0
+    manager = _GLOBAL_MANAGER
+    if manager is not None and getattr(manager, "dialog", None) is not None:
+        try:
+            if manager.dialog.isVisible():
+                hidden += 1
+        except Exception:
+            pass
+        try:
+            manager.dialog.close()
+        except Exception:
+            pass
+        manager.dialog = None
+    try:
+        if _graph_editor_root_exists():
+            if _graph_editor_root_visible():
+                hidden += 1
+            _delete_graph_editor_ui()
+    except Exception:
+        pass
+    if QtWidgets and QtWidgets.QApplication.instance():
+        try:
+            QtWidgets.QApplication.instance().processEvents()
+        except Exception:
+            pass
+    return hidden
+
+
 def show_floating_channel_box():
     manager = install_global_hotkey()
     if manager:
@@ -1996,6 +2031,7 @@ __all__ = [
     "get_hotkey",
     "graph_hotkey_to_parts",
     "hotkey_to_parts",
+    "hide_floating_channel_box_and_graph_editor",
     "install_global_hotkey",
     "normalize_hotkey",
     "set_channel_opacity",

@@ -61,6 +61,14 @@ DEFAULT_NOTE_COLOR = (0.278, 0.584, 0.800)
 DEFAULT_NOTE_OPACITY = 0.8
 DEFAULT_TOOLTIP_BACKGROUND = (0.18, 0.18, 0.18)
 MAX_TOOLTIP_WIDTH = 420
+TIMELINE_OVERLAY_OBJECT_NAME = "aminateTimelineNotesOverlay"
+TIMELINE_TOOLTIP_OBJECT_NAME = "aminateTimelineNotesTooltip"
+TIMELINE_NOTES_OVERLAY_ENABLED_OPTION = "aminateTimelineNotesOverlayEnabled"
+TIMELINE_NOTES_BAR_HEIGHT_OPTION = "aminateTimelineNotesBarHeight"
+TIMELINE_NOTES_TOOLTIP_OPACITY_OPTION = "aminateTimelineNotesTooltipOpacity"
+TIMELINE_NOTES_DEFAULT_COLOR_OPTION = "aminateTimelineNotesDefaultColor"
+DEFAULT_TIMELINE_BAR_HEIGHT = 7
+DEFAULT_TIMELINE_TOOLTIP_OPACITY = 0.88
 
 GLOBAL_CONTROLLER = None
 GLOBAL_WINDOW = None
@@ -88,6 +96,87 @@ def _blend_channel(channel, background, alpha):
 
 def _blend_color(color, opacity):
     return tuple(_blend_channel(float(color[index]), float(DEFAULT_TOOLTIP_BACKGROUND[index]), float(opacity)) for index in range(3))
+
+
+def _clamp(value, minimum, maximum):
+    return max(float(minimum), min(float(maximum), float(value)))
+
+
+def _clean_color(color, fallback=DEFAULT_NOTE_COLOR):
+    values = list(color or fallback)
+    while len(values) < 3:
+        values.append(fallback[len(values)])
+    return tuple(_clamp(values[index], 0.0, 1.0) for index in range(3))
+
+
+def _option_var_exists(name):
+    if not MAYA_AVAILABLE or not cmds:
+        return False
+    try:
+        return bool(cmds.optionVar(exists=name))
+    except Exception:
+        return False
+
+
+def _option_var_int(name, default):
+    if not _option_var_exists(name):
+        return int(default)
+    try:
+        return int(cmds.optionVar(query=name))
+    except Exception:
+        return int(default)
+
+
+def _option_var_float(name, default):
+    if not _option_var_exists(name):
+        return float(default)
+    try:
+        return float(cmds.optionVar(query=name))
+    except Exception:
+        return float(default)
+
+
+def _option_var_color(name, default):
+    if not _option_var_exists(name):
+        return _clean_color(default)
+    try:
+        return _clean_color(json.loads(cmds.optionVar(query=name)), default)
+    except Exception:
+        return _clean_color(default)
+
+
+def _set_option_var_int(name, value):
+    if MAYA_AVAILABLE and cmds:
+        cmds.optionVar(intValue=(name, int(value)))
+
+
+def _set_option_var_float(name, value):
+    if MAYA_AVAILABLE and cmds:
+        cmds.optionVar(floatValue=(name, float(value)))
+
+
+def _set_option_var_color(name, color):
+    if MAYA_AVAILABLE and cmds:
+        cmds.optionVar(stringValue=(name, json.dumps([float(value) for value in _clean_color(color)])))
+
+
+def _timeline_customization_defaults():
+    return {
+        "overlay_enabled": True,
+        "bar_height": int(DEFAULT_TIMELINE_BAR_HEIGHT),
+        "tooltip_opacity": float(DEFAULT_TIMELINE_TOOLTIP_OPACITY),
+        "default_color": tuple(DEFAULT_NOTE_COLOR),
+    }
+
+
+def _timeline_customization_settings():
+    defaults = _timeline_customization_defaults()
+    return {
+        "overlay_enabled": bool(_option_var_int(TIMELINE_NOTES_OVERLAY_ENABLED_OPTION, int(defaults["overlay_enabled"]))),
+        "bar_height": int(_clamp(_option_var_int(TIMELINE_NOTES_BAR_HEIGHT_OPTION, defaults["bar_height"]), 3, 24)),
+        "tooltip_opacity": float(_clamp(_option_var_float(TIMELINE_NOTES_TOOLTIP_OPACITY_OPTION, defaults["tooltip_opacity"]), 0.25, 1.0)),
+        "default_color": _option_var_color(TIMELINE_NOTES_DEFAULT_COLOR_OPTION, defaults["default_color"]),
+    }
 
 
 def _escape_html(text):
@@ -291,13 +380,129 @@ class _TimelineTooltipFilter(QtCore.QObject if QtCore else object):
         if event_type == _qt_flag("QEvent", "ToolTip", fallback=QtCore.QEvent.ToolTip):
             note = self.controller.note_at_widget_x(event.pos().x(), self.widget.width())
             if note:
-                QtWidgets.QToolTip.showText(event.globalPos(), self.controller.tooltip_html(note), self.widget, self.widget.rect(), 3000)
+                self.controller.show_tooltip(note, event.globalPos())
                 return True
-            QtWidgets.QToolTip.hideText()
+            self.controller.hide_tooltip()
             return True
         if event_type == _qt_flag("QEvent", "Leave", fallback=QtCore.QEvent.Leave):
-            QtWidgets.QToolTip.hideText()
+            self.controller.hide_tooltip()
         return False
+
+
+class _TimelineNoteTooltipBubble(QtWidgets.QFrame if QtWidgets else object):
+    def __init__(self, controller, parent=None):
+        flags = _qt_flag("WindowType", "ToolTip", getattr(QtCore.Qt, "ToolTip", 0)) if QtCore else 0
+        super(_TimelineNoteTooltipBubble, self).__init__(parent, flags)
+        self.controller = controller
+        self.setObjectName(TIMELINE_TOOLTIP_OBJECT_NAME)
+        self.setAttribute(_qt_flag("WidgetAttribute", "WA_ShowWithoutActivating", getattr(QtCore.Qt, "WA_ShowWithoutActivating", None)), True)
+        self.setAttribute(_qt_flag("WidgetAttribute", "WA_TranslucentBackground", getattr(QtCore.Qt, "WA_TranslucentBackground", None)), True)
+        self.setWindowOpacity(float(self.controller.timeline_customization()["tooltip_opacity"]))
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        self.label = QtWidgets.QLabel()
+        self.label.setWordWrap(True)
+        self.label.setTextFormat(_qt_flag("TextFormat", "RichText", getattr(QtCore.Qt, "RichText", None)))
+        self.label.setMaximumWidth(MAX_TOOLTIP_WIDTH)
+        layout.addWidget(self.label)
+        self._effect = None
+        self._animation = None
+        try:
+            self._effect = QtWidgets.QGraphicsOpacityEffect(self)
+            self.setGraphicsEffect(self._effect)
+            self._animation = QtCore.QPropertyAnimation(self._effect, b"opacity", self)
+            self._animation.setDuration(180)
+        except Exception:
+            self._effect = None
+            self._animation = None
+
+    def show_note(self, note, global_pos):
+        settings = self.controller.timeline_customization()
+        self.setWindowOpacity(float(settings["tooltip_opacity"]))
+        self.setStyleSheet(
+            "#{0} {{ background: rgba(31, 31, 31, 232); color: #F2F2F2; border: 1px solid rgba(0, 161, 224, 180); border-radius: 6px; }}"
+            "QLabel {{ color: #F2F2F2; }}".format(TIMELINE_TOOLTIP_OBJECT_NAME)
+        )
+        self.label.setText(self.controller.tooltip_html(note))
+        self.adjustSize()
+        self.move(global_pos + QtCore.QPoint(14, 18))
+        if self._animation and self._effect:
+            self._animation.stop()
+            self._effect.setOpacity(0.0)
+            self.show()
+            self._animation.setStartValue(0.0)
+            self._animation.setEndValue(1.0)
+            self._animation.start()
+        else:
+            self.show()
+
+
+class _TimelineNotesOverlay(QtWidgets.QWidget if QtWidgets else object):
+    def __init__(self, controller, parent_widget):
+        super(_TimelineNotesOverlay, self).__init__(parent_widget)
+        self.controller = controller
+        self.parent_widget = parent_widget
+        self.setObjectName(TIMELINE_OVERLAY_OBJECT_NAME)
+        self.setAttribute(_qt_flag("WidgetAttribute", "WA_TransparentForMouseEvents", getattr(QtCore.Qt, "WA_TransparentForMouseEvents", None)), True)
+        self.setAttribute(_qt_flag("WidgetAttribute", "WA_TranslucentBackground", getattr(QtCore.Qt, "WA_TranslucentBackground", None)), True)
+        self.setAttribute(_qt_flag("WidgetAttribute", "WA_NoSystemBackground", getattr(QtCore.Qt, "WA_NoSystemBackground", None)), True)
+        self.sync_geometry()
+        self.show()
+        self.raise_()
+        try:
+            parent_widget.installEventFilter(self)
+        except Exception:
+            pass
+
+    def sync_geometry(self):
+        if self.parent_widget:
+            self.setGeometry(self.parent_widget.rect())
+
+    def refresh_notes(self):
+        self.sync_geometry()
+        self.update()
+
+    def eventFilter(self, watched, event):
+        if watched is self.parent_widget and QtCore:
+            event_type = event.type()
+            if event_type in (
+                _qt_flag("QEvent", "Resize", fallback=QtCore.QEvent.Resize),
+                _qt_flag("QEvent", "Show", fallback=QtCore.QEvent.Show),
+                _qt_flag("QEvent", "Paint", fallback=QtCore.QEvent.Paint),
+            ):
+                self.sync_geometry()
+                self.raise_()
+        return False
+
+    def paintEvent(self, event):
+        if not QtGui:
+            return
+        settings = self.controller.timeline_customization()
+        if not settings["overlay_enabled"]:
+            return
+        rects = self.controller.timeline_note_rects(self.width(), height=self.height())
+        if not rects:
+            return
+        painter = QtGui.QPainter(self)
+        antialiasing = getattr(QtGui.QPainter, "Antialiasing", None)
+        if antialiasing is None and hasattr(QtGui.QPainter, "RenderHint"):
+            antialiasing = getattr(QtGui.QPainter.RenderHint, "Antialiasing", None)
+        if antialiasing is not None:
+            painter.setRenderHint(antialiasing, True)
+        for item in rects:
+            note = item["note"]
+            color = QtGui.QColor.fromRgbF(*_clean_color(note.get("color")))
+            color.setAlphaF(_clamp(float(note.get("opacity", DEFAULT_NOTE_OPACITY)), 0.15, 1.0))
+            border = QtGui.QColor(color)
+            border.setAlphaF(min(1.0, color.alphaF() + 0.2))
+            painter.setPen(QtGui.QPen(border, 1.0))
+            painter.setBrush(QtGui.QBrush(color))
+            painter.drawRoundedRect(
+                QtCore.QRectF(float(item["x"]), float(item["y"]), float(item["width"]), float(item["height"])),
+                3.0,
+                3.0,
+            )
+        painter.end()
 
 
 class MayaTimelineNotesController(object):
@@ -306,7 +511,9 @@ class MayaTimelineNotesController(object):
         self.status_callback = None
         self.tooltip_filter = None
         self.tooltip_widget = None
-        self._install_tooltip_filter()
+        self.tooltip_bubble = None
+        self.overlay_widget = None
+        self.install_timeline_ui_hooks()
 
     def shutdown(self):
         if self.tooltip_filter and self.tooltip_widget:
@@ -316,6 +523,20 @@ class MayaTimelineNotesController(object):
                 pass
         self.tooltip_filter = None
         self.tooltip_widget = None
+        if self.tooltip_bubble:
+            try:
+                self.tooltip_bubble.close()
+                self.tooltip_bubble.deleteLater()
+            except Exception:
+                pass
+        self.tooltip_bubble = None
+        if self.overlay_widget:
+            try:
+                self.overlay_widget.close()
+                self.overlay_widget.deleteLater()
+            except Exception:
+                pass
+        self.overlay_widget = None
 
     def set_status_callback(self, callback):
         self.status_callback = callback
@@ -343,6 +564,71 @@ class MayaTimelineNotesController(object):
         self.tooltip_filter = _TimelineTooltipFilter(self, widget)
         widget.installEventFilter(self.tooltip_filter)
         widget.setMouseTracking(True)
+
+    def _install_overlay(self):
+        if not QtWidgets:
+            return
+        widget = _time_slider_widget()
+        if not widget:
+            return
+        if self.overlay_widget:
+            try:
+                self.overlay_widget.close()
+                self.overlay_widget.deleteLater()
+            except Exception:
+                pass
+            self.overlay_widget = None
+        if not self.timeline_customization()["overlay_enabled"]:
+            return
+        self.overlay_widget = _TimelineNotesOverlay(self, widget)
+        self.overlay_widget.refresh_notes()
+
+    def install_timeline_ui_hooks(self):
+        self._install_tooltip_filter()
+        self._install_overlay()
+
+    def refresh_timeline_overlay(self):
+        if self.overlay_widget:
+            try:
+                self.overlay_widget.refresh_notes()
+            except Exception:
+                pass
+
+    def hide_tooltip(self):
+        if self.tooltip_bubble:
+            try:
+                self.tooltip_bubble.hide()
+            except Exception:
+                pass
+
+    def show_tooltip(self, note, global_pos):
+        if not QtWidgets:
+            return
+        if self.tooltip_bubble is None:
+            self.tooltip_bubble = _TimelineNoteTooltipBubble(self)
+        self.tooltip_bubble.show_note(note, global_pos)
+
+    def timeline_customization(self):
+        return _timeline_customization_settings()
+
+    def set_timeline_customization(self, overlay_enabled=None, bar_height=None, tooltip_opacity=None, default_color=None):
+        current = self.timeline_customization()
+        if overlay_enabled is not None:
+            current["overlay_enabled"] = bool(overlay_enabled)
+            _set_option_var_int(TIMELINE_NOTES_OVERLAY_ENABLED_OPTION, int(current["overlay_enabled"]))
+        if bar_height is not None:
+            current["bar_height"] = int(_clamp(bar_height, 3, 24))
+            _set_option_var_int(TIMELINE_NOTES_BAR_HEIGHT_OPTION, current["bar_height"])
+        if tooltip_opacity is not None:
+            current["tooltip_opacity"] = float(_clamp(tooltip_opacity, 0.25, 1.0))
+            _set_option_var_float(TIMELINE_NOTES_TOOLTIP_OPACITY_OPTION, current["tooltip_opacity"])
+        if default_color is not None:
+            current["default_color"] = _clean_color(default_color)
+            _set_option_var_color(TIMELINE_NOTES_DEFAULT_COLOR_OPTION, current["default_color"])
+        self.install_timeline_ui_hooks()
+        if self.tooltip_bubble:
+            self.tooltip_bubble.setWindowOpacity(float(current["tooltip_opacity"]))
+        return current
 
     def notes(self):
         if not MAYA_AVAILABLE:
@@ -376,6 +662,42 @@ class MayaTimelineNotesController(object):
             return None
         hits.sort(key=lambda item: (item["end_frame"] - item["start_frame"], item["start_frame"]))
         return hits[0]
+
+    def timeline_note_rects(self, width, height=24, playback_start=None, playback_end=None):
+        width = max(1, int(width))
+        height = max(1, int(height))
+        if playback_start is None or playback_end is None:
+            playback_start, playback_end = _playback_range()
+        playback_start = float(playback_start)
+        playback_end = float(playback_end)
+        if playback_end <= playback_start:
+            return []
+        settings = self.timeline_customization()
+        bar_height = int(settings["bar_height"])
+        y_value = max(0, height - bar_height - 2)
+        rects = []
+        for note in self.notes():
+            start_frame = max(playback_start, float(note["start_frame"]))
+            end_frame = min(playback_end, float(note["end_frame"]))
+            if end_frame < playback_start or start_frame > playback_end:
+                continue
+            start_ratio = (start_frame - playback_start) / (playback_end - playback_start)
+            end_ratio = (end_frame - playback_start) / (playback_end - playback_start)
+            x_value = int(round(start_ratio * width))
+            x_stop = int(round(end_ratio * width))
+            rects.append(
+                {
+                    "note": note,
+                    "x": max(0, min(width - 1, x_value)),
+                    "y": y_value,
+                    "width": max(3, min(width, x_stop) - max(0, min(width - 1, x_value))),
+                    "height": bar_height,
+                    "start_frame": int(note["start_frame"]),
+                    "end_frame": int(note["end_frame"]),
+                    "title": note["title"],
+                }
+            )
+        return rects
 
     def tooltip_html(self, note):
         title = (note.get("title") or "").strip()
@@ -418,6 +740,7 @@ class MayaTimelineNotesController(object):
         _set_string_attr(bookmark, NOTE_RGB_ATTR, json.dumps([float(value) for value in color]))
         _set_string_attr(bookmark, NOTE_EXPORT_ID_ATTR, bookmark)
         _set_double_attr(bookmark, NOTE_OPACITY_ATTR, opacity)
+        self.refresh_timeline_overlay()
         return True, "Added timeline note from frame {0} to {1}.".format(int(start_frame), int(end_frame))
 
     def update_note(self, node_name, title, start_frame, end_frame, color, opacity, text):
@@ -437,12 +760,14 @@ class MayaTimelineNotesController(object):
         _set_string_attr(node_name, NOTE_TEXT_ATTR, text)
         _set_string_attr(node_name, NOTE_RGB_ATTR, json.dumps([float(value) for value in color]))
         _set_double_attr(node_name, NOTE_OPACITY_ATTR, opacity)
+        self.refresh_timeline_overlay()
         return True, "Updated timeline note."
 
     def delete_note(self, node_name):
         if not MAYA_AVAILABLE or not cmds.objExists(node_name):
             return False, "That note is already gone."
         cmds.delete(node_name)
+        self.refresh_timeline_overlay()
         return True, "Deleted the selected timeline note."
 
     def export_notes(self, file_path):
@@ -500,6 +825,7 @@ class MayaTimelineNotesController(object):
                 )
                 if success:
                     created += 1
+        self.refresh_timeline_overlay()
         return True, "Imported {0} new note(s) and updated {1} existing note(s).".format(created, updated)
 
 
@@ -546,6 +872,14 @@ if QtWidgets:
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
 
+            self.tab_widget = QtWidgets.QTabWidget()
+            self.tab_widget.setObjectName("timelineNotesTabWidget")
+            self.notes_tab = QtWidgets.QWidget()
+            self.notes_tab.setObjectName("timelineNotesNotesTab")
+            notes_layout = QtWidgets.QVBoxLayout(self.notes_tab)
+            self.customize_tab = QtWidgets.QWidget()
+            self.customize_tab.setObjectName("timelineNotesCustomizeTab")
+
             form = QtWidgets.QGridLayout()
             self.title_line = QtWidgets.QLineEdit()
             self.title_line.setPlaceholderText("Run start, Contact pose, Camera beat")
@@ -581,8 +915,8 @@ if QtWidgets:
             color_holder = QtWidgets.QWidget()
             color_holder.setLayout(color_row)
             form.addWidget(color_holder, 2, 3)
-            main_layout.addLayout(form)
-            main_layout.addWidget(self.note_text, 1)
+            notes_layout.addLayout(form)
+            notes_layout.addWidget(self.note_text, 1)
 
             range_row = QtWidgets.QHBoxLayout()
             self.auto_highlight_range_check = QtWidgets.QCheckBox("Auto Use Highlighted Range")
@@ -606,22 +940,22 @@ if QtWidgets:
             range_row.addWidget(self.add_button)
             range_row.addWidget(self.update_button)
             range_row.addWidget(self.delete_button)
-            main_layout.addLayout(range_row)
+            notes_layout.addLayout(range_row)
 
             notes_label = QtWidgets.QLabel("Scene Notes")
-            main_layout.addWidget(notes_label)
+            notes_layout.addWidget(notes_label)
             self.notes_list = QtWidgets.QTreeWidget()
             self.notes_list.setHeaderLabels(["Title", "Range", "Opacity"])
             self.notes_list.setAlternatingRowColors(True)
-            main_layout.addWidget(self.notes_list, 1)
+            notes_layout.addWidget(self.notes_list, 1)
 
             self.current_frame_notes_label = QtWidgets.QLabel("Notes At Current Frame")
-            main_layout.addWidget(self.current_frame_notes_label)
+            notes_layout.addWidget(self.current_frame_notes_label)
             self.current_frame_notes_box = QtWidgets.QPlainTextEdit()
             self.current_frame_notes_box.setReadOnly(True)
             self.current_frame_notes_box.setPlaceholderText("Move the time slider into a note range to read the full note here.")
             self.current_frame_notes_box.setMaximumHeight(170)
-            main_layout.addWidget(self.current_frame_notes_box)
+            notes_layout.addWidget(self.current_frame_notes_box)
 
             file_row = QtWidgets.QHBoxLayout()
             self.export_button = QtWidgets.QPushButton("Export Notes")
@@ -629,7 +963,7 @@ if QtWidgets:
             file_row.addWidget(self.export_button)
             file_row.addWidget(self.import_button)
             file_row.addStretch(1)
-            main_layout.addLayout(file_row)
+            notes_layout.addLayout(file_row)
 
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
@@ -642,7 +976,12 @@ if QtWidgets:
                 "6. Hover over the colored range on the time slider to read the full note.\n"
                 "7. Export Notes if you want to move them to another scene later."
             )
-            main_layout.addWidget(help_box)
+            notes_layout.addWidget(help_box)
+
+            self._build_customization_tab()
+            self.tab_widget.addTab(self.notes_tab, "Notes")
+            self.tab_widget.addTab(self.customize_tab, "Customize")
+            main_layout.addWidget(self.tab_widget, 1)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
@@ -659,7 +998,7 @@ if QtWidgets:
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
 
-            self.current_color = tuple(DEFAULT_NOTE_COLOR)
+            self.current_color = tuple(getattr(self, "default_note_color", DEFAULT_NOTE_COLOR))
             self._refresh_color_preview()
             self._build_marking_menu()
             self.range_sync_timer = QtCore.QTimer(self)
@@ -688,6 +1027,63 @@ if QtWidgets:
             self.end_spin.valueChanged.connect(self._schedule_auto_update_note)
             self.opacity_spin.valueChanged.connect(self._handle_opacity_changed)
             self.note_text.textChanged.connect(self._schedule_auto_update_note)
+
+        def _build_customization_tab(self):
+            settings = self.controller.timeline_customization()
+            self.default_note_color = tuple(settings["default_color"])
+            layout = QtWidgets.QVBoxLayout(self.customize_tab)
+
+            overlay_box = QtWidgets.QGroupBox("Timeline Display")
+            overlay_layout = QtWidgets.QGridLayout(overlay_box)
+            self.overlay_enabled_check = QtWidgets.QCheckBox("Show colored note ranges on Maya's timeline")
+            self.overlay_enabled_check.setObjectName("timelineNotesOverlayEnabledCheck")
+            self.overlay_enabled_check.setChecked(bool(settings["overlay_enabled"]))
+            self.overlay_enabled_check.setToolTip("Draws Aminate note ranges on top of Maya's time slider so the notes are visible even when Maya's bookmark display changes.")
+            self.bar_height_spin = QtWidgets.QSpinBox()
+            self.bar_height_spin.setObjectName("timelineNotesBarHeightSpin")
+            self.bar_height_spin.setRange(3, 24)
+            self.bar_height_spin.setValue(int(settings["bar_height"]))
+            self.bar_height_spin.setSuffix(" px")
+            self.tooltip_opacity_spin = QtWidgets.QDoubleSpinBox()
+            self.tooltip_opacity_spin.setObjectName("timelineNotesTooltipOpacitySpin")
+            self.tooltip_opacity_spin.setDecimals(2)
+            self.tooltip_opacity_spin.setRange(0.25, 1.0)
+            self.tooltip_opacity_spin.setSingleStep(0.05)
+            self.tooltip_opacity_spin.setValue(float(settings["tooltip_opacity"]))
+            overlay_layout.addWidget(self.overlay_enabled_check, 0, 0, 1, 2)
+            overlay_layout.addWidget(QtWidgets.QLabel("Range Bar Height"), 1, 0)
+            overlay_layout.addWidget(self.bar_height_spin, 1, 1)
+            overlay_layout.addWidget(QtWidgets.QLabel("Hover Bubble Opacity"), 2, 0)
+            overlay_layout.addWidget(self.tooltip_opacity_spin, 2, 1)
+            layout.addWidget(overlay_box)
+
+            color_box = QtWidgets.QGroupBox("New Note Defaults")
+            color_layout = QtWidgets.QHBoxLayout(color_box)
+            self.default_color_button = QtWidgets.QPushButton("Default Note Color")
+            self.default_color_button.setObjectName("timelineNotesDefaultColorButton")
+            self.default_color_preview = QtWidgets.QLabel("      ")
+            self.default_color_preview.setFrameShape(QtWidgets.QFrame.Box)
+            color_layout.addWidget(self.default_color_button)
+            color_layout.addWidget(self.default_color_preview)
+            color_layout.addStretch(1)
+            layout.addWidget(color_box)
+
+            button_row = QtWidgets.QHBoxLayout()
+            self.apply_customization_button = QtWidgets.QPushButton("Apply")
+            self.reset_customization_button = QtWidgets.QPushButton("Reset Defaults")
+            button_row.addWidget(self.apply_customization_button)
+            button_row.addWidget(self.reset_customization_button)
+            button_row.addStretch(1)
+            layout.addLayout(button_row)
+            layout.addStretch(1)
+
+            self._refresh_default_color_preview()
+            self.default_color_button.clicked.connect(self._pick_default_color)
+            self.apply_customization_button.clicked.connect(self._apply_customization)
+            self.reset_customization_button.clicked.connect(self._reset_customization)
+            self.overlay_enabled_check.toggled.connect(self._apply_customization)
+            self.bar_height_spin.valueChanged.connect(self._apply_customization)
+            self.tooltip_opacity_spin.valueChanged.connect(self._apply_customization)
 
         def _build_marking_menu(self):
             self.marking_menu = QtWidgets.QMenu(self)
@@ -749,6 +1145,49 @@ if QtWidgets:
         def _refresh_color_preview(self):
             color = QtGui.QColor.fromRgbF(*_blend_color(self.current_color, self.opacity_spin.value()))
             self.color_preview.setStyleSheet("background-color: {0};".format(color.name()))
+
+        def _refresh_default_color_preview(self):
+            color = QtGui.QColor.fromRgbF(*_clean_color(self.default_note_color))
+            self.default_color_preview.setStyleSheet("background-color: {0};".format(color.name()))
+
+        def _pick_default_color(self):
+            current = QtGui.QColor.fromRgbF(*_clean_color(self.default_note_color))
+            chosen = QtWidgets.QColorDialog.getColor(current, self, "Pick Default Timeline Note Color")
+            if not chosen.isValid():
+                return
+            self.default_note_color = (chosen.redF(), chosen.greenF(), chosen.blueF())
+            self._refresh_default_color_preview()
+            self._apply_customization()
+
+        def _apply_customization(self, *_args):
+            if not hasattr(self, "overlay_enabled_check"):
+                return
+            settings = self.controller.set_timeline_customization(
+                overlay_enabled=self.overlay_enabled_check.isChecked(),
+                bar_height=self.bar_height_spin.value(),
+                tooltip_opacity=self.tooltip_opacity_spin.value(),
+                default_color=self.default_note_color,
+            )
+            self.default_note_color = tuple(settings["default_color"])
+            if not self._selected_node():
+                self.current_color = tuple(self.default_note_color)
+                self._refresh_color_preview()
+            self._refresh_default_color_preview()
+            self._set_status("Timeline note display settings updated.", True)
+
+        def _reset_customization(self):
+            defaults = _timeline_customization_defaults()
+            self.overlay_enabled_check.blockSignals(True)
+            self.bar_height_spin.blockSignals(True)
+            self.tooltip_opacity_spin.blockSignals(True)
+            self.overlay_enabled_check.setChecked(bool(defaults["overlay_enabled"]))
+            self.bar_height_spin.setValue(int(defaults["bar_height"]))
+            self.tooltip_opacity_spin.setValue(float(defaults["tooltip_opacity"]))
+            self.overlay_enabled_check.blockSignals(False)
+            self.bar_height_spin.blockSignals(False)
+            self.tooltip_opacity_spin.blockSignals(False)
+            self.default_note_color = tuple(defaults["default_color"])
+            self._apply_customization()
 
         def _refresh_notes(self, selected_node=""):
             self.notes_list.clear()

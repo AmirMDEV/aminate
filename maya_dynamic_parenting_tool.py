@@ -800,10 +800,10 @@ class MayaDynamicParentingController(object):
     def _target_snap_matrix(self, target_entry):
         if not target_entry:
             return None
-        if target_entry.get("locator") and cmds.objExists(target_entry["locator"]):
-            return _visible_pose_matrix(target_entry["locator"])
         if target_entry.get("driver") and cmds.objExists(target_entry["driver"]):
             return _visible_pose_matrix(target_entry["driver"])
+        if target_entry.get("locator") and cmds.objExists(target_entry["locator"]):
+            return _visible_pose_matrix(target_entry["locator"])
         return None
 
     def _save_targets(self, setup, targets):
@@ -924,7 +924,11 @@ class MayaDynamicParentingController(object):
         target_matrix = self._target_snap_matrix(target_entry)
         if target_matrix is None:
             return False, "That parent is missing."
+        blend_values = self._active_constraint_blend_values(setup, active=False)
+        if blend_values:
+            _set_blend_attr_values(setup["driven"], blend_values, keyframe=True)
         _set_world_translation_rotation_preserve_scale(setup["driven"], target_matrix)
+        _set_keyable_channels(setup["driven"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
         self._store_switch_reference_matrix(setup, target_matrix)
         return True, "Snapped {0} onto {1}. Move it if you want, then click Switch.".format(
             setup["label"],

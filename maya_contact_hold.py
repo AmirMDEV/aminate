@@ -110,6 +110,19 @@ def _current_frame():
     return int(round(float(cmds.currentTime(query=True))))
 
 
+def _stabilize_contact_hold_evaluation():
+    if not MAYA_AVAILABLE:
+        return
+    try:
+        cmds.evaluationManager(mode="serial")
+    except Exception:
+        pass
+    try:
+        cmds.evaluator(name="gpuOverride", enable=False)
+    except Exception:
+        pass
+
+
 def _leaf_name(node_name):
     return node_name.rsplit("|", 1)[-1]
 
@@ -1673,6 +1686,7 @@ class MayaContactHoldController(object):
             success, message = self.analyze_setup()
             if not success:
                 return False, message
+        _stabilize_contact_hold_evaluation()
 
         controls = list(self.report["controls"])
         start_frame = int(self.report["start_frame"])
@@ -1686,6 +1700,16 @@ class MayaContactHoldController(object):
             cmds.currentTime(start_frame, edit=True)
             created_locators = []
             for node_name in controls:
+                matching_entries = [
+                    item
+                    for item in _sorted_hold_entries(node_name)
+                    if int(item.get("start_frame", 0)) == start_frame
+                    and int(item.get("end_frame", 0)) == end_frame
+                    and tuple(item.get("axes") or ()) == hold_axes
+                    and bool(item.get("keep_rotation")) == keep_rotation
+                ]
+                if matching_entries:
+                    continue
                 hub_node = _ensure_hold_hub(node_name)
                 locator_node = _create_hold_locator(node_name)
                 _snap_hold_locator(locator_node, node_name, keep_rotation)
@@ -1725,6 +1749,7 @@ class MayaContactHoldController(object):
         locator_nodes = self._resolved_selected_hold_locators()
         if not locator_nodes:
             return False, "Pick one or more saved hold rows in the list first."
+        _stabilize_contact_hold_evaluation()
         hold_axes = _normalized_hold_axes(self.hold_axes)
         start_frame = int(self.start_frame)
         end_frame = int(self.end_frame)
@@ -1764,6 +1789,7 @@ class MayaContactHoldController(object):
         locator_nodes = self._hold_targets()
         if not locator_nodes:
             return False, "Pick the hand or foot control with the saved hold first, or pick saved rows in the list."
+        _stabilize_contact_hold_evaluation()
         updated = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldEnable")
@@ -1786,6 +1812,7 @@ class MayaContactHoldController(object):
         locator_nodes = self._hold_targets()
         if not locator_nodes:
             return False, "Pick the hand or foot control with the saved hold first, or pick saved rows in the list."
+        _stabilize_contact_hold_evaluation()
         updated = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldDisable")
@@ -1808,6 +1835,7 @@ class MayaContactHoldController(object):
         locator_nodes = self._hold_targets()
         if not locator_nodes:
             return False, "Pick the hand or foot control with the saved hold first, or pick saved rows in the list."
+        _stabilize_contact_hold_evaluation()
         deleted = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldDelete")
@@ -1828,6 +1856,7 @@ class MayaContactHoldController(object):
         return True, "Deleted {0} saved hold row(s).".format(deleted)
 
     def delete_all_holds(self):
+        _stabilize_contact_hold_evaluation()
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaContactHoldDeleteAll")
             deleted = _delete_all_holds()
@@ -2040,24 +2069,32 @@ if QtWidgets:
             selected_locators = set(self.controller._resolved_selected_hold_locators())
             payloads = self.controller.hold_entries()
             self._syncing_table = True
-            self.holds_table.setRowCount(len(payloads))
-            for row_index, payload in enumerate(payloads):
-                row_values = [
-                    payload.get("list_name", ""),
-                    _short_name(payload.get("control", "")),
-                    "{0}-{1}".format(int(payload.get("start_frame", 0)), int(payload.get("end_frame", 0))),
-                    _hold_axis_label(payload.get("axes", ())),
-                    "Keep Turn" if payload.get("keep_rotation") else "Keep Original Turn",
-                    payload.get("state_text", "Hold"),
-                ]
-                for column_index, value in enumerate(row_values):
-                    item = QtWidgets.QTableWidgetItem(str(value))
-                    if column_index == 0:
-                        item.setData(QtCore.Qt.UserRole, payload["locator"])
-                    self.holds_table.setItem(row_index, column_index, item)
-                if payload["locator"] in selected_locators:
+            blocker = QtCore.QSignalBlocker(self.holds_table)
+            try:
+                self.holds_table.clearSelection()
+                self.holds_table.setRowCount(len(payloads))
+                rows_to_select = []
+                for row_index, payload in enumerate(payloads):
+                    row_values = [
+                        payload.get("list_name", ""),
+                        _short_name(payload.get("control", "")),
+                        "{0}-{1}".format(int(payload.get("start_frame", 0)), int(payload.get("end_frame", 0))),
+                        _hold_axis_label(payload.get("axes", ())),
+                        "Keep Turn" if payload.get("keep_rotation") else "Keep Original Turn",
+                        payload.get("state_text", "Hold"),
+                    ]
+                    for column_index, value in enumerate(row_values):
+                        item = QtWidgets.QTableWidgetItem(str(value))
+                        if column_index == 0:
+                            item.setData(QtCore.Qt.UserRole, payload["locator"])
+                        self.holds_table.setItem(row_index, column_index, item)
+                    if payload["locator"] in selected_locators:
+                        rows_to_select.append(row_index)
+                del blocker
+                for row_index in rows_to_select:
                     self.holds_table.selectRow(row_index)
-            self._syncing_table = False
+            finally:
+                self._syncing_table = False
 
         def _sync_from_controller(self):
             self.controls_line.setText(", ".join(_control_list_name(node_name) for node_name in self.controller.control_nodes))
@@ -2191,12 +2228,14 @@ if QtWidgets:
 
         def _delete_hold(self):
             self._sync_to_controller()
+            self.holds_table.clearSelection()
             success, message = self.controller.delete_hold()
             self._sync_from_controller()
             self._set_status(message, success)
 
         def _delete_all_holds(self):
             self._sync_to_controller()
+            self.holds_table.clearSelection()
             success, message = self.controller.delete_all_holds()
             self._sync_from_controller()
             self._set_status(message, success)

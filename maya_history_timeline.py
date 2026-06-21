@@ -44,6 +44,13 @@ MANIFEST_VERSION = 1
 AMINATE_HISTORY_VERSION = "0.1"
 AUTO_SNAPSHOT_SUPPRESS_UNTIL_OPTION = "AmirMayaHistoryAutoSnapshotSuppressUntil"
 AUTO_SNAPSHOT_ENABLED_OPTION = "AmirMayaHistoryAutoSnapshotEnabled"
+HISTORY_SECURITY_PROMPT_OPTION_VARS = (
+    "SafeModeOption",
+    "SafeModeImportOption",
+    "SafeModeBuiltInCheck",
+    "SafeModeUserSetupHashOption",
+    "TrustCenterPathOption",
+)
 AUTO_SNAPSHOT_SETTLE_SECONDS = 1.5
 DEFAULT_AUTO_SNAPSHOT_ENABLED = False
 DEFAULT_STEP_COLOR = "#4CC9F0"
@@ -334,6 +341,21 @@ def _set_auto_snapshot_enabled_option(enabled):
         cmds.optionVar(intValue=(AUTO_SNAPSHOT_ENABLED_OPTION, 1 if enabled else 0))
     except Exception:
         pass
+
+
+def _quiet_scene_file_prompts_for_history():
+    if not MAYA_AVAILABLE or not cmds:
+        return
+    try:
+        cmds.file(prompt=False)
+    except Exception:
+        pass
+    for option_name in HISTORY_SECURITY_PROMPT_OPTION_VARS:
+        try:
+            if cmds.optionVar(exists=option_name):
+                cmds.optionVar(intValue=(option_name, 0))
+        except Exception:
+            pass
 
 
 def _show_auto_history_security_warning(parent=None):
@@ -1618,10 +1640,7 @@ class MayaHistoryTimelineController(object):
         if not os.path.isdir(os.path.dirname(snapshot_path)):
             os.makedirs(os.path.dirname(snapshot_path))
         file_type = _scene_file_type(context.get("original_scene_path", "") or self._current_scene_path())
-        try:
-            cmds.file(prompt=False)
-        except Exception:
-            pass
+        _quiet_scene_file_prompts_for_history()
         try:
             cmds.file(
                 snapshot_path,
@@ -1679,10 +1698,7 @@ class MayaHistoryTimelineController(object):
         self.stop_default_action_snapshots()
         self._auto_snapshot_busy = True
         try:
-            try:
-                cmds.file(prompt=False)
-            except Exception:
-                pass
+            _quiet_scene_file_prompts_for_history()
             cmds.file(snapshot_path, open=True, force=True, prompt=False)
             cmds.file(rename=record.get("original_scene_path") or context.get("original_scene_path"))
         except Exception as exc:

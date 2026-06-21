@@ -55,6 +55,13 @@ CAMERA_NOTES_SHAPE_NAME = CAMERA_NOTES_NAME + "Shape"
 CAMERA_NOTES_ATTR = "animatorsPencilCameraNotes"
 DRAW_CONTEXT_NAME = "aminateAnimatorsPencilDrawContext"
 MARQUEE_CONTEXT_NAME = "aminateAnimatorsPencilMarqueeContext"
+TRANSLUCENT_MARKS_ATTR = "animatorsPencilTranslucentMarks"
+DEFAULT_SHORTCUTS = {
+    "drag_draw": "D",
+    "marquee_select": "M",
+    "erase_selected": "Delete",
+    "toggle_translucent": "T",
+}
 GLOBAL_DRAG_CONTEXT_CONTROLLER = None
 
 
@@ -74,6 +81,10 @@ def _tool_button_popup_mode(member_name):
     if scoped_enum and hasattr(scoped_enum, member_name):
         return getattr(scoped_enum, member_name)
     return getattr(QtWidgets.QToolButton, "InstantPopup", 2)
+
+
+def _shortcut_class():
+    return getattr(QtWidgets, "QShortcut", None) or getattr(QtGui, "QShortcut", None)
 
 
 def _short_name(node_name):
@@ -322,6 +333,27 @@ def _set_display_color(node_name, color, opacity=1.0, line_width=2.0):
         cmds.setAttr(node_name + ".visibility", True)
     _ensure_attr(node_name, "animatorsPencilOpacity", "double", opacity)
     cmds.setAttr(node_name + ".animatorsPencilOpacity", float(opacity))
+
+
+def _mark_shapes(mark):
+    if not mark or not cmds.objExists(mark):
+        return []
+    shapes = cmds.listRelatives(mark, shapes=True, noIntermediate=True, fullPath=True) or []
+    descendants = cmds.listRelatives(mark, allDescendents=True, fullPath=True) or []
+    for child in descendants:
+        try:
+            if cmds.nodeType(child) in ("nurbsCurve", "nurbsSurface", "mesh"):
+                shapes.append(child)
+        except Exception:
+            continue
+    result = []
+    seen = set()
+    for shape in shapes:
+        if shape in seen or not cmds.objExists(shape):
+            continue
+        seen.add(shape)
+        result.append(shape)
+    return result
 
 
 def _curve_node(name, points, parent, color, opacity, size, degree=1):
@@ -1086,6 +1118,60 @@ class AnimatorsPencilController(object):
                 cmds.scale(scale, scale, scale, mark, relative=True, objectSpace=True)
         self._status("Transformed {0} mark(s).".format(len(marks)))
 
+    def set_marks_translucent(self, layer_node=None, enabled=True):
+        layer_node = layer_node or self.active_layer()
+        marks = self.selected_marks() or self.marks(layer_node)
+        display_type = 1 if enabled else 0
+        changed = 0
+        for mark in marks:
+            _ensure_attr(mark, TRANSLUCENT_MARKS_ATTR, "bool", bool(enabled))
+            cmds.setAttr(mark + "." + TRANSLUCENT_MARKS_ATTR, bool(enabled))
+            for shape in _mark_shapes(mark):
+                if cmds.objExists(shape + ".overrideEnabled"):
+                    cmds.setAttr(shape + ".overrideEnabled", True)
+                if cmds.objExists(shape + ".overrideDisplayType"):
+                    cmds.setAttr(shape + ".overrideDisplayType", display_type)
+                    changed += 1
+        self._status("{0} translucent pencil mark shape(s).".format("Enabled" if enabled else "Disabled"))
+        return {"enabled": bool(enabled), "marks": len(marks), "shapes": changed}
+
+    def toggle_marks_translucent(self, layer_node=None):
+        layer_node = layer_node or self.active_layer()
+        marks = self.selected_marks() or self.marks(layer_node)
+        any_enabled = False
+        for mark in marks:
+            if cmds.attributeQuery(TRANSLUCENT_MARKS_ATTR, node=mark, exists=True) and cmds.getAttr(mark + "." + TRANSLUCENT_MARKS_ATTR):
+                any_enabled = True
+                break
+        return self.set_marks_translucent(layer_node, enabled=not any_enabled)
+
+    def default_shortcut_bindings(self):
+        return dict(DEFAULT_SHORTCUTS)
+
+    def activate_viewport_transform(self, mode="move"):
+        marks = self.selected_marks()
+        if not marks:
+            marks = self.marks()
+            if marks:
+                cmds.select(marks, replace=True)
+        if not marks:
+            self._status("No pencil marks to transform.")
+            return False
+        mode = (mode or "move").lower()
+        context_map = {
+            "move": "moveSuperContext",
+            "rotate": "RotateSuperContext",
+            "scale": "scaleSuperContext",
+        }
+        context = context_map.get(mode, "moveSuperContext")
+        try:
+            cmds.setToolTo(context)
+        except Exception:
+            context = "selectSuperContext"
+            cmds.setToolTo(context)
+        self._status("Viewport {0} gizmo is active for {1} pencil mark(s).".format(mode, len(marks)))
+        return True
+
     def transform_layer(self, layer_node=None, tx=0.0, ty=0.0, rotate=0.0, scale=1.0):
         layer_node = layer_node or self.active_layer()
         if not layer_node or not cmds.objExists(layer_node):
@@ -1224,7 +1310,9 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.controller = controller or AnimatorsPencilController()
         self.controller.set_status_callback(self._set_status)
         self.current_layer = ""
+        self._shortcuts = {}
         self._build_ui()
+        self._install_shortcuts()
         self.refresh_layers()
 
     def _build_ui(self):
@@ -1381,8 +1469,12 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.cut_button = QtWidgets.QPushButton("Cut Selected")
         self.paste_button = QtWidgets.QPushButton("Paste")
         self.delete_marks_button = QtWidgets.QPushButton("Erase Selected")
+        self.translucent_button = QtWidgets.QPushButton("Toggle Translucent")
+        self.translucent_button.setObjectName("animatorsPencilTranslucentToggleButton")
+        self.translucent_button.setToolTip("Toggle selected pencil marks into Maya's translucent/template display for quick draw-over review.")
         for button in (self.undo_button, self.redo_button, self.copy_button, self.cut_button, self.paste_button, self.delete_marks_button):
             edit_buttons.addWidget(button)
+        edit_buttons.addWidget(self.translucent_button)
         layout.addLayout(edit_buttons)
 
         transform = QtWidgets.QGroupBox("Transform")
@@ -1395,10 +1487,22 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.rotate_right_button = QtWidgets.QPushButton("Rotate +5")
         self.scale_down_button = QtWidgets.QPushButton("Scale 90%")
         self.scale_up_button = QtWidgets.QPushButton("Scale 110%")
+        self.viewport_move_button = QtWidgets.QPushButton("Move Gizmo")
+        self.viewport_move_button.setObjectName("animatorsPencilViewportMoveButton")
+        self.viewport_move_button.setToolTip("Select pencil marks and switch Maya to the viewport move manipulator.")
+        self.viewport_rotate_button = QtWidgets.QPushButton("Rotate Gizmo")
+        self.viewport_rotate_button.setObjectName("animatorsPencilViewportRotateButton")
+        self.viewport_rotate_button.setToolTip("Select pencil marks and switch Maya to the viewport rotate manipulator.")
+        self.viewport_scale_button = QtWidgets.QPushButton("Scale Gizmo")
+        self.viewport_scale_button.setObjectName("animatorsPencilViewportScaleButton")
+        self.viewport_scale_button.setToolTip("Select pencil marks and switch Maya to the viewport scale manipulator.")
         self.transform_layer_button = QtWidgets.QPushButton("Apply To Full Layer")
         for i, button in enumerate((self.move_left_button, self.move_right_button, self.move_up_button, self.move_down_button, self.rotate_left_button, self.rotate_right_button, self.scale_down_button, self.scale_up_button)):
             transform_layout.addWidget(button, i // 4, i % 4)
-        transform_layout.addWidget(self.transform_layer_button, 2, 0, 1, 4)
+        transform_layout.addWidget(self.viewport_move_button, 2, 0)
+        transform_layout.addWidget(self.viewport_rotate_button, 2, 1)
+        transform_layout.addWidget(self.viewport_scale_button, 2, 2)
+        transform_layout.addWidget(self.transform_layer_button, 2, 3)
         layout.addWidget(transform)
 
         anim = QtWidgets.QGroupBox("Animation")
@@ -1444,6 +1548,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.cut_button.clicked.connect(lambda: self.controller.copy_selected_marks(True))
         self.paste_button.clicked.connect(lambda: self._after_action(self.controller.paste_marks(self.current_layer)))
         self.delete_marks_button.clicked.connect(lambda: self._after_action(self.controller.delete_selected_marks()))
+        self.translucent_button.clicked.connect(lambda: self._after_action(self.controller.toggle_marks_translucent(self.current_layer)))
         self.move_left_button.clicked.connect(lambda: self.controller.transform_selected(tx=-0.1))
         self.move_right_button.clicked.connect(lambda: self.controller.transform_selected(tx=0.1))
         self.move_up_button.clicked.connect(lambda: self.controller.transform_selected(ty=0.1))
@@ -1452,6 +1557,9 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.rotate_right_button.clicked.connect(lambda: self.controller.transform_selected(rotate=5.0))
         self.scale_down_button.clicked.connect(lambda: self.controller.transform_selected(scale=0.9))
         self.scale_up_button.clicked.connect(lambda: self.controller.transform_selected(scale=1.1))
+        self.viewport_move_button.clicked.connect(lambda: self.controller.activate_viewport_transform("move"))
+        self.viewport_rotate_button.clicked.connect(lambda: self.controller.activate_viewport_transform("rotate"))
+        self.viewport_scale_button.clicked.connect(lambda: self.controller.activate_viewport_transform("scale"))
         self.transform_layer_button.clicked.connect(lambda: self.controller.transform_layer(self.current_layer, scale=1.05))
         self.add_key_button.clicked.connect(self.controller.add_key)
         self.remove_key_button.clicked.connect(self.controller.remove_key)
@@ -1461,6 +1569,55 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.retime_forward_button.clicked.connect(lambda: self.controller.retime_selected(1))
         self.ghost_button.clicked.connect(lambda: self.controller.make_ghosts(self.current_layer))
         self.clear_ghosts_button.clicked.connect(self.controller.clear_ghosts)
+
+    def _is_text_input_focused(self):
+        widget = QtWidgets.QApplication.focusWidget()
+        while widget is not None:
+            if isinstance(
+                widget,
+                (
+                    QtWidgets.QLineEdit,
+                    QtWidgets.QPlainTextEdit,
+                    QtWidgets.QTextEdit,
+                    QtWidgets.QAbstractSpinBox,
+                    QtWidgets.QComboBox,
+                ),
+            ):
+                return True
+            widget = widget.parentWidget()
+        return False
+
+    def _run_panel_shortcut(self, callback):
+        if self._is_text_input_focused():
+            return
+        callback()
+
+    def _install_shortcuts(self):
+        shortcut_type = _shortcut_class()
+        if shortcut_type is None:
+            return
+        bindings = self.controller.default_shortcut_bindings()
+        shortcut_specs = (
+            ("drag_draw", self._activate_drag_draw, "animatorsPencilShortcutDragDraw"),
+            ("marquee_select", self._activate_marquee_select, "animatorsPencilShortcutMarquee"),
+            ("erase_selected", lambda: self._after_action(self.controller.delete_selected_marks()), "animatorsPencilShortcutErase"),
+            ("toggle_translucent", lambda: self._after_action(self.controller.toggle_marks_translucent(self.current_layer)), "animatorsPencilShortcutTranslucent"),
+        )
+        for action_name, callback, object_name in shortcut_specs:
+            key_text = bindings.get(action_name)
+            if not key_text:
+                continue
+            try:
+                shortcut = shortcut_type(QtGui.QKeySequence(key_text), self)
+                shortcut.setObjectName(object_name)
+                shortcut_context = _qt_flag("ShortcutContext", "WidgetWithChildrenShortcut")
+                if shortcut_context is not None:
+                    shortcut.setContext(shortcut_context)
+                shortcut.setAutoRepeat(False)
+                shortcut.activated.connect(lambda _callback=callback: self._run_panel_shortcut(_callback))
+                self._shortcuts[action_name] = shortcut
+            except Exception:
+                continue
 
     def _build_tool_menu(self, tool_names):
         menu = QtWidgets.QMenu(self)
@@ -1694,7 +1851,30 @@ def run_smoke_scene():
         points=[(-1.1, -0.55, 0.0), (-0.75, -0.25, 0.0), (-0.35, -0.5, 0.0), (0.15, -0.2, 0.0), (0.55, -0.45, 0.0)],
     )
     marquee_selected = controller.select_marks_in_box(layer, (-1.35, -0.3, 0.0), (-0.05, 0.95, 0.0))
+    cmds.select(line, replace=True)
+    viewport_move_ok = controller.activate_viewport_transform("move")
+    viewport_move_context = cmds.currentCtx()
+    viewport_rotate_ok = controller.activate_viewport_transform("rotate")
+    viewport_rotate_context = cmds.currentCtx()
+    viewport_scale_ok = controller.activate_viewport_transform("scale")
+    viewport_scale_context = cmds.currentCtx()
+    viewport_transform_selection_count = len(controller.selected_marks())
+    translucent_on = controller.toggle_marks_translucent(layer)
+    translucent_display_types = [
+        int(cmds.getAttr(shape + ".overrideDisplayType"))
+        for shape in _mark_shapes(line)
+        if cmds.objExists(shape + ".overrideDisplayType")
+    ]
+    translucent_off = controller.toggle_marks_translucent(layer)
+    opaque_display_types = [
+        int(cmds.getAttr(shape + ".overrideDisplayType"))
+        for shape in _mark_shapes(line)
+        if cmds.objExists(shape + ".overrideDisplayType")
+    ]
     text = controller.create_mark("Text", layer, DEFAULT_COLORS["White"], 2.0, 1.0, text="Animators Pencil")
+    delete_target = controller.create_mark("Line", layer, DEFAULT_COLORS["Black"], 2.0, 1.0)
+    cmds.select(delete_target, replace=True)
+    controller.delete_selected_marks()
     controller.add_key()
     dupes = controller.duplicate_previous_key(layer)
     ghosts = controller.make_ghosts(layer, before=3, after=3)
@@ -1710,6 +1890,19 @@ def run_smoke_scene():
         "freehand": freehand,
         "freehand_point_count": _get_json_attr(freehand, "animatorsPencilMarkData", {}).get("freehandPointCount") if freehand and cmds.objExists(freehand) else 0,
         "marquee_select_count": len(marquee_selected),
+        "viewport_move_ok": viewport_move_ok,
+        "viewport_move_context": viewport_move_context,
+        "viewport_rotate_ok": viewport_rotate_ok,
+        "viewport_rotate_context": viewport_rotate_context,
+        "viewport_scale_ok": viewport_scale_ok,
+        "viewport_scale_context": viewport_scale_context,
+        "viewport_transform_selection_count": viewport_transform_selection_count,
+        "translucent_on": translucent_on,
+        "translucent_display_types": translucent_display_types,
+        "translucent_off": translucent_off,
+        "opaque_display_types": opaque_display_types,
+        "default_shortcuts": controller.default_shortcut_bindings(),
+        "delete_selected_removed_mark": bool(delete_target and not cmds.objExists(delete_target)),
         "drag_shape_bounds": _get_json_attr(dragged_rect, "animatorsPencilMarkData", {}).get("dragBounds") if dragged_rect and cmds.objExists(dragged_rect) else [],
         "text": text,
         "dupe_count": len(dupes),

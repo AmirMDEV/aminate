@@ -30,9 +30,16 @@ The sections in regular use in this beta are:
 
 Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
 
-`Version 0.3.4`
+`Version 0.3.5 Beta`
 
-## What Is New In 0.3.4
+## What Is New In 0.3.5 Beta
+
+- Release packaging now has stronger static audit coverage, including runtime package parity, installed Maya runtime checks, release ZIP payload hash checks, stale-evidence detection, and report indexing for Maya-family verification evidence.
+- Smear Frames were re-tested against the installed Aminate runtime on Amanda, not only repo modules. The edit handoff now proves selected target vertices can be moved in Maya, active morph/VAT targets isolate correctly, and installed package hashes match the release payload.
+- Aminate dock and Toolkit Bar stability were tightened for normal Maya use: Aminate docks at a usable width, the old global `S` key filter is opt-in, the Toolkit Bar docks to Maya's bottom layout, hover behavior uses safer native tooltips, and existing panels are reused instead of rebuilt where possible.
+- The package release process now tracks `Aminate_v0.3.5.zip` from the manifest tag so future beta releases do not keep stale ZIP names.
+
+## What Was New In 0.3.4
 
 - `Timeline Notes` now draw colored note ranges directly over Maya's time slider, with customizable range-bar height.
 - Timeline note hovers now use a translucent Aminate bubble that fades in and shows the full formatted note, title, and frame range.
@@ -78,7 +85,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 ## Install
 
-1. Download `Aminate_v0.3.4.zip` from the latest release.
+1. Download `Aminate_v0.3.5.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.

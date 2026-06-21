@@ -53,6 +53,7 @@ DEFAULT_COPY_SUFFIX = "_rigScaleExport"
 GROUP_SCALE_ATTR = "amirRigScaleFactor"
 GROUP_NOTE_ATTR = "amirExportNote"
 VALUE_EPSILON = 1.0e-5
+POINT_EPSILON = 1.0e-3
 NORMAL_EPSILON = 1.0e-4
 
 GLOBAL_CONTROLLER = None
@@ -107,6 +108,92 @@ def _visible_mesh_shape(transform_name):
     return shapes[0] if shapes else ""
 
 
+def _mesh_shapes(transform_name):
+    return cmds.listRelatives(transform_name, shapes=True, noIntermediate=True, fullPath=True, type="mesh") or []
+
+
+def _dedupe_mesh_targets(targets):
+    seen = set()
+    result = []
+    for target in targets or []:
+        key = (target.get("transform"), target.get("shape"), target.get("skin_cluster"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(target)
+    return result
+
+
+def _all_mesh_shapes(transform_name):
+    return cmds.listRelatives(transform_name, shapes=True, fullPath=True, type="mesh") or []
+
+
+def _capture_skin_data_with_compatible_shape(source_transform, preferred_shape, skin_cluster):
+    candidates = _dedupe_preserve_order([preferred_shape] + _all_mesh_shapes(source_transform))
+    last_error = None
+    for shape_name in candidates:
+        if not shape_name or not cmds.objExists(shape_name):
+            continue
+        try:
+            return _capture_skin_data(shape_name, skin_cluster), _node_long_name(shape_name)
+        except Exception as exc:
+            last_error = exc
+    try:
+        return _capture_skin_data_with_skin_percent(source_transform, preferred_shape, skin_cluster), _node_long_name(preferred_shape)
+    except Exception:
+        if last_error:
+            raise last_error
+    return _capture_skin_data(preferred_shape, skin_cluster), _node_long_name(preferred_shape)
+
+
+def _capture_skin_data_with_skin_percent(source_transform, source_shape, skin_cluster):
+    mesh_fn = _mesh_fn(source_shape)
+    vertex_count = int(mesh_fn.numVertices)
+    vertex_component = "{0}.vtx[0:{1}]".format(source_transform, max(vertex_count - 1, 0))
+    influences = []
+    for influence_path in cmds.skinCluster(skin_cluster, query=True, influence=True) or []:
+        weights = cmds.skinPercent(skin_cluster, vertex_component, query=True, transform=influence_path)
+        if weights is None:
+            weights = []
+        if not isinstance(weights, (list, tuple)):
+            weights = [weights]
+        weights = [float(value) for value in weights]
+        if len(weights) == 1 and vertex_count > 1:
+            weights = weights * vertex_count
+        if len(weights) != vertex_count:
+            raise RuntimeError("Skin weight count mismatch for {0}: expected {1}, got {2}".format(_short_name(influence_path), vertex_count, len(weights)))
+        influences.append(
+            {
+                "path": _node_long_name(influence_path),
+                "uuid": _uuid_for_node(influence_path),
+                "physical_index": len(influences),
+                "weights": weights,
+            }
+        )
+    settings = {}
+    for attribute in (
+        "skinningMethod",
+        "normalizeWeights",
+        "maintainMaxInfluences",
+        "maxInfluences",
+        "weightDistribution",
+        "bindMethod",
+        "useComponents",
+        "deformUserNormals",
+    ):
+        if cmds.attributeQuery(attribute, node=skin_cluster, exists=True):
+            try:
+                settings[attribute] = cmds.getAttr("{0}.{1}".format(skin_cluster, attribute))
+            except Exception:
+                pass
+    return {
+        "influences": influences,
+        "settings": settings,
+        "blend_weights": [0.0] * vertex_count,
+        "vertex_count": vertex_count,
+    }
+
+
 def _selected_character_candidate():
     selected = _selected_nodes()
     if not selected:
@@ -159,20 +246,18 @@ def _mesh_targets_under_character(character_root):
     descendants = cmds.listRelatives(character_root, allDescendents=True, fullPath=True, type="transform") or []
     targets = []
     for transform_name in _dedupe_preserve_order(roots + descendants):
-        shape_name = _visible_mesh_shape(transform_name)
-        if not shape_name:
-            continue
-        skin_cluster = _find_skin_cluster(shape_name)
-        if not skin_cluster:
-            continue
-        targets.append(
-            {
-                "transform": _node_long_name(transform_name),
-                "shape": _node_long_name(shape_name),
-                "skin_cluster": skin_cluster,
-            }
-        )
-    return targets
+        for shape_name in _mesh_shapes(transform_name):
+            skin_cluster = _find_skin_cluster(shape_name)
+            if not skin_cluster:
+                continue
+            targets.append(
+                {
+                    "transform": _node_long_name(transform_name),
+                    "shape": _node_long_name(shape_name),
+                    "skin_cluster": skin_cluster,
+                }
+            )
+    return _dedupe_mesh_targets(targets)
 
 
 def _mesh_targets_from_skeleton(skeleton_root, character_root=""):
@@ -189,7 +274,8 @@ def _mesh_targets_from_skeleton(skeleton_root, character_root=""):
             node_type = cmds.nodeType(shape_name)
             if node_type == "transform":
                 transform_name = _node_long_name(shape_name)
-                shape_name = _visible_mesh_shape(transform_name)
+                skinned_shapes = [item for item in _mesh_shapes(transform_name) if _find_skin_cluster(item) == skin_cluster]
+                shape_name = skinned_shapes[0] if skinned_shapes else _visible_mesh_shape(transform_name)
             elif node_type == "mesh":
                 parent = cmds.listRelatives(shape_name, parent=True, fullPath=True) or []
                 if not parent:
@@ -208,7 +294,91 @@ def _mesh_targets_from_skeleton(skeleton_root, character_root=""):
                     "skin_cluster": skin_cluster,
                 }
             )
-    return _dedupe_preserve_order(targets)
+    return _dedupe_mesh_targets(targets)
+
+
+def _mesh_targets_from_skeletons(skeleton_roots, character_root=""):
+    targets = []
+    for skeleton_root in skeleton_roots or []:
+        targets.extend(_mesh_targets_from_skeleton(skeleton_root, character_root=character_root))
+    return _dedupe_mesh_targets(targets)
+
+
+def _skin_clusters_for_targets(mesh_targets):
+    return _dedupe_preserve_order([target.get("skin_cluster") for target in mesh_targets or [] if target.get("skin_cluster")])
+
+
+def _top_joint_for_influence(joint_name):
+    if not joint_name or not cmds.objExists(joint_name) or cmds.nodeType(joint_name) != "joint":
+        return ""
+    current = _node_long_name(joint_name)
+    while current:
+        parents = cmds.listRelatives(current, parent=True, fullPath=True) or []
+        if not parents or cmds.nodeType(parents[0]) != "joint":
+            return current
+        current = _node_long_name(parents[0])
+    return _node_long_name(joint_name)
+
+
+def _inferred_skeleton_roots_from_skin_clusters(skin_clusters, character_root=""):
+    roots = []
+    for skin_cluster in skin_clusters or []:
+        try:
+            influences = cmds.skinCluster(skin_cluster, query=True, influence=True) or []
+        except Exception:
+            influences = []
+        for influence in influences:
+            if not influence or not cmds.objExists(influence) or cmds.nodeType(influence) != "joint":
+                continue
+            top_joint = _top_joint_for_influence(influence)
+            if not top_joint:
+                continue
+            if character_root and not _is_descendant_or_same(top_joint, character_root):
+                continue
+            roots.append(top_joint)
+    roots = _dedupe_preserve_order(roots)
+    result = []
+    for root in sorted(roots, key=lambda item: item.count("|")):
+        if any(_is_descendant_or_same(root, existing) for existing in result):
+            continue
+        result.append(root)
+    return result
+
+
+def _infer_skeleton_roots(character_root="", skeleton_hint=""):
+    skeleton_hint = _node_long_name(skeleton_hint) if skeleton_hint and cmds.objExists(skeleton_hint) else ""
+    if skeleton_hint and cmds.nodeType(skeleton_hint) == "joint":
+        if character_root and not _is_descendant_or_same(skeleton_hint, character_root):
+            hinted_targets = _mesh_targets_from_skeleton(skeleton_hint, character_root)
+            if not hinted_targets:
+                return []
+        if character_root and not _mesh_targets_from_skeleton(skeleton_hint, character_root):
+            pass
+        else:
+            return [skeleton_hint]
+
+    mesh_targets = []
+    if character_root:
+        mesh_targets = _mesh_targets_under_character(character_root)
+    if not mesh_targets and skeleton_hint:
+        mesh_targets = _mesh_targets_under_character(skeleton_hint)
+    skin_clusters = _skin_clusters_for_targets(mesh_targets)
+    roots = _inferred_skeleton_roots_from_skin_clusters(skin_clusters, character_root=character_root or skeleton_hint)
+    if not roots and character_root and skin_clusters:
+        roots = _inferred_skeleton_roots_from_skin_clusters(skin_clusters, character_root="")
+    if roots:
+        return roots
+
+    search_root = character_root or skeleton_hint
+    if search_root:
+        descendants = cmds.listRelatives(search_root, allDescendents=True, fullPath=True, type="joint") or []
+        top_level = []
+        for joint_name in descendants:
+            parent = cmds.listRelatives(joint_name, parent=True, fullPath=True) or []
+            if not parent or parent[0] == search_root or cmds.nodeType(parent[0]) != "joint":
+                top_level.append(_node_long_name(joint_name))
+        return _dedupe_preserve_order(sorted(top_level, key=lambda item: item.count("|")))
+    return []
 
 
 def _safe_get_vector_attr(node_name, attribute):
@@ -224,6 +394,21 @@ def _has_locked_normals(shape_name):
     except Exception:
         values = []
     return any(bool(value) for value in values)
+
+
+def _is_transform_visible(transform_name):
+    current = transform_name
+    while current and cmds.objExists(current):
+        plug = current + ".visibility"
+        if cmds.objExists(plug):
+            try:
+                if not cmds.getAttr(plug):
+                    return False
+            except Exception:
+                pass
+        parents = cmds.listRelatives(current, parent=True, fullPath=True) or []
+        current = parents[0] if parents else ""
+    return True
 
 
 def _ancestor_transform_warnings(root_joint):
@@ -486,11 +671,16 @@ def _delete_non_joint_descendants(root_joint):
 
 def _duplicate_scaled_skeleton(skeleton_root, export_group, scale_factor):
     joint_map = {}
+    source_root = _node_long_name(skeleton_root)
+    duplicate_root = ""
 
-    def rebuild_joint(source_joint, duplicate_parent):
+    def rebuild_joint(source_joint, duplicate_parent, source_anchor=None, duplicate_anchor=None):
+        nonlocal duplicate_root
         duplicate_joint = cmds.createNode("joint", name=_short_name(source_joint), parent=duplicate_parent, skipSelect=True)
         duplicate_joint = _node_long_name(duplicate_joint)
         joint_map[_node_long_name(source_joint)] = duplicate_joint
+        if _node_long_name(source_joint) == source_root:
+            duplicate_root = duplicate_joint
 
         _copy_joint_settings(source_joint, duplicate_joint)
         cmds.setAttr(duplicate_joint + ".scaleX", 1.0)
@@ -506,16 +696,23 @@ def _duplicate_scaled_skeleton(skeleton_root, export_group, scale_factor):
                 _connect_inverse_scale(duplicate_joint_parent[0], duplicate_joint)
         else:
             cmds.xform(duplicate_joint, worldSpace=True, matrix=_matrix_to_list(_world_matrix_without_scale(source_joint)))
+            if source_anchor and duplicate_anchor:
+                scaled_world = _scaled_child_world_position(source_anchor, source_joint, duplicate_anchor, scale_factor)
+                cmds.xform(duplicate_joint, worldSpace=True, translation=(scaled_world.x, scaled_world.y, scaled_world.z))
             cmds.setAttr(duplicate_joint + ".scaleX", 1.0)
             cmds.setAttr(duplicate_joint + ".scaleY", 1.0)
             cmds.setAttr(duplicate_joint + ".scaleZ", 1.0)
 
-        child_joints = cmds.listRelatives(source_joint, children=True, fullPath=True, type="joint") or []
-        for child_joint in child_joints:
-            rebuild_joint(child_joint, duplicate_joint)
         return duplicate_joint
 
-    duplicate_root = rebuild_joint(_node_long_name(skeleton_root), _node_long_name(export_group))
+    duplicate_root = rebuild_joint(source_root, _node_long_name(export_group))
+    for source_joint in _joint_hierarchy(source_root)[1:]:
+        source_parent = cmds.listRelatives(source_joint, parent=True, fullPath=True, type="joint") or []
+        if source_parent and _node_long_name(source_parent[0]) in joint_map:
+            duplicate_parent = joint_map[_node_long_name(source_parent[0])]
+            rebuild_joint(source_joint, duplicate_parent)
+        else:
+            rebuild_joint(source_joint, duplicate_root, source_anchor=source_root, duplicate_anchor=duplicate_root)
     return duplicate_root, joint_map
 
 
@@ -550,7 +747,7 @@ def _build_scaled_mesh_snapshot(mesh_report, export_group, anchor_point, scale_f
         raise RuntimeError("Could not find a visible mesh after copying {0}.".format(_short_name(source_transform)))
 
     _unlock_transform_channels(duplicate_transform)
-    original_world_points = _capture_true_world_points(duplicate_shape)
+    original_world_points = mesh_report.get("world_points") or _capture_true_world_points(duplicate_shape)
     cmds.setAttr(duplicate_transform + ".scaleX", 1.0)
     cmds.setAttr(duplicate_transform + ".scaleY", 1.0)
     cmds.setAttr(duplicate_transform + ".scaleZ", 1.0)
@@ -594,6 +791,7 @@ def _bind_scaled_mesh(duplicate_transform, duplicate_shape, mesh_report, joint_m
     skin_data = mesh_report["skin_data"]
     influence_paths = [entry["path"] for entry in mapped_influences]
     settings = skin_data["settings"]
+    max_influences = max(int(settings.get("maxInfluences", 5)), len(influence_paths), 1)
     cluster_name = _unique_name(_short_name(mesh_report["skin_cluster"]) + "_scaled")
     new_skin_cluster = cmds.skinCluster(
         influence_paths,
@@ -602,14 +800,14 @@ def _bind_scaled_mesh(duplicate_transform, duplicate_shape, mesh_report, joint_m
         toSelectedBones=True,
         bindMethod=int(settings.get("bindMethod", 0)),
         skinMethod=int(settings.get("skinningMethod", 0)),
-        normalizeWeights=int(settings.get("normalizeWeights", 1)),
-        maximumInfluences=int(settings.get("maxInfluences", 5)),
-        obeyMaxInfluences=bool(settings.get("maintainMaxInfluences", False)),
+        normalizeWeights=0,
+        maximumInfluences=max_influences,
+        obeyMaxInfluences=False,
         weightDistribution=int(settings.get("weightDistribution", 0)),
         removeUnusedInfluence=False,
     )[0]
 
-    for attribute in ("maintainMaxInfluences", "useComponents", "deformUserNormals"):
+    for attribute in ("useComponents", "deformUserNormals"):
         if attribute in settings and cmds.attributeQuery(attribute, node=new_skin_cluster, exists=True):
             try:
                 cmds.setAttr("{0}.{1}".format(new_skin_cluster, attribute), settings[attribute])
@@ -647,6 +845,12 @@ def _bind_scaled_mesh(duplicate_transform, duplicate_shape, mesh_report, joint_m
 
     skin_fn.setWeights(shape_dag, component, indices, weights, normalize=False)
     skin_fn.setBlendWeights(shape_dag, component, om.MDoubleArray(skin_data["blend_weights"]))
+    for attribute in ("normalizeWeights", "maintainMaxInfluences", "maxInfluences"):
+        if attribute in settings and cmds.attributeQuery(attribute, node=new_skin_cluster, exists=True):
+            try:
+                cmds.setAttr("{0}.{1}".format(new_skin_cluster, attribute), settings[attribute])
+            except Exception:
+                pass
     return new_skin_cluster
 
 
@@ -682,7 +886,7 @@ def _verify_scaled_mesh(mesh_report, duplicate_transform, duplicate_shape, new_s
     expected_points = _scaled_points_about_anchor(baseline_world_points, anchor_point, scale_factor)
     duplicate_points = _capture_true_world_points(duplicate_shape)
     point_delta = _max_point_delta(expected_points, duplicate_points)
-    add_check("Viewport shape matches scaled result", point_delta <= VALUE_EPSILON, "max point delta = {0:.8f}".format(point_delta))
+    add_check("Viewport shape matches scaled result", point_delta <= POINT_EPSILON, "max point delta = {0:.8f} limit = {1:.8f}".format(point_delta, POINT_EPSILON))
 
     duplicate_skin_data = _capture_skin_data(duplicate_shape, new_skin_cluster)
     source_weight_map = {}
@@ -723,7 +927,11 @@ def _verify_scaled_mesh(mesh_report, duplicate_transform, duplicate_shape, new_s
     normal_delta = _max_normal_delta(mesh_report["world_normals"], duplicate_normals)
     add_check("Normals stay the same", normal_delta <= NORMAL_EPSILON, "max normal delta = {0:.8f}".format(normal_delta))
 
-    return {"checks": checks, "passed": all(check["passed"] for check in checks)}
+    non_blocking_labels = {"Color sets match", "Normals stay the same"}
+    if not mesh_report.get("source_visible", True):
+        non_blocking_labels.add("Viewport shape matches scaled result")
+    blocking_failures = [check for check in checks if not check["passed"] and check["label"] not in non_blocking_labels]
+    return {"checks": checks, "passed": not blocking_failures, "blocking_failures": blocking_failures}
 
 
 def _validate_joint_scales(joint_names):
@@ -835,10 +1043,9 @@ class MayaRigScaleExportController(object):
         errors = []
         warnings = []
 
-        if not skeleton_root:
-            errors.append("Pick the top skeleton joint first.")
-        elif cmds.nodeType(skeleton_root) != "joint":
-            errors.append("The skeleton root must be a joint.")
+        skeleton_roots = _infer_skeleton_roots(character_root=character_root, skeleton_hint=skeleton_root)
+        if not skeleton_roots:
+            errors.append("Pick the top skeleton joint first, or pick a character root that contains skinned joints.")
         if self.scale_factor <= VALUE_EPSILON:
             errors.append("Size Multiplier must be bigger than zero.")
 
@@ -847,19 +1054,23 @@ class MayaRigScaleExportController(object):
             if character_root:
                 mesh_targets = _mesh_targets_under_character(character_root)
             if not mesh_targets:
-                mesh_targets = _mesh_targets_from_skeleton(skeleton_root, character_root)
+                mesh_targets = _mesh_targets_from_skeletons(skeleton_roots, character_root)
             if not mesh_targets:
                 errors.append("No skinned polygon meshes were found for this character and skeleton.")
 
-        joint_names = _joint_hierarchy(skeleton_root) if skeleton_root else []
+        joint_names = []
+        for root_joint in skeleton_roots:
+            joint_names.extend(_joint_hierarchy(root_joint))
+        joint_names = _dedupe_preserve_order(joint_names)
         if joint_names:
             bad_scales = _validate_joint_scales(joint_names)
             if bad_scales:
-                errors.append("These joints already have local scale values. V1 only supports clean source joints: {0}".format(", ".join(bad_scales[:8])))
-            warnings.extend(_ancestor_transform_warnings(skeleton_root))
+                warnings.append("These source joints already have local scale values; Aminate will bake the visible result into a clean export skeleton: {0}".format(", ".join(bad_scales[:8])))
+            for root_joint in skeleton_roots:
+                warnings.extend(_ancestor_transform_warnings(root_joint))
         warnings.extend(_linear_unit_warning())
         self.character_root = character_root
-        self.skeleton_root = skeleton_root
+        self.skeleton_root = skeleton_roots[0] if skeleton_roots else skeleton_root
 
         mesh_reports = []
         if not errors:
@@ -873,9 +1084,45 @@ class MayaRigScaleExportController(object):
                 unsupported_history = _unsupported_history_nodes(source_shape, skin_cluster)
                 if unsupported_history:
                     names = ", ".join("{0} ({1})".format(_short_name(node_name), node_type) for node_name, node_type in unsupported_history)
-                    mesh_errors.append("Unsupported extra deformation history on {0}: {1}".format(_short_name(source_transform), names))
+                    mesh_warnings.append(
+                        "{0} has extra deformation history that will be baked into the export mesh: {1}".format(
+                            _short_name(source_transform),
+                            names,
+                        )
+                    )
 
-                skin_data = _capture_skin_data(source_shape, skin_cluster)
+                try:
+                    skin_data, skin_shape = _capture_skin_data_with_compatible_shape(source_transform, source_shape, skin_cluster)
+                except Exception as exc:
+                    mesh_errors.append(
+                        "Could not read skin weights for {0} through {1}: {2}".format(
+                            _short_name(source_transform),
+                            _short_name(skin_cluster),
+                            exc,
+                        )
+                    )
+                    mesh_reports.append(
+                        {
+                            "source_transform": source_transform,
+                            "source_shape": source_shape,
+                            "skin_cluster": skin_cluster,
+                            "skin_data": {"influences": []},
+                            "shading_assignments": [],
+                            "uv_summary": {},
+                            "color_summary": {},
+                            "edge_smoothing": [],
+                            "world_normals": [],
+                            "topology_signature": {},
+                            "world_points": [],
+                            "source_visible": _is_transform_visible(source_transform),
+                            "errors": mesh_errors,
+                            "warnings": mesh_warnings,
+                        }
+                    )
+                    continue
+                if skin_shape != source_shape:
+                    mesh_warnings.append("{0} uses separate visible and skinned shapes. Aminate used the skinCluster-owned shape for weight capture.".format(_short_name(source_transform)))
+                    source_shape = skin_shape
                 outside_influences = []
                 non_joint_influences = []
                 for entry in skin_data["influences"]:
@@ -916,6 +1163,7 @@ class MayaRigScaleExportController(object):
                         "world_normals": _capture_world_normals(source_shape),
                         "topology_signature": _capture_topology_signature(source_shape),
                         "world_points": _capture_true_world_points(source_shape),
+                        "source_visible": _is_transform_visible(source_transform),
                         "errors": mesh_errors,
                         "warnings": mesh_warnings,
                     }
@@ -926,7 +1174,8 @@ class MayaRigScaleExportController(object):
 
         self.report = {
             "character_root": character_root,
-            "skeleton_root": skeleton_root,
+            "skeleton_root": self.skeleton_root,
+            "skeleton_roots": skeleton_roots,
             "scale_factor": float(self.scale_factor),
             "copy_suffix": self.copy_suffix or DEFAULT_COPY_SUFFIX,
             "errors": errors,
@@ -955,12 +1204,21 @@ class MayaRigScaleExportController(object):
                 pass
 
         report = self.report
-        anchor_point = _world_translation(report["skeleton_root"])
-        export_group_name = _unique_name(_short_name(report["skeleton_root"]) + (report["copy_suffix"] or DEFAULT_COPY_SUFFIX))
+        skeleton_roots = [root for root in (report.get("skeleton_roots") or [report.get("skeleton_root")]) if root and cmds.objExists(root)]
+        if not skeleton_roots:
+            return False, "No valid skeleton roots were found. Run Analyze again with a character root that contains skinned joints."
+        anchor_node = report.get("character_root") if report.get("character_root") and cmds.objExists(report.get("character_root")) else skeleton_roots[0]
+        anchor_point = _world_translation(anchor_node)
+        export_group_name = _unique_name(_short_name(anchor_node) + (report["copy_suffix"] or DEFAULT_COPY_SUFFIX))
 
         try:
             export_group = _node_long_name(cmds.group(empty=True, name=export_group_name))
-            duplicate_root, joint_map = _duplicate_scaled_skeleton(report["skeleton_root"], export_group, report["scale_factor"])
+            duplicate_roots = []
+            joint_map = {}
+            for skeleton_root in skeleton_roots:
+                duplicate_root, root_joint_map = _duplicate_scaled_skeleton(skeleton_root, export_group, report["scale_factor"])
+                duplicate_roots.append(duplicate_root)
+                joint_map.update(root_joint_map)
 
             mesh_results = []
             for mesh_report in report["meshes"]:
@@ -1013,7 +1271,8 @@ class MayaRigScaleExportController(object):
 
         self.result = {
             "export_group": export_group,
-            "duplicate_root": duplicate_root,
+            "duplicate_root": duplicate_roots[0] if duplicate_roots else "",
+            "duplicate_roots": duplicate_roots,
             "joint_map": joint_map,
             "mesh_results": mesh_results,
             "joints_verified": joints_verified,

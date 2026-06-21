@@ -13,6 +13,7 @@ DEFAULT_MANIFEST_FILE_NAME = "manifest.json"
 DEFAULT_RUNTIME_FILES = [
     "maya_anim_workflow_tools.py",
     "maya_anim_workflow_tools_package_manifest.py",
+    "maya_aminate_customization.py",
     "maya_animation_assistant.py",
     "maya_animation_styling.py",
     "maya_animators_pencil.py",
@@ -31,15 +32,28 @@ DEFAULT_RUNTIME_FILES = [
     "maya_shelf_utils.py",
     "maya_skin_transfer.py",
     "maya_skinning_cleanup.py",
+    "maya_smear_frames.py",
     "maya_surface_contact.py",
     "maya_timeline_notes.py",
     "maya_timing_tools.py",
     "maya_universal_ikfk_switcher.py",
     "maya_video_reference_tool.py",
+    "combine_freeze_pivot_icon.png",
     "game_animation_mode_icon.png",
     "maya_anim_workflow_tools_icon.png",
+    "toolkit_bake_twos_icon.png",
+    "toolkit_clean_static_icon.png",
+    "toolkit_cut_key_icon.png",
+    "toolkit_insert_inbetween_icon.png",
+    "toolkit_nudge_left_icon.png",
+    "toolkit_nudge_right_icon.png",
+    "toolkit_package_zip_icon.png",
+    "toolkit_reset_pose_icon.png",
+    "toolkit_select_animated_icon.png",
+    "toolkit_tween_machine_icon.png",
 ]
 DEFAULT_STATIC_DIRS = [
+    "branding",
     "docs",
 ]
 
@@ -49,6 +63,7 @@ def _managed_user_setup_block(destination_root):
         [
             "try:",
             "    import sys",
+            "    import os",
             "    import importlib",
             "    import maya.cmds as _amir_maya_cmds",
             "    import maya.utils as _amir_maya_utils",
@@ -99,11 +114,12 @@ def _managed_user_setup_block(destination_root):
             "            _amir_maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=True)",
             "        except Exception:",
             "            pass",
-            "        try:",
-            "            import maya_anim_workflow_tools as _amir_maya_anim_workflow_tools",
-            "            _amir_maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab='quick_start')",
-            "        except Exception:",
-            "            pass",
+            "        if os.environ.get('AMINATE_AUTO_OPEN_ON_MAYA_STARTUP') == '1':",
+            "            try:",
+            "                import maya_anim_workflow_tools as _amir_maya_anim_workflow_tools",
+            "                _amir_maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab='quick_start')",
+            "            except Exception:",
+            "                pass",
             "    def _amir_workflow_wait_for_startup(attempt=0):",
             "        if int(attempt) >= 8 and _amir_workflow_main_window_ready():",
             "            _amir_workflow_bootstrap_startup()",
@@ -247,7 +263,6 @@ def install_maya_anim_workflow_tools_from_dragdrop():
         sys.path.remove(destination_root)
     sys.path.insert(0, destination_root)
 
-    import importlib
     for stale_module_name in ("maya_dynamic_parent_pivot", "maya_anim_workflow_tools"):
         stale_module = sys.modules.get(stale_module_name)
         if stale_module:
@@ -258,17 +273,12 @@ def install_maya_anim_workflow_tools_from_dragdrop():
                     stale_close()
                 except Exception:
                     pass
-    for module_name in list(sys.modules):
-        if module_name == "maya_anim_workflow_tools" or module_name.startswith("maya_"):
-            sys.modules.pop(module_name, None)
-    importlib.invalidate_caches()
     import maya_anim_workflow_tools
 
-    importlib.reload(maya_anim_workflow_tools)
     import maya_crash_recovery
-    importlib.reload(maya_crash_recovery)
-    _ensure_user_setup_hook(cmds, destination_root)
-    maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=False)
+    if os.environ.get("AMINATE_ENABLE_STARTUP_RECOVERY") == "1":
+        _ensure_user_setup_hook(cmds, destination_root)
+        maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=False)
     button_name = maya_anim_workflow_tools.install_maya_anim_workflow_tools_shelf_button(repo_path=destination_root)
     window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True)
     version = manifest.get("version") or "unknown"

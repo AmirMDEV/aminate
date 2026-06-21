@@ -1,4 +1,7 @@
 __pycache__/
+maya_aminate_heavy_rig_perf_result.json
+maya_onion_skin_gui_perf_result.json
+aminate_feature_contract_result.json
 *.pyc
 release_package/*.zip
 _codex_tmp_*

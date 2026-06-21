@@ -1,7 +1,31 @@
 # Changelog
 
+## Version 0.3.5 Beta - 2026-06-21
+
+- Bumped Aminate beta package metadata, UI labels, README install copy, and release ZIP naming to `Version 0.3.5 Beta` / `v0.3.5`.
+- Made release ZIP paths derive from the manifest tag so future package parity checks, completion matrix evidence, and build outputs follow the current release automatically.
+- Added the runtime package parity unit test to the static release audit so the ZIP payload hash guard is checked as part of release readiness.
+- Published the latest private Smear Frames, docking, Toolkit Bar, report-index, stale-evidence, release-audit, installed-runtime parity, and package ZIP parity work as the 0.3.5 beta public-facing update.
+
 ## Version 0.3.4 - 2026-05-08
 
+- Added an Aminate report indexer that summarizes tracked verification reports by type, age, pass/fail status, dry-run state, crash-health fields, screenshot path coverage, stale status, and expected negative guard reports.
+- Added CSV output to the Aminate report indexer so release and stability audits can filter report type, age, pass/fail state, stale status, crash-health fields, and screenshot coverage in spreadsheet tools.
+- Tightened the Aminate report index screenshot audit so optional screenshot paths with matching `*_screenshot_saved: false` are tracked as configured-but-unsaved instead of false missing screenshot evidence.
+- Added screenshot proof-state fields to the Aminate report index so audits distinguish saved claimed screenshots, configured-unsaved paths, legacy unqualified paths, and missing claimed screenshots.
+- Added Maya vs MotionBuilder family classification and `--family` filtering to the Aminate report index so Maya release audits can exclude older MoBu smoke reports without deleting their history.
+- Made the Aminate report index default to the Maya family while preserving `--family all` for mixed Maya/MotionBuilder history, with a static guard for family classification.
+- Hardened the Aminate completion gate with evidence file age metadata plus an optional `--max-age-days` stale-proof guard and `--report` output override for non-destructive audit runs.
+- Added a static Aminate release audit wrapper that compiles audit scripts, runs static guards, checks completion evidence freshness, refreshes a Maya-family release report index, and writes combined JSON/Markdown release-decision reports without launching Maya.
+- Added a release-audit static regression test that guards stale-only release decisions, blocked failure states, and prevents static audit JSON outputs from indexing themselves as verification reports.
+- Added expected dry-run guard classification to the Aminate report index and release audit so deliberate dry-run safety reports are separated from unexpected dry-run evidence.
+- Added a read-only Aminate runtime package parity static test that detects release-package and installed-copy drift, then synced the installed Maya `Aminate` runtime back to the current release payload.
+- Hardened Aminate JSON report loaders to accept UTF-8 BOM files, preventing Windows-written reports from being misclassified as invalid JSON.
+- Added `--installed-root` to the static release audit so package parity can include the current installed Maya `Aminate` runtime when release or shelf-path confidence needs it.
+- Made the runtime package parity check write a stable JSON artifact so release audits preserve package/install drift evidence without feeding it back into the `*report.json` index.
+- Added optional legacy installed-runtime detection to the package parity guard so old `AmirMayaAnimWorkflowTools` folders can be warned on or release-blocked deliberately.
+- Surfaced runtime package parity warning counts in the top-level static release audit so legacy runtime drift is visible without opening the parity artifact separately.
+- Extended the runtime package parity guard to verify `Aminate_v0.3.4.zip` hashes against repo source files and the drag-and-drop installer, catching stale release ZIP payloads.
 - Re-tested Smear Frames against the installed Aminate runtime, not just the repo modules. The verifier now supports `--module-root`, the suite forwards it, the installed Amanda GUI proof moves selected target vertices after Edit Target In Viewport, isolates the active morph/VAT target, confirms repo/package/installed runtime hash parity, and avoids parallel Maya GUI sessions after an Autodesk ADP crash event was caught when testing beside an open Maya session.
 - Improved Smear Frames editability: selected mesh vertices now become the smear mask, generated smears store that vertex set, Edit Target In Viewport unlocks the editable target and selects those vertices for direct component editing, and VAT editing hides non-active target frames so only the active smeared frame is visible.
 - Added a step-by-step Smear Frames Amanda rig test. It runs in a sacrificial Maya GUI session, duplicates Amanda's `body_geo` as the disposable animated source, then proves Static Mesh, Unreal Morph Target, Unreal Morph Sequence/VAT, viewport edit handoff, cleanup, and crash-health status step by step.

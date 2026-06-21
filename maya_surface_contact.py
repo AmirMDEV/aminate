@@ -449,6 +449,28 @@ def _set_constraint_enabled(constraint_nodes, enabled):
                 pass
 
 
+def _record_enabled_has_anim(record_node):
+    plug = "{0}.{1}".format(record_node, SURFACE_CONTACT_ENABLED_ATTR)
+    try:
+        return bool(cmds.listConnections(plug, source=True, destination=False, type="animCurve") or [])
+    except Exception:
+        return False
+
+
+def _set_record_enabled(record_node, enabled):
+    _set_bool_attr(record_node, SURFACE_CONTACT_ENABLED_ATTR, bool(enabled))
+    if _record_enabled_has_anim(record_node):
+        try:
+            cmds.setKeyframe(
+                record_node,
+                attribute=SURFACE_CONTACT_ENABLED_ATTR,
+                time=cmds.currentTime(query=True),
+                value=1.0 if enabled else 0.0,
+            )
+        except Exception:
+            pass
+
+
 def _delete_contact_constraints(payload):
     deleted = []
     for node_name in _contact_constraint_nodes(payload):
@@ -1104,7 +1126,7 @@ class MayaSurfaceContactController(object):
             for record_node in records:
                 if not cmds.objExists(record_node):
                     continue
-                _set_bool_attr(record_node, SURFACE_CONTACT_ENABLED_ATTR, True)
+                _set_record_enabled(record_node, True)
                 count += 1
         finally:
             try:
@@ -1126,7 +1148,7 @@ class MayaSurfaceContactController(object):
             for record_node in records:
                 if not cmds.objExists(record_node):
                     continue
-                _set_bool_attr(record_node, SURFACE_CONTACT_ENABLED_ATTR, False)
+                _set_record_enabled(record_node, False)
                 count += 1
         finally:
             try:
@@ -1372,7 +1394,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.2")
+            self.version_label = QtWidgets.QLabel("Version 0.3.5 Beta")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -1408,23 +1430,31 @@ if QtWidgets:
             selected_records = set(self.controller.selected_records)
             payloads = self.controller.contact_entries(from_selection=False)
             self._syncing_table = True
-            self.contacts_table.setRowCount(len(payloads))
-            for row_index, payload in enumerate(payloads):
-                row_values = [
-                    payload.get("control_label", _short_name(payload.get("control", ""))),
-                    _short_name(payload.get("surface", "")),
-                    "0.00",
-                    "Yes" if payload.get("follow_normal") else "No",
-                    "On" if payload.get("enabled") else "Off",
-                ]
-                for column_index, value in enumerate(row_values):
-                    item = QtWidgets.QTableWidgetItem(str(value))
-                    if column_index == 0:
-                        item.setData(QtCore.Qt.UserRole, payload["record"])
-                    self.contacts_table.setItem(row_index, column_index, item)
-                if payload["record"] in selected_records:
+            blocker = QtCore.QSignalBlocker(self.contacts_table)
+            try:
+                self.contacts_table.clearSelection()
+                self.contacts_table.setRowCount(len(payloads))
+                rows_to_select = []
+                for row_index, payload in enumerate(payloads):
+                    row_values = [
+                        payload.get("control_label", _short_name(payload.get("control", ""))),
+                        _short_name(payload.get("surface", "")),
+                        "0.00",
+                        "Yes" if payload.get("follow_normal") else "No",
+                        "On" if payload.get("enabled") else "Off",
+                    ]
+                    for column_index, value in enumerate(row_values):
+                        item = QtWidgets.QTableWidgetItem(str(value))
+                        if column_index == 0:
+                            item.setData(QtCore.Qt.UserRole, payload["record"])
+                        self.contacts_table.setItem(row_index, column_index, item)
+                    if payload["record"] in selected_records:
+                        rows_to_select.append(row_index)
+                del blocker
+                for row_index in rows_to_select:
                     self.contacts_table.selectRow(row_index)
-            self._syncing_table = False
+            finally:
+                self._syncing_table = False
 
         def _sync_from_controller(self):
             self.controls_line.setText(", ".join(_short_name(node_name) for node_name in self.controller.control_nodes))

@@ -67,7 +67,7 @@ FACE_RETARGET_SOURCE_ATTR = "faceRetargetSource"
 FACE_RETARGET_TARGET_ATTR = "faceRetargetTarget"
 FACE_RETARGET_ENABLED_ATTR = "faceRetargetEnabled"
 FACE_RETARGET_DATA_ATTR = "faceRetargetData"
-DEFAULT_MAINTAIN_OFFSET = True
+DEFAULT_MAINTAIN_OFFSET = False
 DEFAULT_FOLLOW_TRANSLATE = True
 DEFAULT_FOLLOW_ROTATE = True
 DEFAULT_REDUCE_KEYS = False
@@ -131,6 +131,14 @@ _SIDE_TOKEN_MIRRORS = {
     "r": "l",
     "lf": "rt",
     "rt": "lf",
+}
+_SIDE_TOKEN_NORMALS = {
+    "left": "left",
+    "l": "left",
+    "lf": "left",
+    "right": "right",
+    "r": "right",
+    "rt": "right",
 }
 
 _MATCH_IGNORE_TOKENS = {"ctrl", "ctl", "control", "controls", "source", "target", "src", "dst"}
@@ -437,16 +445,22 @@ def _side_token(node_name):
     return ""
 
 
+def _normal_side_token(node_name):
+    return _SIDE_TOKEN_NORMALS.get(_side_token(node_name), "")
+
+
 def _name_match_score(source_node, target_node):
     source_normal = _match_string(source_node)
     target_normal = _match_string(target_node)
     mirrored_source = _mirrored_match_string(source_node)
     score = difflib.SequenceMatcher(None, mirrored_source, target_normal).ratio()
     score = max(score, difflib.SequenceMatcher(None, source_normal, target_normal).ratio() * 0.85)
-    source_side = _side_token(source_node)
-    target_side = _side_token(target_node)
-    if source_side and target_side and _SIDE_TOKEN_MIRRORS.get(source_side, "") == target_side:
+    source_side = _normal_side_token(source_node)
+    target_side = _normal_side_token(target_node)
+    if source_side and target_side and source_side == target_side:
         score += 0.2
+    elif source_side and target_side:
+        score -= 0.15
     source_core = " ".join(_match_core_tokens(_match_tokens(source_node)))
     target_core = " ".join(_match_core_tokens(_match_tokens(target_node)))
     if source_core and source_core == target_core:
@@ -753,19 +767,28 @@ class FaceRetargetController(object):
         skipped_sources = 0
         used_targets = set()
         target_key_map = {}
+        target_mirror_key_map = {}
         for target_node in available_targets:
-            for key in (_fast_match_key(target_node), _normal_match_key(target_node)):
-                if key and key not in target_key_map:
-                    target_key_map[key] = target_node
+            normal_key = _normal_match_key(target_node)
+            mirror_key = _fast_match_key(target_node)
+            if normal_key and normal_key not in target_key_map:
+                target_key_map[normal_key] = target_node
+            if mirror_key and mirror_key not in target_mirror_key_map:
+                target_mirror_key_map[mirror_key] = target_node
         for source_node in [_node_long_name(node_name) for node_name in self.source_nodes if node_name and cmds.objExists(node_name)]:
             best_target = ""
             best_score = 0.0
-            for key in (_fast_match_key(source_node), _normal_match_key(source_node)):
-                candidate = target_key_map.get(key, "")
+            normal_key = _normal_match_key(source_node)
+            candidate = target_key_map.get(normal_key, "")
+            if candidate and candidate not in used_targets:
+                best_target = candidate
+                best_score = 1.0
+            if not best_target:
+                mirror_key = _fast_match_key(source_node)
+                candidate = target_mirror_key_map.get(mirror_key, "")
                 if candidate and candidate not in used_targets:
                     best_target = candidate
-                    best_score = 1.0
-                    break
+                    best_score = 0.82
             if not best_target:
                 source_tokens = set(_match_core_tokens(_match_tokens(source_node)))
                 for target_node in available_targets:
@@ -1072,9 +1095,12 @@ if QtWidgets:
             self.pair_row_widgets = []
 
             options_row = QtWidgets.QHBoxLayout()
-            self.maintain_offset_check = QtWidgets.QCheckBox("Maintain Offset")
+            self.maintain_offset_check = QtWidgets.QCheckBox("Keep Target Offset")
             self.maintain_offset_check.setChecked(DEFAULT_MAINTAIN_OFFSET)
-            self.maintain_offset_check.setToolTip("Keep the target's starting difference from the source at the source's first keyed frame.")
+            self.maintain_offset_check.setToolTip(
+                "Off by default: target controls receive the source channel values directly. "
+                "Turn on only when you want to preserve the target control's starting offset from the source."
+            )
             self.follow_translate_check = QtWidgets.QCheckBox("Follow Translation")
             self.follow_translate_check.setChecked(DEFAULT_FOLLOW_TRANSLATE)
             self.follow_rotate_check = QtWidgets.QCheckBox("Follow Rotation")
@@ -1196,7 +1222,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.2")
+            self.version_label = QtWidgets.QLabel("Version 0.3.5 Beta")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)

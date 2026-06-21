@@ -821,7 +821,7 @@ class MayaSkinningCleanupController(object):
         unsupported_history = _unsupported_history_nodes(source_shape, skin_cluster) if skin_cluster else []
         if unsupported_history:
             names = ", ".join("{0} ({1})".format(_short_name(node_name), node_type) for node_name, node_type in unsupported_history)
-            errors.append("Unsupported extra deformation history was found: {0}".format(names))
+            warnings.append("Extra deformation history will be baked into the clean mesh copy: {0}".format(names))
 
         if ":" in source_transform:
             warnings.append("This mesh uses names with extra tags. The tool can still work, but it will check names carefully.")
