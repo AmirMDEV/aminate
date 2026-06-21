@@ -4,7 +4,7 @@ This is the tracked Aminate feature wiki. It ships with the repo and the release
 
 ## Start Here
 
-- Install: download the latest `Aminate_v0.3.5.zip`, unzip it, and drag `Aminate drag and drop this onto Maya viewport.py` into the Maya viewport.
+- Install: download the latest `Aminate_v0.3.5.zip`, unzip it, and drag `Aminate_v0_3_5_drag_this_file_into_Maya.py` into the Maya viewport.
 - Main UI: Aminate opens as a docked Maya panel. The Toolkit Bar docks near Maya's timeline.
 - Safety rule: use the Maya GUI for final proof. Automated checks use command ports and Qt inspection, not physical mouse or keyboard takeover.
 - Local docs: open `docs/index.html` for searchable screenshots, GIFs, videos, and button help.

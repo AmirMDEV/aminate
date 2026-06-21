@@ -5,6 +5,13 @@ LICENSE_FILE_NAME = "LICENSE"
 MANIFEST_FILE_NAME = "manifest.json"
 RELEASE_VERSION_LABEL = "Version 0.3.5 Beta"
 RELEASE_TAG = "v0.3.5"
+RELEASE_TAG_FILE_SAFE = RELEASE_TAG.replace(".", "_").replace("-", "_")
+INSTALLER_RELEASE_NAME = "Aminate_{0}_drag_this_file_into_Maya.py".format(RELEASE_TAG_FILE_SAFE)
+LEGACY_INSTALLER_RELEASE_NAME = "Aminate drag and drop this onto Maya viewport.py"
+INSTALLER_RELEASE_NAMES = [
+    INSTALLER_RELEASE_NAME,
+    LEGACY_INSTALLER_RELEASE_NAME,
+]
 PUBLIC_REPO_URL = "https://github.com/AmirMDEV/aminate-public"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"

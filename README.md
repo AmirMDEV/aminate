@@ -38,6 +38,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 - Smear Frames were re-tested against the installed Aminate runtime on Amanda, not only repo modules. The edit handoff now proves selected target vertices can be moved in Maya, active morph/VAT targets isolate correctly, and installed package hashes match the release payload.
 - Aminate dock and Toolkit Bar stability were tightened for normal Maya use: Aminate docks at a usable width, the old global `S` key filter is opt-in, the Toolkit Bar docks to Maya's bottom layout, hover behavior uses safer native tooltips, and existing panels are reused instead of rebuilt where possible.
 - The package release process now tracks `Aminate_v0.3.5.zip` from the manifest tag so future beta releases do not keep stale ZIP names.
+- The drag-and-drop installer now includes a versioned file name, `Aminate_v0_3_5_drag_this_file_into_Maya.py`, so Maya does not reuse an older cached installer in the same Maya session.
 
 ## What Was New In 0.3.4
 
@@ -89,7 +90,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `Aminate drag and drop this onto Maya viewport.py` into the Maya viewport.
+5. Drag `Aminate_v0_3_5_drag_this_file_into_Maya.py` into the Maya viewport.
 6. The tool installs, opens, and docks automatically.
 7. After install, Maya opens Aminate and the Toolkit Bar when Maya starts.
 

@@ -9,6 +9,10 @@
   "donation_url": "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA",
   "redistribution_notice": "Redistribution is allowed only for unmodified copies that keep the license, copyright, GitHub, followamir.com, and donation links.",
   "modification_notice": "Modification, derivative works, forks, rebranding, and claims of ownership are not permitted without written permission.",
+  "installer_files": [
+    "Aminate_v0_3_5_drag_this_file_into_Maya.py",
+    "Aminate drag and drop this onto Maya viewport.py"
+  ],
   "runtime_files": [
     "maya_anim_workflow_tools.py",
     "maya_anim_workflow_tools_package_manifest.py",

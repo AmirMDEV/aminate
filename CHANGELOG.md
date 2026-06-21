@@ -6,6 +6,7 @@
 - Made release ZIP paths derive from the manifest tag so future package parity checks, completion matrix evidence, and build outputs follow the current release automatically.
 - Added the runtime package parity unit test to the static release audit so the ZIP payload hash guard is checked as part of release readiness.
 - Published the latest private Smear Frames, docking, Toolkit Bar, report-index, stale-evidence, release-audit, installed-runtime parity, and package ZIP parity work as the 0.3.5 beta public-facing update.
+- Fixed same-session Maya drag-and-drop updates by adding a versioned installer file name, keeping the legacy installer as a fallback, copying installer files into the installed runtime, and evicting the drop-file import cache after each run.
 
 ## Version 0.3.4 - 2026-05-08
 
