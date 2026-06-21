@@ -39,6 +39,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 - Aminate dock and Toolkit Bar stability were tightened for normal Maya use: Aminate docks at a usable width, the old global `S` key filter is opt-in, the Toolkit Bar docks to Maya's bottom layout, hover behavior uses safer native tooltips, and existing panels are reused instead of rebuilt where possible.
 - The package release process now tracks `Aminate_v0.3.5.zip` from the manifest tag so future beta releases do not keep stale ZIP names.
 - The drag-and-drop installer now includes a versioned file name, `Aminate_v0_3_5_drag_this_file_into_Maya.py`, so Maya does not reuse an older cached installer in the same Maya session.
+- The release process now blocks shipping unless the package keeps both manifest files, both installer files, and the versioned drag-and-drop update path.
 
 ## What Was New In 0.3.4
 
