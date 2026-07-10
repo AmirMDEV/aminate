@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Renamed the public GitHub project from `aminate-public` to `aminate` and aligned its public identity with Aminate.
 - Refreshed the 0.3.5 build with extra Maya 2026 stability hardening for Aminate's docked windows and Toolkit Bar workflows.
 - Fixed Scene Helpers global hotkeys so Floating Channel Box, Graph Editor, and Tween Machine shortcuts do not fire while typing into text fields.
 - Simplified Surface Contact window hosting so embedded and standalone opens avoid a risky extra Maya dockable-wrapper layer.

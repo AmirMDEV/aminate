@@ -21,7 +21,7 @@ You may redistribute unmodified copies only when this package keeps its license,
 You may not modify, patch, extend, fork, rebrand, sell modified versions, or claim Aminate as your own work without written permission from Amir Mansaray.
 
 Credit: Amir Mansaray
-GitHub: https://github.com/AmirMDEV/aminate-public
+GitHub: https://github.com/AmirMDEV/aminate
 Follow Amir: https://followamir.com
 Donate: https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA
 Full license: see LICENSE

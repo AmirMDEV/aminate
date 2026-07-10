@@ -9,7 +9,7 @@ A tabbed Maya toolset for animation workflow helpers.
 - [Searchable local docs](docs/index.html) cover tutorials, screenshots, GIFs, and button help.
 - [Tracked feature wiki](docs/wiki/README.md) is the canonical full feature map for the private repo, public repo, and release package.
 - [Release process](AMINATE_RELEASE_PROCESS.md) is the required checklist for drag-and-drop update packages.
-- Public mirror: [AmirMDEV/aminate-public](https://github.com/AmirMDEV/aminate-public).
+- Public project: [AmirMDEV/aminate](https://github.com/AmirMDEV/aminate).
 
 ## Sections In Use
 
@@ -303,4 +303,4 @@ Plain-English summary:
 - You can redistribute unmodified copies if you keep the license, copyright notice, and credit links intact.
 - You cannot modify, patch, extend, fork, rebrand, sell modified versions, or claim Aminate or any part of Aminate as your own work without written permission from Amir Mansaray.
 - Public source access is for transparency, review, installation, and permitted use only. Aminate is not open source.
-- Redistribution must credit Amir Mansaray and include links to [GitHub](https://github.com/AmirMDEV/aminate-public), [followamir.com](https://followamir.com), and the [donation page](https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA).
+- Redistribution must credit Amir Mansaray and include links to [GitHub](https://github.com/AmirMDEV/aminate), [followamir.com](https://followamir.com), and the [donation page](https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA).
