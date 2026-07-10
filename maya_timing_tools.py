@@ -3428,6 +3428,20 @@ def _scene_keyed_transforms():
     return _dedupe_preserve_order(nodes)
 
 
+def _settable_keyable_attrs(node_name):
+    attrs = set(cmds.listAttr(node_name, keyable=True) or [])
+    attrs.update(cmds.listAttr(node_name, channelBox=True) or [])
+    settable_attrs = []
+    for attr_name in sorted(attrs):
+        plug = "{0}.{1}".format(node_name, attr_name)
+        try:
+            if cmds.objExists(plug) and not cmds.getAttr(plug, lock=True) and cmds.getAttr(plug, settable=True):
+                settable_attrs.append(attr_name)
+        except Exception:
+            continue
+    return settable_attrs
+
+
 def _all_model_panels():
     if not cmds:
         return []
@@ -5434,6 +5448,95 @@ class MayaTimingToolsController(object):
             return True, "All snapped keys were already on whole frames."
         return True, "Snapped {0} key group(s) across {1} {2}.".format(changed_keys, changed_nodes, scope_label)
 
+    def key_selected_controls_on_union_frames(self, include_translation=True, include_rotation=True, include_other=False):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        include_translation = bool(include_translation)
+        include_rotation = bool(include_rotation)
+        include_other = bool(include_other)
+        if not any((include_translation, include_rotation, include_other)):
+            return False, "Choose Translation, Rotation, or Other keyable attributes first."
+        nodes = _selected_transform_nodes()
+        if not nodes:
+            return False, "Select the rig controls to key first."
+        translation_attrs = {"translateX", "translateY", "translateZ"}
+        rotation_attrs = {"rotateX", "rotateY", "rotateZ"}
+        keyed_frames = set()
+        attrs_by_node = {}
+        for node_name in nodes:
+            attrs_by_node[node_name] = [
+                attr_name
+                for attr_name in _settable_keyable_attrs(node_name)
+                if (include_translation and attr_name in translation_attrs)
+                or (include_rotation and attr_name in rotation_attrs)
+                or (include_other and attr_name not in translation_attrs and attr_name not in rotation_attrs)
+            ]
+            try:
+                for time_value in cmds.keyframe(node_name, query=True, timeChange=True) or []:
+                    keyed_frames.add(float(time_value))
+            except Exception:
+                continue
+        frames = sorted(keyed_frames)
+        if not frames:
+            return False, "Selected controls do not have any existing keyframes to match."
+        if not any(attrs_by_node.values()):
+            return False, "Selected controls do not have settable keyable channels."
+        original_time = float(cmds.currentTime(query=True))
+        keyed_plugs = 0
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="SceneHelpersKeyFullBlockingPoses")
+        except Exception:
+            pass
+        refresh_suspended = False
+        try:
+            try:
+                cmds.refresh(suspend=True)
+                refresh_suspended = True
+            except Exception:
+                pass
+            for frame in frames:
+                cmds.currentTime(frame, edit=True)
+                for node_name in nodes:
+                    attrs = attrs_by_node.get(node_name) or []
+                    if not attrs:
+                        continue
+                    try:
+                        cmds.setKeyframe(node_name, attribute=attrs, time=frame)
+                        keyed_plugs += len(attrs)
+                    except Exception:
+                        for attr_name in attrs:
+                            try:
+                                cmds.setKeyframe(node_name, attribute=attr_name, time=frame)
+                                keyed_plugs += 1
+                            except Exception:
+                                continue
+        finally:
+            try:
+                cmds.currentTime(original_time, edit=True)
+            except Exception:
+                pass
+            if refresh_suspended:
+                try:
+                    cmds.refresh(suspend=False)
+                except Exception:
+                    pass
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        if not keyed_plugs:
+            return False, "No selected control channels could be keyed."
+        channel_groups = []
+        if include_translation:
+            channel_groups.append("Translation")
+        if include_rotation:
+            channel_groups.append("Rotation")
+        if include_other:
+            channel_groups.append("Other")
+        return True, "Keyed {0} selected control(s) on {1} shared blocking frame(s): {2}.".format(
+            len(nodes), len(frames), ", ".join(channel_groups)
+        )
+
     def _student_core_targets(self):
         nodes = _selected_transform_nodes()
         if nodes:
@@ -6555,15 +6658,7 @@ class MayaTimingToolsController(object):
 
 
 if QtWidgets:
-    try:
-        from maya.OpenMayaUI import MQtUtil
-        _HAS_MAYA_MAIN_WINDOW = MQtUtil.mainWindow() is not None
-    except Exception:
-        _HAS_MAYA_MAIN_WINDOW = False
-    if MayaQWidgetDockableMixin is not None and _HAS_MAYA_MAIN_WINDOW:
-        _WindowBase = type("MayaTimingToolsWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
-    else:
-        _WindowBase = type("MayaTimingToolsWindowBase", (QtWidgets.QDialog,), {})
+    _WindowBase = type("MayaTimingToolsWindowBase", (QtWidgets.QDialog,), {})
 
     class HotkeyCaptureLineEdit(QtWidgets.QLineEdit):
         def __init__(self, default_hotkey="", parent=None):
@@ -7185,9 +7280,9 @@ if QtWidgets:
             hint.setObjectName("studentCoreHint")
             hint.setWordWrap(True)
             header.addWidget(hint, 1)
-            self.show_temp_button = QtWidgets.QPushButton("Open Bottom Toolkit Bar")
-            self.show_temp_button.setText("Open Bottom Toolkit Bar")
-            self.show_temp_button.setToolTip("Dock the small Toolkit Bar into the bottom of Maya near the native timeline.")
+            self.show_temp_button = QtWidgets.QPushButton("Show Embedded Toolkit Bar")
+            self.show_temp_button.setText("Show Embedded Toolkit Bar")
+            self.show_temp_button.setToolTip("Use the permanent Toolkit Bar embedded at the bottom of Aminate.")
             self.show_temp_button.clicked.connect(self._show_temporary_buttons)
             header.addWidget(self.show_temp_button)
             layout.addLayout(header)
@@ -7223,9 +7318,8 @@ if QtWidgets:
                 self.status_callback(message, success)
 
         def _show_temporary_buttons(self):
-            launch_student_timeline_button_bar(dock=True, controller=self.controller, status_callback=self.status_callback)
             if self.status_callback:
-                self.status_callback("Toolkit Bar docked to the bottom of Maya.", True)
+                self.status_callback("Toolkit Bar is embedded at the bottom of Aminate.", True)
 
 
     class StudentTimelineButtonBarWindow(_WindowBase):
@@ -7240,7 +7334,8 @@ if QtWidgets:
             start_layer_tint_timer=False,
             max_history_markers=18,
         ):
-            super(StudentTimelineButtonBarWindow, self).__init__(parent or _maya_main_window())
+            base_parent = parent if parent is not None else (None if embedded else _maya_main_window())
+            super(StudentTimelineButtonBarWindow, self).__init__(base_parent)
             self.controller = controller
             self.status_callback = status_callback
             self.owns_controller = bool(owns_controller)
@@ -7857,19 +7952,45 @@ if QtWidgets:
             main_layout.setContentsMargins(12, 12, 12, 12)
             main_layout.setSpacing(10)
 
-            intro = QtWidgets.QLabel(
-            "Use Auto Key when you want Maya to key changes as you animate. "
-            "Use Auto Snap To Frames when keys land between frames after a timing change. "
-            "Use Animation Layer Tint to see the current layer color and name above the timeline. "
-            "Use Game Animation Mode to prep the scene for 30 fps game animation. "
-            "Use Set Up Render Environment to build the cyclorama helper, helper cameras, and a sky dome or fallback light around the selected character."
+            section_scroll = QtWidgets.QScrollArea()
+            section_scroll.setObjectName("sceneHelpersSectionScroll")
+            section_scroll.setWidgetResizable(True)
+            section_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+            section_content = QtWidgets.QWidget()
+            section_content.setObjectName("sceneHelpersSectionContent")
+            section_content_layout = QtWidgets.QVBoxLayout(section_content)
+            section_content_layout.setContentsMargins(0, 0, 0, 0)
+            section_content_layout.setSpacing(10)
+            blocking_page = QtWidgets.QWidget()
+            scene_setup_page = QtWidgets.QWidget()
+            notes_page = QtWidgets.QWidget()
+            help_page = QtWidgets.QWidget()
+            for page in (blocking_page, scene_setup_page, notes_page, help_page):
+                page.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
+            blocking_layout = QtWidgets.QVBoxLayout(blocking_page)
+            scene_setup_layout = QtWidgets.QVBoxLayout(scene_setup_page)
+            notes_layout = QtWidgets.QVBoxLayout(notes_page)
+            help_layout = QtWidgets.QVBoxLayout(help_page)
+            for page_layout in (blocking_layout, scene_setup_layout, notes_layout, help_layout):
+                page_layout.setContentsMargins(8, 8, 8, 8)
+                page_layout.setSpacing(10)
+            section_groups = (
+                ("Blocking & Timing", blocking_page, "Keying, blocking poses, timing helpers, and animation utility controls."),
+                ("Scene Setup", scene_setup_page, "Auto Key, scene setup, render cameras, game mode, and teacher demo tools."),
+                ("Scene Notes", notes_page, "Create, resize, key, move, style, and delete scene text notes."),
+                ("Help", help_page, "Short descriptions for each Scene Helpers workflow."),
             )
-            intro.setWordWrap(True)
-            main_layout.addWidget(intro)
-
-            quick_label = QtWidgets.QLabel("Scene Helpers")
-            quick_label.setStyleSheet("font-weight: 600;")
-            main_layout.addWidget(quick_label)
+            for title, page, tooltip in section_groups:
+                group = QtWidgets.QGroupBox(title)
+                group.setToolTip(tooltip)
+                group.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
+                group_layout = QtWidgets.QVBoxLayout(group)
+                group_layout.setContentsMargins(4, 4, 4, 4)
+                group_layout.addWidget(page)
+                section_content_layout.addWidget(group)
+            section_content_layout.addStretch(1)
+            section_scroll.setWidget(section_content)
+            main_layout.addWidget(section_scroll, 1)
 
             action_row = QtWidgets.QHBoxLayout()
             action_row.setSpacing(8)
@@ -7914,7 +8035,7 @@ if QtWidgets:
                 "Turn off Maya Safe Mode / Trust Center popup checks for trusted classroom rigs that repeatedly block scene load and History Timeline restore. Only use this for rigs you trust."
             )
             action_row.addWidget(self.disable_security_popups_button, 1)
-            main_layout.addLayout(action_row)
+            scene_setup_layout.addLayout(action_row)
 
             self.game_mode_group = QtWidgets.QGroupBox("Game Animation Mode")
             self.game_mode_group.setObjectName("sceneHelpersGameAnimationModeGroup")
@@ -7953,7 +8074,7 @@ if QtWidgets:
                 self.game_mode_action_checks[action_key] = checkbox
                 game_mode_checks.addWidget(checkbox, index // 3, index % 3)
             game_mode_layout.addLayout(game_mode_checks)
-            main_layout.addWidget(self.game_mode_group)
+            scene_setup_layout.addWidget(self.game_mode_group)
 
             setup_row = QtWidgets.QHBoxLayout()
             setup_row.setSpacing(8)
@@ -7979,7 +8100,7 @@ if QtWidgets:
                 "Delete every teacher-demo rig duplicate and its helper display layer from this scene."
             )
             setup_row.addWidget(self.delete_teacher_rig_button, 1)
-            main_layout.addLayout(setup_row)
+            scene_setup_layout.addLayout(setup_row)
 
             teacher_log_group = QtWidgets.QGroupBox("Teacher Demo Edit Log")
             teacher_log_group.setObjectName("sceneHelpersTeacherDemoEditLogGroup")
@@ -8006,7 +8127,7 @@ if QtWidgets:
             teacher_log_buttons.addWidget(self.refresh_teacher_demo_log_button, 1)
             teacher_log_buttons.addWidget(self.reset_teacher_demo_log_button, 1)
             teacher_log_layout.addLayout(teacher_log_buttons)
-            main_layout.addWidget(teacher_log_group)
+            scene_setup_layout.addWidget(teacher_log_group)
 
             camera_row = QtWidgets.QHBoxLayout()
             camera_row.setSpacing(8)
@@ -8021,7 +8142,7 @@ if QtWidgets:
             self.render_preset_button.setObjectName("sceneHelpersCameraPresetButton")
             self.render_preset_button.setToolTip("Switch the active viewport to the selected helper camera preset.")
             camera_row.addWidget(self.render_preset_button)
-            main_layout.addLayout(camera_row)
+            scene_setup_layout.addLayout(camera_row)
 
             offset_row = QtWidgets.QHBoxLayout()
             offset_row.setSpacing(8)
@@ -8050,7 +8171,7 @@ if QtWidgets:
             self.teacher_rig_offset_spin.setValue(DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X)
             self.teacher_rig_offset_spin.setToolTip("Move the duplicated teacher-demo rig left or right without changing its own animation keys.")
             offset_row.addWidget(self.teacher_rig_offset_spin)
-            main_layout.addLayout(offset_row)
+            scene_setup_layout.addLayout(offset_row)
 
             snap_row = QtWidgets.QHBoxLayout()
             snap_row.setSpacing(8)
@@ -8060,6 +8181,12 @@ if QtWidgets:
                 "snaps the keyed controls it can find in the scene."
             )
             snap_row.addWidget(self.snap_now_button, 1)
+            self.key_blocking_poses_button = QtWidgets.QPushButton("Key Full Blocking Poses")
+            self.key_blocking_poses_button.setObjectName("sceneHelpersKeyFullBlockingPosesButton")
+            self.key_blocking_poses_button.setToolTip(
+                "For selected controls, find every keyed frame on any selected control, then key selected channel groups on every selected control at those frames."
+            )
+            snap_row.addWidget(self.key_blocking_poses_button, 1)
             self.animation_layer_tint_button = QtWidgets.QToolButton()
             self.animation_layer_tint_button.setObjectName("sceneHelpersAnimationLayerTintButton")
             self.animation_layer_tint_button.setCheckable(True)
@@ -8069,18 +8196,43 @@ if QtWidgets:
             self.animation_layer_tint_button.setToolTip(
                 "Show a colored strip above Maya's timeline using the current selected animation layer name and color."
             )
-            snap_row.addWidget(self.animation_layer_tint_button, 1)
             self.keep_toolbar_extras_on_hide_check = QtWidgets.QCheckBox("Keep Toolbar Extras On Aminate Hide")
             self.keep_toolbar_extras_on_hide_check.setObjectName("sceneHelpersKeepToolbarExtrasOnHideCheck")
             self.keep_toolbar_extras_on_hide_check.setToolTip(
                 "When this is off, hiding or closing Aminate also hides the docked Toolkit Bar, Tween Machine popup, Floating Channel Box, and Floating Graph Editor."
             )
-            snap_row.addWidget(self.keep_toolbar_extras_on_hide_check, 1)
             self.refresh_layer_tint_button = QtWidgets.QPushButton("Refresh Layer Tint")
             self.refresh_layer_tint_button.setObjectName("sceneHelpersRefreshLayerTintButton")
             self.refresh_layer_tint_button.setToolTip("Refresh the docked timeline layer tint strip after changing animation layers.")
-            snap_row.addWidget(self.refresh_layer_tint_button, 1)
-            main_layout.addLayout(snap_row)
+            blocking_layout.addLayout(snap_row)
+
+            layer_row = QtWidgets.QHBoxLayout()
+            layer_row.setSpacing(8)
+            layer_row.addWidget(self.animation_layer_tint_button, 1)
+            layer_row.addWidget(self.keep_toolbar_extras_on_hide_check, 1)
+            layer_row.addWidget(self.refresh_layer_tint_button, 1)
+            blocking_layout.addLayout(layer_row)
+
+            blocking_options_row = QtWidgets.QHBoxLayout()
+            blocking_options_row.setSpacing(8)
+            blocking_options_row.addWidget(QtWidgets.QLabel("Blocking Pose Channels"))
+            self.key_blocking_translation_check = QtWidgets.QCheckBox("Translation")
+            self.key_blocking_translation_check.setObjectName("sceneHelpersKeyBlockingTranslationCheck")
+            self.key_blocking_translation_check.setChecked(True)
+            self.key_blocking_translation_check.setToolTip("Key translate X, Y, and Z on every shared keyed frame.")
+            blocking_options_row.addWidget(self.key_blocking_translation_check)
+            self.key_blocking_rotation_check = QtWidgets.QCheckBox("Rotation")
+            self.key_blocking_rotation_check.setObjectName("sceneHelpersKeyBlockingRotationCheck")
+            self.key_blocking_rotation_check.setChecked(True)
+            self.key_blocking_rotation_check.setToolTip("Key rotate X, Y, and Z on every shared keyed frame.")
+            blocking_options_row.addWidget(self.key_blocking_rotation_check)
+            self.key_blocking_other_check = QtWidgets.QCheckBox("Other keyable attributes")
+            self.key_blocking_other_check.setObjectName("sceneHelpersKeyBlockingOtherCheck")
+            self.key_blocking_other_check.setChecked(False)
+            self.key_blocking_other_check.setToolTip("Include scale, visibility, and unlocked custom keyable attributes.")
+            blocking_options_row.addWidget(self.key_blocking_other_check)
+            blocking_options_row.addStretch(1)
+            blocking_layout.addLayout(blocking_options_row)
 
             tween_machine_row = QtWidgets.QHBoxLayout()
             tween_machine_row.setSpacing(8)
@@ -8107,7 +8259,7 @@ if QtWidgets:
             self.open_tween_machine_button.setObjectName("sceneHelpersOpenTweenMachineButton")
             self.open_tween_machine_button.setToolTip("Open the translucent inbetween popup next to the cursor.")
             tween_machine_row.addWidget(self.open_tween_machine_button)
-            main_layout.addLayout(tween_machine_row)
+            blocking_layout.addLayout(tween_machine_row)
 
             floating_channel_row = QtWidgets.QHBoxLayout()
             floating_channel_row.setSpacing(8)
@@ -8134,7 +8286,7 @@ if QtWidgets:
             self.open_floating_channel_box_button.setObjectName("sceneHelpersOpenFloatingChannelBoxButton")
             self.open_floating_channel_box_button.setToolTip("Open the semi-transparent floating channel editor for the current selection.")
             floating_channel_row.addWidget(self.open_floating_channel_box_button)
-            main_layout.addLayout(floating_channel_row)
+            blocking_layout.addLayout(floating_channel_row)
 
             floating_graph_row = QtWidgets.QHBoxLayout()
             floating_graph_row.setSpacing(8)
@@ -8161,7 +8313,7 @@ if QtWidgets:
             self.open_floating_graph_button.setObjectName("sceneHelpersOpenFloatingGraphButton")
             self.open_floating_graph_button.setToolTip("Open a semi-transparent native Maya Graph Editor clone that can float or dock without creating duplicates.")
             floating_graph_row.addWidget(self.open_floating_graph_button)
-            main_layout.addLayout(floating_graph_row)
+            blocking_layout.addLayout(floating_graph_row)
 
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
@@ -8185,11 +8337,11 @@ if QtWidgets:
                 "17. Select controls first when you want the snap to act only on part of the scene."
             )
             help_box.setMaximumHeight(110)
-            main_layout.addWidget(help_box)
+            help_layout.addWidget(help_box)
 
             text_note_label = QtWidgets.QLabel("Scene Text Notes")
             text_note_label.setStyleSheet("font-weight: 600;")
-            main_layout.addWidget(text_note_label)
+            notes_layout.addWidget(text_note_label)
 
             text_note_row = QtWidgets.QHBoxLayout()
             text_note_row.setSpacing(8)
@@ -8217,7 +8369,7 @@ if QtWidgets:
             self.create_scene_text_note_button.setObjectName("sceneHelpersCreateTextNoteButton")
             self.create_scene_text_note_button.setToolTip("Create a Maya text-curve note beside the selected body part or control.")
             text_note_row.addWidget(self.create_scene_text_note_button, 1)
-            main_layout.addLayout(text_note_row)
+            notes_layout.addLayout(text_note_row)
 
             text_note_wrap_row = QtWidgets.QHBoxLayout()
             text_note_wrap_row.setSpacing(8)
@@ -8252,7 +8404,7 @@ if QtWidgets:
             self.select_text_note_box_button.setObjectName("sceneHelpersTextNoteSelectBoxButton")
             self.select_text_note_box_button.setToolTip("Select the note's viewport resize box. Scale it in Maya and the text wrap updates to fit.")
             text_note_wrap_row.addWidget(self.select_text_note_box_button, 1)
-            main_layout.addLayout(text_note_wrap_row)
+            notes_layout.addLayout(text_note_wrap_row)
 
             text_note_list_row = QtWidgets.QHBoxLayout()
             text_note_list_row.setSpacing(8)
@@ -8285,7 +8437,7 @@ if QtWidgets:
             ):
                 text_note_buttons.addWidget(button)
             text_note_list_row.addLayout(text_note_buttons, 1)
-            main_layout.addLayout(text_note_list_row)
+            notes_layout.addLayout(text_note_list_row)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
@@ -8297,7 +8449,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.5 Beta")
+            self.version_label = QtWidgets.QLabel("Version 0.3.6")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -8320,6 +8472,7 @@ if QtWidgets:
             self.floating_graph_opacity_spin.valueChanged.connect(self._set_floating_graph_opacity)
             self.open_floating_graph_button.clicked.connect(self._open_floating_graph_editor)
             self.snap_now_button.clicked.connect(self._snap_now)
+            self.key_blocking_poses_button.clicked.connect(self._key_blocking_poses)
             self.game_mode_button.toggled.connect(self._toggle_game_mode)
             for action_key, checkbox in getattr(self, "game_mode_action_checks", {}).items():
                 checkbox.toggled.connect(lambda enabled, key=action_key: self._toggle_game_mode_action(key, enabled))
@@ -8443,6 +8596,14 @@ if QtWidgets:
 
         def _snap_now(self):
             success, message = self.controller.snap_current_targets()
+            self._set_status(message, success)
+
+        def _key_blocking_poses(self):
+            success, message = self.controller.key_selected_controls_on_union_frames(
+                include_translation=self.key_blocking_translation_check.isChecked(),
+                include_rotation=self.key_blocking_rotation_check.isChecked(),
+                include_other=self.key_blocking_other_check.isChecked(),
+            )
             self._set_status(message, success)
 
         def _set_tween_machine_hotkey(self):
@@ -8925,6 +9086,54 @@ def _reset_stale_timeline_bar_workspace():
     return not _timeline_bar_workspace_exists()
 
 
+def _show_timeline_bar_in_native_workspace(window, area="bottom"):
+    if not (MAYA_AVAILABLE and cmds and QtWidgets and hold_utils.omui and shiboken):
+        return False, "Maya native workspace parenting is not available."
+    if not _qt_object_valid(window):
+        return False, "Toolkit Bar Qt window is not valid."
+    _delete_timeline_bar_workspace()
+    try:
+        cmds.workspaceControl(
+            STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME,
+            label=" ",
+            retain=False,
+            floating=False,
+            dockToMainWindow=(area, False),
+            initialHeight=124,
+            minimumHeight=96,
+        )
+    except Exception as exc:
+        return False, "Could not create Toolkit Bar workspace control: {0}".format(exc)
+    pointer = hold_utils.omui.MQtUtil.findControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME)
+    if not pointer:
+        return False, "Maya created no Toolkit Bar workspace pointer."
+    try:
+        workspace_widget = shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+    except Exception as exc:
+        return False, "Could not wrap Toolkit Bar workspace: {0}".format(exc)
+    try:
+        window.setWindowFlags(QtCore.Qt.Widget)
+    except Exception:
+        pass
+    try:
+        window.setParent(workspace_widget)
+    except Exception as exc:
+        return False, "Could not parent Toolkit Bar into workspace: {0}".format(exc)
+    layout = workspace_widget.layout()
+    if layout is None:
+        layout = QtWidgets.QVBoxLayout(workspace_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+    layout.addWidget(window)
+    window.show()
+    _process_timeline_bar_events()
+    try:
+        cmds.workspaceControl(STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME, edit=True, visible=True, restore=True)
+    except Exception:
+        pass
+    return True, "Docked Toolkit Bar into Maya's {0} layout.".format(area)
+
+
 def launch_student_timeline_button_bar(dock=True, controller=None, status_callback=None):
     global GLOBAL_TIMELINE_BAR_CONTROLLER
     global GLOBAL_TIMELINE_BAR_WINDOW
@@ -8959,6 +9168,12 @@ def launch_student_timeline_button_bar(dock=True, controller=None, status_callba
                     existing.show()
                 _process_timeline_bar_events()
                 return existing
+            if dock and not _timeline_bar_workspace_exists():
+                try:
+                    existing.close()
+                except Exception:
+                    pass
+                GLOBAL_TIMELINE_BAR_WINDOW = None
         except RuntimeError:
             GLOBAL_TIMELINE_BAR_WINDOW = None
     if dock and GLOBAL_TIMELINE_BAR_WINDOW is None and _timeline_bar_workspace_exists():
@@ -8968,24 +9183,33 @@ def launch_student_timeline_button_bar(dock=True, controller=None, status_callba
             raise RuntimeError(dock_message)
     owns_controller = controller is None
     GLOBAL_TIMELINE_BAR_CONTROLLER = controller or MayaTimingToolsController()
-    parent_widget = None if safe_bottom_window else _maya_main_window()
+    parent_widget = None if (safe_bottom_window or dock) else _maya_main_window()
     GLOBAL_TIMELINE_BAR_WINDOW = StudentTimelineButtonBarWindow(
         GLOBAL_TIMELINE_BAR_CONTROLLER,
         status_callback=status_callback,
         parent=parent_widget,
         owns_controller=owns_controller,
+        embedded=bool(dock),
     )
+    if dock:
+        try:
+            GLOBAL_TIMELINE_BAR_WINDOW.setObjectName(STUDENT_TIMELINE_BAR_OBJECT_NAME)
+        except Exception:
+            pass
     if safe_bottom_window:
         try:
             GLOBAL_TIMELINE_BAR_WINDOW.setWindowFlags(GLOBAL_TIMELINE_BAR_WINDOW.windowFlags() | QtCore.Qt.Tool)
         except Exception:
             pass
     if dock:
-        try:
-            GLOBAL_TIMELINE_BAR_WINDOW.show(dockable=True, floating=False, area="bottom")
-            _process_timeline_bar_events()
-        except Exception:
-            GLOBAL_TIMELINE_BAR_WINDOW.show()
+        docked, dock_message = _show_timeline_bar_in_native_workspace(GLOBAL_TIMELINE_BAR_WINDOW, "bottom")
+        if not docked:
+            _warn_timeline_bar_docking(dock_message)
+            try:
+                GLOBAL_TIMELINE_BAR_WINDOW.close()
+            except Exception:
+                pass
+            raise RuntimeError(dock_message)
     else:
         if safe_bottom_window:
             _show_timeline_bar_as_safe_window(GLOBAL_TIMELINE_BAR_WINDOW)

@@ -2,12 +2,24 @@
 
 ## Unreleased
 
-- Hardened Maya startup: the installed `userSetup.py` now prepares Aminate's runtime path without clearing loaded Maya modules. Startup auto-open remains opt-in through `AMINATE_AUTO_OPEN_ON_MAYA_STARTUP=1`.
+- Reorganized Scene Helpers into one scrollable surface with focused `Blocking & Timing`, `Scene Setup`, `Scene Notes`, and `Help` groups. Core blocking actions stay first, layer controls sit apart from keying actions, and every prior control remains reachable without tab hunting.
+- Added Scene Helpers `Key Full Blocking Poses` channel controls. Selected controls now receive Translation and Rotation keys on every selected-control union frame, with Other keyable attributes opt-in. The batch preserves current time, suspends redraw, and uses one Undo step for heavy rigs.
+- Bumped Aminate release metadata and visible tool labels to `Version 0.3.6` / `v0.3.6`.
+- Hardened drag-and-drop updates: if Aminate is already open, the installer now copies the update without closing or rebuilding live Qt panels. Restart Maya before reopening Aminate.
+- Hardened Maya startup: Aminate's installed `userSetup.py` no longer purges all `maya_*` modules or auto-opens Aminate unless `AMINATE_AUTO_OPEN_ON_MAYA_STARTUP=1` is set. The startup verifier now completes its command-port write before waiting for health evidence.
+- Verified installed Aminate in a live Maya 2026.2 session: all 23 tabs opened, the dock stayed stable, no fresh crash/CER evidence appeared after idle, and the blank test scene was cleaned.
+- Refreshed Maya 2026 standalone feature-contract and 600-control performance evidence; the full static release audit now passes with installed-runtime parity.
 - Renamed the public GitHub project from `aminate-public` to `aminate` and aligned its public identity with Aminate.
-- Refreshed the 0.3.5 build with extra Maya 2026 stability hardening for Aminate's docked windows and Toolkit Bar workflows.
-- Fixed Scene Helpers global hotkeys so Floating Channel Box, Graph Editor, and Tween Machine shortcuts do not fire while typing into text fields.
-- Simplified Surface Contact window hosting so embedded and standalone opens avoid a risky extra Maya dockable-wrapper layer.
-- Rebuilt the 0.3.5 package and synced the Maya 2026 `Aminate` runtime with these stability fixes.
+- Deleted the broken public `v0.3.1` GitHub Release after its drag-and-drop installer could raise `NameError: name 'MANIFEST_FILE_NAME' is not defined`.
+- Added an installer import and `_load_manifest()` smoke check to the runtime package parity gate so future release ZIPs, package folders, and installed-runtime copies fail before upload if the drag-and-drop installer has undefined manifest globals.
+- Embedded the Toolkit Bar permanently inside the main Aminate window so it is no longer a removable Maya dock or separate bottom window by default.
+- Kept the old separate bottom Toolkit Bar window behind `AMINATE_AUTO_OPEN_TOOLKIT_BAR=window` after live probes showed Maya 2026.2 crashes when Aminate main UI and the native bottom Toolkit Bar workspace are both active.
+- Added a docking regression log that compares `v0.3.1`, `8b0a8da`, `ebb3b8f`, `1f6b4fd`, `5db5650`, and current code so future work does not retest the same crashing native workspace path blind.
+- Made the 24-report legacy GUI crash-health refresh runner resumable, with `--force` kept for deliberate full reruns.
+- Added a repeatable legacy GUI evidence refresh runner and shared Maya host-health helper, then refreshed the 24 old GUI reports with process, CER, and fresh crash-event proof.
+- Fixed Scene Helpers global hotkeys so Floating Channel Box, Graph Editor, and Tween Machine hotkeys do not fire while a text-entry widget has focus.
+- Removed the unnecessary Surface Contact dockable mixin from the embedded/standalone window path and hardened the all-tabs verifier against stale Qt wrapper recovery.
+- Rebuilt the 0.3.5 package and synced the installed Maya 2026 `Aminate` runtime after those crash-hardening fixes.
 - Hardened the repo-wide Maya crash audit after the Toolkit Bar crash by adding static guards for unsafe verifier patterns, Video Reference Qt/workspace teardown, Surface Contact live-callback self-triggering, native Toolkit Bar dock opt-in, destructive crash verifiers, and release/completion evidence health.
 - Made old installed open-idle verification route through the startup-safe verifier so Maya UI startup no longer depends on command-port response parsing after the tool opens.
 - Removed live workspace deletion and module purging from the installed bridge open-idle verifier.
