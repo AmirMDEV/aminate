@@ -70,7 +70,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 - `Floating Graph Editor` is now dockable, can include a DAG-only Outliner, has cycle infinity controls, and opens or closes from hotkeys more reliably.
 - `Floating Channel Box` opens near the cursor, edits selected object channels more reliably, supports opacity customization, and avoids staying above every Windows app.
 - `Animation Styling` adds Spider-Verse-style held keys, blocked-hold timeline warnings, and optional stepped curves.
-- `Toolkit Bar` adds Tween Machine, tab navigation buttons, synced embedded toolbar, stronger Game Animation Mode visuals, and updated release packaging.
+- `Toolkit Bar` adds Tween Machine, tab navigation buttons, synced embedded toolbar, stronger Game Animation Mode visuals, one-click 1080p full-scale AVI Playblast to Documents, and updated release packaging.
 - `Scene Text Notes` now support larger default size, live sizing, auto wrap boxes, keyable visibility, pointer splines, and cleaner scene grouping.
 - `Teacher Demo` rig duplication preserves more rig, material, visibility, and skinCluster data, adds clean delete, and stores student-readable edit logs in the Maya scene.
 - `History Timeline` has stronger branching, snapshot filtering, storage caps, restore safety, per-scene history switching, performance guards, and clearer snapshot labels.

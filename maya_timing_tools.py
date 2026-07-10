@@ -215,6 +215,7 @@ STUDENT_CORE_ICON_FILES = {
     "toolkit_select_animated": "toolkit_select_animated_icon.png",
     "toolkit_clean_static": "toolkit_clean_static_icon.png",
     "toolkit_package_zip": "toolkit_package_zip_icon.png",
+    "playblast": "toolkit_package_zip_icon.png",
     "combine_freeze_pivot": COMBINE_FREEZE_PIVOT_ICON_FILE,
     "game": GAME_ANIMATION_MODE_ICON_FILE,
 }
@@ -2075,6 +2076,14 @@ STUDENT_CORE_TOOLS = (
         "glyph": "toolkit_package_zip",
         "tooltip": "One click: save the scene, zip the scene plus references, textures, image planes, audio, and caches, then open the package folder.",
     },
+    {
+        "command": "playblast_1080p",
+        "label": "PB",
+        "group": "Review",
+        "color": "#FF7A59",
+        "glyph": "playblast",
+        "tooltip": "Playblast the playback range to your C:\\Users\\<you>\\Documents folder as a 1920x1080, 100% AVI movie.",
+    },
 )
 WORKFLOW_BAR_TOOLS = (
     {"command": "workflow_quick_start", "tab": "quick_start", "label": "QS", "color": "#9AA4FF", "glyph": "guide", "tooltip": "Quick Start: plain-language guide for every tab, with beginner steps for picking correct tool."},
@@ -2108,6 +2117,7 @@ TOOLKIT_BAR_SIMPLE_HELP = {
     "clean_static": "Remove keys that do not change anything.",
     "combine_freeze_pivot": "Join selected meshes, freeze them, then edit the pivot.",
     "package_scene_zip": "Collect this scene and its files into one zip.",
+    "playblast_1080p": "Playblast this shot to Documents at 1080p full scale.",
     "workflow_quick_start": "Open the beginner guide for choosing the right Aminate tool.",
     "workflow_scene_helpers": "Open the helper tools for safer scene setup.",
     "workflow_reference_manager": "Open the packager for scene files and references.",
@@ -2149,6 +2159,7 @@ TOOLKIT_BAR_KID_HELP = {
     "clean_static": "Throw away keys that do nothing.",
     "combine_freeze_pivot": "Glue picked meshes together, clean transforms, then move the pivot.",
     "package_scene_zip": "Pack scene files into one zip folder.",
+    "playblast_1080p": "Make a full-size 1080p movie in Documents.",
     "workflow_quick_start": "Open the beginner map for Aminate.",
     "workflow_scene_helpers": "Open helpers for clean Maya scene setup.",
     "workflow_reference_manager": "Open the file packer.",
@@ -2190,6 +2201,7 @@ TOOLKIT_BAR_HELP_TITLES = {
     "clean_static": "Clean Static Keys",
     "combine_freeze_pivot": "Combine Freeze Pivot",
     "package_scene_zip": "Package Scene",
+    "playblast_1080p": "Playblast 1080p AVI",
     "toolkitBarDragGrip": "Move Toolkit Bar",
     "studentTimelineBarAnimationLayerTint": "Animation Layer",
     "toolkitBarAnimationLayerAddButton": "New Layer",
@@ -3748,6 +3760,14 @@ def _make_student_core_icon(color_hex, glyph):
             painter.drawRect(8, 9, 14, 12)
             painter.setBrush(light)
             painter.drawPolygon(QtGui.QPolygon([QtCore.QPoint(13, 12), QtCore.QPoint(19, 15), QtCore.QPoint(13, 18)]))
+        elif glyph == "playblast":
+            painter.setBrush(QtCore.Qt.NoBrush)
+            painter.drawRect(8, 11, 14, 11)
+            painter.drawLine(9, 9, 22, 7)
+            painter.drawLine(12, 8, 14, 11)
+            painter.drawLine(17, 7, 19, 10)
+            painter.setBrush(light)
+            painter.drawPolygon(QtGui.QPolygon([QtCore.QPoint(13, 14), QtCore.QPoint(19, 17), QtCore.QPoint(13, 20)]))
         elif glyph == "notes":
             painter.setBrush(QtCore.Qt.NoBrush)
             painter.drawRect(9, 8, 12, 14)
@@ -6018,6 +6038,39 @@ class MayaTimingToolsController(object):
         self._emit_status(message, success)
         return success, message
 
+    def playblast_documents_1080p(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        documents_dir = os.path.join(os.environ.get("USERPROFILE") or os.path.expanduser("~"), "Documents")
+        try:
+            if not os.path.isdir(documents_dir):
+                os.makedirs(documents_dir)
+            scene_name = cmds.file(query=True, sceneName=True) or "untitled"
+            scene_stem = os.path.splitext(os.path.basename(scene_name))[0] or "untitled"
+            scene_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", scene_stem)
+            output_path = os.path.join(
+                documents_dir,
+                "Aminate_Playblast_{0}_{1}.avi".format(scene_stem, time.strftime("%Y%m%d_%H%M%S")),
+            )
+            cmds.playblast(
+                completeFilename=output_path,
+                format="avi",
+                compression="none",
+                widthHeight=(1920, 1080),
+                percent=100,
+                quality=100,
+                forceOverwrite=True,
+                viewer=False,
+                showOrnaments=True,
+                offScreen=True,
+                throwOnError=True,
+            )
+        except Exception as exc:
+            return False, "Could not create 1080p AVI playblast: {0}".format(exc)
+        if not os.path.isfile(output_path):
+            return False, "Maya completed the playblast without creating the expected AVI file."
+        return True, "1080p full-scale AVI playblast saved to {0}.".format(output_path)
+
     def run_student_core_command(self, command):
         command = (command or "").strip().lower()
         if command == "nudge_left":
@@ -6042,6 +6095,8 @@ class MayaTimingToolsController(object):
             return self.combine_selected_meshes_freeze_edit_pivot()
         if command == "package_scene_zip":
             return self.package_scene_to_zip_from_bar()
+        if command == "playblast_1080p":
+            return self.playblast_documents_1080p()
         return False, "Unknown Toolkit Bar command: {0}".format(command)
 
     def apply_game_animation_mode(self):

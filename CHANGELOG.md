@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a bottom Toolkit Bar `Playblast 1080p AVI` button. It writes the current playback range to the user's `Documents` folder at 1920x1080, 100% scale, with uncompressed AVI as the Windows-safe default.
 - Reorganized Scene Helpers into one scrollable surface with focused `Blocking & Timing`, `Scene Setup`, `Scene Notes`, and `Help` groups. Core blocking actions stay first, layer controls sit apart from keying actions, and every prior control remains reachable without tab hunting.
 - Added Scene Helpers `Key Full Blocking Poses` channel controls. Selected controls now receive Translation and Rotation keys on every selected-control union frame, with Other keyable attributes opt-in. The batch preserves current time, suspends redraw, and uses one Undo step for heavy rigs.
 - Bumped Aminate release metadata and visible tool labels to `Version 0.3.6` / `v0.3.6`.

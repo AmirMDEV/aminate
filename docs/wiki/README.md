@@ -17,7 +17,7 @@ Use this as the first page for students. It explains which tab to open and keeps
 
 ### Toolkit Bar
 
-Compact animBot-style controls for repeated animation jobs: key nudging, inbetween keys, Tween Machine, cut current-frame keys, zero pose, bake on twos, select animated controls, clean static curves, package zip, History Timeline strip, animation-layer controls, workflow navigation icons, and Game Animation Mode.
+Compact animBot-style controls for repeated animation jobs: key nudging, inbetween keys, Tween Machine, cut current-frame keys, zero pose, bake on twos, select animated controls, clean static curves, package zip, 1080p full-scale AVI Playblast to Documents, History Timeline strip, animation-layer controls, workflow navigation icons, and Game Animation Mode.
 
 ### Scene Helpers
 
