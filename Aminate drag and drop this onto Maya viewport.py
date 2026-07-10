@@ -64,22 +64,17 @@ def _managed_user_setup_block(destination_root):
             "try:",
             "    import sys",
             "    import os",
-            "    import importlib",
             "    import maya.cmds as _amir_maya_cmds",
             "    import maya.utils as _amir_maya_utils",
             "    _amir_workflow_root = r\"{0}\"".format(destination_root),
-            "    def _amir_workflow_force_latest_runtime():",
+            "    def _amir_workflow_prepare_runtime():",
             "        try:",
             "            while _amir_workflow_root in sys.path:",
             "                sys.path.remove(_amir_workflow_root)",
             "            sys.path.insert(0, _amir_workflow_root)",
-            "            for _amir_module_name in list(sys.modules):",
-            "                if _amir_module_name == 'maya_anim_workflow_tools' or _amir_module_name.startswith('maya_'):",
-            "                    sys.modules.pop(_amir_module_name, None)",
-            "            importlib.invalidate_caches()",
             "        except Exception:",
             "            pass",
-            "    _amir_workflow_force_latest_runtime()",
+            "    _amir_workflow_prepare_runtime()",
             "    def _amir_workflow_schedule(function, delay_ms=1000):",
             "        try:",
             "            from PySide6 import QtCore as _amir_qt_core",
@@ -108,7 +103,7 @@ def _managed_user_setup_block(destination_root):
             "            return",
             "        sys._aminate_startup_bootstrapped = True",
             "        sys._aminate_startup_bootstrapped_root = _amir_workflow_root",
-            "        _amir_workflow_force_latest_runtime()",
+            "        _amir_workflow_prepare_runtime()",
             "        try:",
             "            import maya_crash_recovery as _amir_maya_crash_recovery",
             "            _amir_maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=True)",
@@ -117,7 +112,7 @@ def _managed_user_setup_block(destination_root):
             "        if os.environ.get('AMINATE_AUTO_OPEN_ON_MAYA_STARTUP') == '1':",
             "            try:",
             "                import maya_anim_workflow_tools as _amir_maya_anim_workflow_tools",
-            "                _amir_maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True, initial_tab='quick_start')",
+            "                _amir_maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=False, initial_tab='quick_start')",
             "            except Exception:",
             "                pass",
             "    def _amir_workflow_wait_for_startup(attempt=0):",
@@ -297,7 +292,7 @@ def install_maya_anim_workflow_tools_from_dragdrop():
         _ensure_user_setup_hook(cmds, destination_root)
         maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=False)
     button_name = maya_anim_workflow_tools.install_maya_anim_workflow_tools_shelf_button(repo_path=destination_root)
-    window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True)
+    window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=False)
     version = manifest.get("version") or "unknown"
     cmds.inViewMessage(
         amg='Installed <hl>Aminate</hl> {0}'.format(version),
