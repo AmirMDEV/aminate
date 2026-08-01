@@ -1,7 +1,7 @@
 """
 maya_dynamic_parent_pivot.py
 
-Combined Maya animation workflow tool with Dynamic Parenting, Hand / Foot Hold,
+Combined Aminate with Dynamic Parenting, Hand / Foot Hold,
 Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter (Face and Body), Control Picker,
 Animators Pencil, Onion Skin, Rotation Doctor, Character Skinning, Rig Scale, Video Reference, Timeline Notes, and Customization tabs.
 """
@@ -11,6 +11,7 @@ from __future__ import absolute_import, division, print_function
 import json
 import math
 import os
+import weakref
 
 import maya_shelf_utils
 import maya_animation_assistant
@@ -33,6 +34,7 @@ import maya_timeline_notes
 import maya_video_reference_tool
 import maya_aminate_customization
 import maya_smear_frames
+import maya_aminate_theme
 
 try:
     import maya.cmds as cmds
@@ -67,22 +69,26 @@ except Exception:
         QT_BINDING = None
 
 
-WINDOW_OBJECT_NAME = "mayaAnimWorkflowToolsWindow"
+WINDOW_OBJECT_NAME = "aminateWindow"
 DOCK_HOST_OBJECT_NAME = WINDOW_OBJECT_NAME + "DockHost"
 WORKSPACE_CONTROL_NAME = WINDOW_OBJECT_NAME + "WorkspaceControl"
 LEGACY_WORKSPACE_CONTROL_NAME = DOCK_HOST_OBJECT_NAME + "WorkspaceControl"
 DOCKED_WORKFLOW_MIN_WIDTH = 360
-DOCKED_WORKFLOW_MIN_HEIGHT = 240
+DOCKED_WORKFLOW_MIN_HEIGHT = 480
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.5 Beta"
+VERSION_LABEL = "Version 0.3.7"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
+TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.7/Aminate_v0.3.7_offline_tutorial.zip"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
-SHELF_BUTTON_DOC_TAG = "mayaAnimWorkflowShelfButton"
-SHELF_ICON_FILE_NAME = "maya_anim_workflow_tools_icon.png"
+SHELF_BUTTON_DOC_TAG = "aminateShelfButton"
+SHELF_ICON_FILE_NAME = "aminate_icon.png"
 SHELF_ICON_OVERLAY_LABEL = ""
+SHELF_BUTTON_STYLE = "iconAndTextHorizontal"
+SHELF_BUTTON_WIDTH = 92
+SHELF_BUTTON_HEIGHT = 34
 AMINATE_ENABLE_APP_KEY_FILTER = "AMINATE_ENABLE_APP_KEY_FILTER"
 ROOT_GROUP_NAME = "amirDynamicTools_GRP"
 PARENTING_GROUP_NAME = "amirDynamicParenting_GRP"
@@ -118,47 +124,263 @@ TAB_GUIDE = "Quick Start"
 TAB_STUDENT_CORE = "Toolkit Bar"
 TAB_TIMING = "Scene Helpers"
 TAB_REFERENCE_MANAGER = "Reference Manager"
+
+# Project-local semantic roles for a compact Maya workbench.  The palette stays
+# close to Maya's graphite chrome.  Colour communicates selection, status, and
+# the one primary action; it is not used to brand every tool or draw accent
+# borders around ordinary controls.
+AMINATE_UI_TOKENS = {
+    "background": "#373737",
+    "surface": "#414141",
+    "surface_alt": "#494949",
+    "surface_raised": "#505050",
+    "on_surface": "#F1F1F1",
+    "on_surface_muted": "#B8B8B8",
+    "on_surface_disabled": "#858585",
+    "primary": "#7892A8",
+    "primary_variant": "#4A5966",
+    "primary_container": "#445A6D",
+    "primary_hover": "#526B80",
+    "primary_pressed": "#384A59",
+    "primary_focus": "#8CA5BA",
+    "primary_selection": "#566A7A",
+    "outline": "#5C5C5C",
+    "outline_variant": "#4B4B4B",
+    "secondary_creative": "#F1F1F1",
+    "secondary_rigging": "#F1F1F1",
+    "secondary_review": "#F1F1F1",
+    "success": "#78A67B",
+    "warning": "#C49A5A",
+    "error": "#C57878",
+    "error_container": "#5A3434",
+    "on_error": "#FFF0F0",
+    "disabled_container": "#454545",
+    "on_primary": "#FFFFFF",
+}
+
+# The category names are intentionally stable API for widget properties.  The
+# values point back to the semantic token map so a palette change is made once
+# and then rendered into the shared stylesheet below.
+AMINATE_CATEGORY_TOKEN_KEYS = {
+    "primary": "primary",
+    "rigging": "secondary_rigging",
+    "creative": "secondary_creative",
+    "review": "secondary_review",
+}
+
+
+def _render_aminate_semantic_stylesheet():
+    """Render token-backed role rules appended to the shared Aminate QSS."""
+    token = AMINATE_UI_TOKENS
+    category = AMINATE_CATEGORY_TOKEN_KEYS
+    return """
+QLabel#aminateIntroTitle[aminateCategory="primary"] {{
+    color: {on_surface};
+}}
+QLabel#aminateIntroTitle[aminateCategory="rigging"] {{
+    color: {on_surface};
+}}
+QLabel#aminateIntroTitle[aminateCategory="creative"] {{
+    color: {on_surface};
+}}
+QLabel#aminateIntroTitle[aminateCategory="review"] {{
+    color: {on_surface};
+}}
+QTabBar::tab:selected {{
+    background-color: {primary_selection};
+    border-color: {outline};
+}}
+QComboBox#aminateToolPicker QAbstractItemView {{
+    selection-background-color: {primary_selection};
+}}
+QListWidget#aminateQuickStartToolList::item,
+QListView#aminateQuickStartToolList::item {{
+    background-color: {surface};
+    color: {on_surface};
+    padding: 5px 8px;
+}}
+QListWidget#aminateQuickStartToolList::item:alternate,
+QListView#aminateQuickStartToolList::item:alternate {{
+    background-color: {surface_alt};
+    color: {on_surface};
+}}
+QListWidget#aminateQuickStartToolList::item:hover,
+QListView#aminateQuickStartToolList::item:hover {{
+    background-color: {primary_variant};
+    color: {on_surface};
+}}
+QListWidget#aminateQuickStartToolList::item:selected,
+QListView#aminateQuickStartToolList::item:selected {{
+    background-color: {primary_selection};
+    color: {on_surface};
+}}
+QListWidget#aminateQuickStartToolList::item:disabled,
+QListView#aminateQuickStartToolList::item:disabled {{
+    background-color: {background};
+    color: {on_surface_disabled};
+}}
+QToolButton#animatorsPencilCameraNotesMenuButton {{
+    background-color: {surface};
+    color: {on_surface};
+    border: 1px solid {outline};
+    border-radius: 6px;
+    padding: 5px 8px;
+}}
+QToolButton#animatorsPencilCameraNotesMenuButton:hover {{
+    background-color: {primary_variant};
+    border-color: {outline};
+}}
+QToolButton#animatorsPencilCameraNotesMenuButton:pressed,
+QToolButton#animatorsPencilCameraNotesMenuButton:checked {{
+    background-color: {primary_pressed};
+    border-color: {outline};
+}}
+QToolButton#animatorsPencilCameraNotesMenuButton:disabled {{
+    background-color: {background};
+    color: {on_surface_disabled};
+    border-color: {outline_variant};
+}}
+QMenu#animatorsPencilCameraNotesMenu {{
+    background-color: {surface};
+    color: {on_surface};
+    border: 1px solid {outline};
+    padding: 4px;
+}}
+QMenu#animatorsPencilCameraNotesMenu::item {{
+    background-color: {surface};
+    color: {on_surface};
+    padding: 6px 10px;
+}}
+QMenu#animatorsPencilCameraNotesMenu::item:selected {{
+    background-color: {primary_selection};
+    color: {on_surface};
+}}
+QMenu#animatorsPencilCameraNotesMenu::item:disabled {{
+    background-color: {surface};
+    color: {on_surface_disabled};
+}}
+QPushButton[aminateRole="primary"] {{
+    background-color: {primary_container};
+    color: {on_primary};
+    border-color: {primary_container};
+}}
+QPushButton[aminateRole="primary"]:hover {{
+    background-color: {primary_hover};
+    border-color: {primary_hover};
+}}
+QPushButton[aminateRole="primary"]:pressed {{
+    background-color: {primary_pressed};
+    border-color: {primary_pressed};
+}}
+QPushButton[aminateRole="primary"]:disabled {{
+    background-color: {disabled_container};
+    color: {on_surface_disabled};
+    border-color: {outline_variant};
+}}
+QLabel[aminateRole="success"] {{
+    color: {success};
+}}
+QLabel[aminateRole="warning"] {{
+    color: {warning};
+}}
+QLabel[aminateRole="error"] {{
+    color: {error};
+}}
+""".format(
+        primary=token[category["primary"]],
+        rigging=token[category["rigging"]],
+        creative=token[category["creative"]],
+        review=token[category["review"]],
+        background=token["background"],
+        surface=token["surface"],
+        surface_alt=token["surface_alt"],
+        on_surface=token["on_surface"],
+        primary_variant=token["primary_variant"],
+        primary_container=token["primary_container"],
+        primary_selection=token["primary_selection"],
+        on_primary=token["on_primary"],
+        primary_hover=token["primary_hover"],
+        primary_focus=token["primary_focus"],
+        primary_pressed=token["primary_pressed"],
+        disabled_container=token["disabled_container"],
+        on_surface_disabled=token["on_surface_disabled"],
+        outline=token["outline"],
+        outline_variant=token["outline_variant"],
+        success=token["success"],
+        warning=token["warning"],
+        error=token["error"],
+    )
+
+# Stable category mapping for new tab intros.  Unlisted names intentionally
+# fall back to the blue primary role in _build_tab_intro().
+AMINATE_TAB_CATEGORY = {
+    TAB_GUIDE: "primary",
+    TAB_STUDENT_CORE: "primary",
+    TAB_TIMING: "primary",
+    TAB_REFERENCE_MANAGER: "review",
+    TAB_PARENTING: "rigging",
+    TAB_CONTACT_HOLD: "rigging",
+    TAB_SURFACE_CONTACT: "rigging",
+    TAB_PIVOT: "primary",
+    TAB_IKFK: "rigging",
+    TAB_FACE_RETARGET: "rigging",
+    TAB_CONTROL_PICKER: "rigging",
+    TAB_ANIMATORS_PENCIL: "creative",
+    TAB_ANIMATION_ASSISTANT: "primary",
+    TAB_ANIMATION_STYLING: "creative",
+    TAB_HISTORY_TIMELINE: "review",
+    TAB_ONION: "creative",
+    TAB_ROTATION: "primary",
+    TAB_SKIN: "rigging",
+    TAB_RIG_SCALE: "rigging",
+    TAB_VIDEO: "review",
+    TAB_TIMELINE: "review",
+    TAB_SMEAR_FRAMES: "creative",
+    TAB_CUSTOMIZATION: "creative",
+}
+
+# Aminate is a Maya work surface, not a second copy of its tutorial website.
+# The active stylesheet therefore uses shallow neutral surfaces, compact native
+# controls, and tonal selection.  No tool gets a coloured perimeter, rail, or
+# underline.  Semantic colour is reserved for primary, success, warning, and
+# destructive states.
 AMINATE_WINDOW_STYLESHEET = """
-QDialog#mayaAnimWorkflowToolsWindow {
-    background-color: #2B2B2B;
-    color: #E8E8E8;
+QDialog#aminateWindow,
+QWidget[aminateTabPage="true"],
+QWidget[aminateEmbeddedPanel="true"],
+QScrollArea#aminateTabScroll,
+QScrollArea#aminateTabScroll > QWidget > QWidget {
+    background-color: #373737;
+    color: #F1F1F1;
 }
-QWidget[aminateTabPage="true"] {
-    background-color: #2B2B2B;
-    color: #E8E8E8;
+QWidget[aminateEmbeddedPanel="true"] QScrollArea,
+QWidget[aminateEmbeddedPanel="true"] QScrollArea > QWidget > QWidget {
+    background-color: #373737;
+    color: #F1F1F1;
 }
-QScrollArea#mayaAnimWorkflowTabScroll {
-    background-color: #2B2B2B;
+QScrollArea#aminateTabScroll {
     border: 0px;
 }
-QScrollArea#mayaAnimWorkflowTabScroll > QWidget > QWidget {
-    background-color: #2B2B2B;
-}
-QTabWidget#mayaAnimWorkflowTabWidget::pane {
-    background-color: #2B2B2B;
-    border: 1px solid #3C3C3C;
-    border-radius: 8px;
-    top: -1px;
+QTabWidget#aminateTabWidget::pane {
+    background-color: #373737;
+    border: 0px;
 }
 QTabBar::tab {
-    background-color: #242424;
-    color: #CFCFCF;
-    border: 1px solid #3C3C3C;
-    border-bottom-color: #2B2B2B;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-    min-width: 108px;
-    max-width: 190px;
-    padding: 7px 10px;
-    margin-right: 2px;
+    background-color: #414141;
+    color: #B8B8B8;
+    border: 0px;
+    min-width: 96px;
+    max-width: 180px;
+    padding: 5px 8px;
+    margin-right: 1px;
 }
 QTabBar::tab:selected {
-    background-color: #3A3A3A;
-    color: #F2F2F2;
-    border-color: #4CC9F0;
+    background-color: #566A7A;
+    color: #FFFFFF;
+    font-weight: 700;
 }
 QTabBar::tab:hover {
-    background-color: #333333;
+    background-color: #505050;
     color: #FFFFFF;
 }
 QTabBar QToolButton {
@@ -169,76 +391,179 @@ QTabBar QToolButton {
     padding: 0px;
     background: transparent;
 }
-QToolButton#mayaAnimWorkflowTabNavButton {
-    min-width: 34px;
-    max-width: 44px;
-    min-height: 24px;
-    max-height: 26px;
-    padding: 2px 6px;
-    border-radius: 7px;
-    background-color: #113B4A;
-    color: #FFFFFF;
-    border: 1px solid #4CC9F0;
-    font-weight: 800;
+QWidget#aminateToolNavigation {
+    background-color: #414141;
+    border: 0px;
 }
-QToolButton#mayaAnimWorkflowTabNavButton:hover {
-    background-color: #176075;
-    border-color: #79E2FF;
-}
-QToolButton#mayaAnimWorkflowTabNavButton:pressed {
-    background-color: #0E2C38;
-    border-color: #B7F2FF;
-}
-QToolButton#mayaAnimWorkflowTabNavButton:disabled {
-    background-color: #252525;
-    color: #6E6E6E;
-    border-color: #3A3A3A;
-}
-QFrame#mayaAnimWorkflowTabIntro {
-    background-color: #353535;
-    color: #E8E8E8;
-    border: 1px solid #4A4A4A;
-    border-left: 4px solid #4CC9F0;
-    border-radius: 8px;
-}
-QLabel#mayaAnimWorkflowIntroTitle {
-    color: #F2F2F2;
+QLabel#aminateToolNavigationLabel {
+    color: #B8B8B8;
     font-weight: 700;
 }
-QLabel#mayaAnimWorkflowStatusLabel {
-    background-color: #202020;
-    color: #E8E8E8;
-    border: 1px solid #3C3C3C;
-    border-radius: 6px;
-    padding: 6px 8px;
+QComboBox#aminateToolPicker {
+    min-height: 26px;
+    background-color: #505050;
+    color: #F1F1F1;
+    border: 1px solid #5C5C5C;
+    border-radius: 3px;
+    padding: 2px 26px 2px 7px;
+    selection-background-color: #566A7A;
 }
-QLabel#mayaAnimWorkflowBrandLabel,
-QLabel#mayaAnimWorkflowVersionLabel {
-    color: #BDBDBD;
-}
-QPushButton,
-QToolButton {
-    background-color: #3A3A3A;
-    color: #F2F2F2;
-    border: 1px solid #555555;
-    border-radius: 6px;
-    padding: 5px 8px;
-}
-QPushButton:hover,
-QToolButton:hover {
-    background-color: #454545;
+QComboBox#aminateToolPicker:hover,
+QComboBox#aminateToolPicker:focus,
+QComboBox#aminateToolPicker:on {
+    background-color: #585858;
     border-color: #6A6A6A;
 }
-QPushButton:pressed,
-QToolButton:pressed {
-    background-color: #2F5D66;
-    border-color: #4CC9F0;
+QComboBox#aminateToolPicker::drop-down {
+    width: 22px;
+    border: 0px;
+    border-left: 1px solid #5C5C5C;
+    background-color: #4A4A4A;
 }
-QPushButton:disabled,
-QToolButton:disabled {
-    background-color: #262626;
-    color: #777777;
-    border-color: #363636;
+QComboBox#aminateToolPicker::drop-down:hover {
+    background-color: #5A5A5A;
+}
+QComboBox#aminateToolPicker QAbstractItemView {
+    background-color: #414141;
+    color: #F1F1F1;
+    border: 1px solid #5C5C5C;
+    selection-background-color: #566A7A;
+    selection-color: #FFFFFF;
+    outline: 0px;
+    padding: 2px;
+}
+QFrame#aminateTabIntro {
+    background-color: transparent;
+    color: #F1F1F1;
+    border: 0px;
+}
+QLabel#aminateIntroTitle {
+    color: #F1F1F1;
+    font-size: 15px;
+    font-weight: 700;
+}
+QToolButton#aminateIntroToggle,
+QToolButton#aminateSupportButton {
+    min-width: 0px;
+    padding: 3px 6px;
+    color: #D4D4D4;
+    background-color: transparent;
+    border: 0px;
+    border-radius: 3px;
+}
+QToolButton#aminateIntroToggle:hover,
+QToolButton#aminateSupportButton:hover {
+    background-color: #505050;
+    color: #FFFFFF;
+}
+QToolButton#aminateIntroToggle:pressed,
+QToolButton#aminateIntroToggle:checked,
+QToolButton#aminateSupportButton:pressed {
+    background-color: #494949;
+    color: #FFFFFF;
+}
+QWidget#aminateIntroHelp {
+    background-color: #414141;
+    border: 0px;
+}
+QFrame#aminateCoach {
+    background-color: transparent;
+    border: 0px;
+}
+QLabel#aminateCoachTitle {
+    color: #D7D7D7;
+    font-weight: 700;
+}
+QLabel#aminateCoachStep {
+    color: #C8C8C8;
+}
+QPushButton#aminateTutorialButton {
+    background-color: transparent;
+    color: #C7D7E4;
+    border: 0px;
+    padding: 3px 0px;
+    min-height: 20px;
+    text-align: left;
+}
+QPushButton#aminateTutorialButton:hover {
+    background-color: transparent;
+    color: #FFFFFF;
+    text-decoration: underline;
+}
+QLabel#aminateStatusLabel {
+    background-color: transparent;
+    color: #B8B8B8;
+    border: 0px;
+    padding: 3px 1px;
+}
+QLabel#aminateBrandLabel,
+QLabel#aminateVersionLabel {
+    color: #9F9F9F;
+}
+QPushButton {
+    background-color: #505050;
+    color: #F1F1F1;
+    border: 1px solid #5C5C5C;
+    border-radius: 3px;
+    padding: 4px 7px;
+    min-height: 24px;
+}
+QPushButton:hover {
+    background-color: #5A5A5A;
+    border-color: #666666;
+}
+QPushButton:pressed,
+QPushButton:checked {
+    background-color: #454545;
+    border-color: #5C5C5C;
+}
+QPushButton#animatorsPencilStartDrawingButton[aminateDrawingActive="true"] {
+    background-color: #1F7A43;
+    color: #FFFFFF;
+    border-color: #8F8F8F;
+    font-weight: 700;
+}
+QPushButton#animatorsPencilStartDrawingButton[aminateDrawingActive="true"]:hover {
+    background-color: #278E50;
+    border-color: #A8A8A8;
+}
+QPushButton#animatorsPencilStartDrawingButton[aminateDrawingActive="true"]:focus {
+    border-color: #FFFFFF;
+}
+QPushButton:focus {
+    border-color: #6A6A6A;
+}
+QPushButton:disabled {
+    background-color: #414141;
+    color: #858585;
+    border-color: #4B4B4B;
+}
+QPushButton[aminateRole="primary"] {
+    background-color: #445A6D;
+    color: #FFFFFF;
+    border-color: #445A6D;
+    font-weight: 700;
+}
+QPushButton[aminateRole="primary"]:hover {
+    background-color: #526B80;
+    border-color: #526B80;
+}
+QPushButton[aminateRole="primary"]:pressed {
+    background-color: #384A59;
+    border-color: #384A59;
+}
+QPushButton[aminateRole="primary"]:disabled {
+    background-color: #454545;
+    color: #858585;
+    border-color: #454545;
+}
+QPushButton[aminateRole="danger"] {
+    background-color: #5A3434;
+    color: #FFF0F0;
+    border-color: #5A3434;
+}
+QLabel[aminateRole="muted"] {
+    color: #B8B8B8;
 }
 QLineEdit,
 QPlainTextEdit,
@@ -246,12 +571,12 @@ QTextEdit,
 QComboBox,
 QSpinBox,
 QDoubleSpinBox {
-    background-color: #1E1E1E;
-    color: #F2F2F2;
-    border: 1px solid #444444;
-    border-radius: 5px;
-    padding: 4px;
-    selection-background-color: #335C67;
+    background-color: #2F2F2F;
+    color: #F1F1F1;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 3px;
+    selection-background-color: #566A7A;
 }
 QLineEdit:focus,
 QPlainTextEdit:focus,
@@ -259,7 +584,8 @@ QTextEdit:focus,
 QComboBox:focus,
 QSpinBox:focus,
 QDoubleSpinBox:focus {
-    border-color: #4CC9F0;
+    background-color: #343434;
+    border-color: #686868;
 }
 QComboBox::drop-down {
     border: 0px;
@@ -268,61 +594,64 @@ QComboBox::drop-down {
 QCheckBox,
 QRadioButton,
 QLabel {
-    color: #E8E8E8;
+    color: #F1F1F1;
 }
 QGroupBox {
-    background-color: #303030;
-    color: #F2F2F2;
-    border: 1px solid #444444;
-    border-radius: 8px;
-    margin-top: 14px;
-    padding: 8px;
+    background-color: transparent;
+    color: #F1F1F1;
+    border: 0px;
+    margin-top: 12px;
+    padding-top: 5px;
+    font-weight: 400;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 10px;
-    padding: 0px 4px;
-    color: #F2F2F2;
+    left: 0px;
+    padding: 0px;
+    color: #D7D7D7;
+    font-weight: 700;
 }
 QTableWidget,
 QTreeWidget,
 QListWidget {
-    background-color: #202020;
+    background-color: #303030;
     color: #EFEFEF;
-    gridline-color: #3C3C3C;
-    border: 1px solid #3C3C3C;
-    border-radius: 6px;
-    selection-background-color: #335C67;
+    gridline-color: #4B4B4B;
+    border: 1px solid #4B4B4B;
+    border-radius: 2px;
+    selection-background-color: #566A7A;
     selection-color: #FFFFFF;
 }
 QHeaderView::section {
-    background-color: #303030;
-    color: #F2F2F2;
-    border: 1px solid #444444;
+    background-color: #454545;
+    color: #F1F1F1;
+    border: 0px;
+    border-right: 1px solid #555555;
+    border-bottom: 1px solid #555555;
     padding: 4px;
 }
 QScrollBar:vertical,
 QScrollBar:horizontal {
-    background-color: #202020;
+    background-color: #333333;
     border: 0px;
     margin: 0px;
 }
 QScrollBar:vertical {
-    width: 14px;
+    width: 12px;
 }
 QScrollBar:horizontal {
-    height: 14px;
+    height: 12px;
 }
 QScrollBar::handle:vertical,
 QScrollBar::handle:horizontal {
-    background-color: #4A4A4A;
-    border-radius: 4px;
-    min-height: 24px;
-    min-width: 24px;
+    background-color: #5A5A5A;
+    border-radius: 3px;
+    min-height: 22px;
+    min-width: 22px;
 }
 QScrollBar::handle:vertical:hover,
 QScrollBar::handle:horizontal:hover {
-    background-color: #5A5A5A;
+    background-color: #686868;
 }
 QScrollBar::add-line,
 QScrollBar::sub-line {
@@ -336,12 +665,12 @@ TAB_HELP_TEXT = {
     TAB_TIMING: "Use this when you want the Scene Helpers quick buttons for Auto Key, Auto Snap To Frames, Animation Layer Tint, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Delete Render Environment, Camera Offset controls, and Camera Preset plus whole-frame timing cleanup.",
     TAB_REFERENCE_MANAGER: "Use this when you want one zip containing the saved Maya scene plus referenced scenes, textures, image planes, audio, caches, and a manifest so the shot can move to another machine.",
     TAB_PARENTING: "Use this when one prop or control needs to switch between hand, gun, world, or mixed parents without popping. Best for reloads, pickups, passes, and drops.",
-    TAB_CONTACT_HOLD: "Use this when a hand or foot should stay planted on chosen world axes while the body keeps moving. The hold stays live, editable, and reversible.",
-    TAB_SURFACE_CONTACT: "Use this when a hand, foot, or other control should stay clamped to a selected mesh surface in real time. The solver stays live, follows the selected mesh, and can be keyed on or off.",
-    TAB_PIVOT: "Use this when you want to turn from a temporary pivot point without changing the real rig pivot.",
+    TAB_CONTACT_HOLD: "Use this to manage several planted hand or foot ranges while the root keeps moving. Turn saved holds on for the held/on-the-spot result, or off to restore the original forward-moving animation.",
+    TAB_SURFACE_CONTACT: "Use this when hand, foot, or object controls must stay on or outside one or more live mesh surfaces, including slopes, uneven ground, steps, and curved props.",
+    TAB_PIVOT: "Use this when selected controls must turn around a temporary point for one frame or a highlighted Time Slider range, without changing the real rig pivot.",
     TAB_IKFK: "Use this when you need to switch an arm or leg cleanly between IK and FK and keep the pose matched.",
     TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. Put a source control on the left and its target control on the right. Empty rows are ignored. Auto Map By Name matches controls quickly from names, and Retarget All Controls bakes onto the target controls. Reduce Keys keeps only the original source keyframes.",
-    TAB_CONTROL_PICKER: "Use this when you want a synced list and visual control map for a rig. It auto-finds likely controls by name, groups them by face, body, side, tail, wings, and FK/IK, keeps Maya and the picker in sync, lets you reorder the list, and shows the keyable attrs for the control you pick.",
+    TAB_CONTROL_PICKER: "Choose any character or animal rig root and Aminate builds selection sets from its controls, hierarchy, body area, side, and FK/IK mode. Parent groups select every child, Ctrl/Shift combines groups, custom sets can mix any controls, and the live Front/Side map places buttons from the rig's real control positions.",
     TAB_ANIMATORS_PENCIL: "Use this when you want expanded Blue Pencil-style drawing stored as real Maya curves and text in the scene. Pencil marks stay visible without this tool installed. Use it for 2D animation notes, layers, frame markers, ghosting, retiming, camera-based drawings, and quick annotation shapes.",
     TAB_ANIMATION_ASSISTANT: "Use this when you want Aminate to check pose balance. Pick a floor plane, add the controls that can touch the floor, pick a center of gravity control, and get a tiny balanced or unbalanced viewport light plus support area drawing.",
     TAB_ANIMATION_STYLING: "Use this when you want Into the Spider-Verse-style held keys. Set a hold length, auto-copy new key values into the future, and mark timeline ranges where nearby keys block that hold.",
@@ -353,7 +682,287 @@ TAB_HELP_TEXT = {
     TAB_VIDEO: "Use this when you want video or image reference in the scene for tracing, timing, and annotation.",
     TAB_TIMELINE: "Use this when you want readable colored notes directly on the timeline so you can scrub and review shot notes.",
     TAB_SMEAR_FRAMES: "Use this when you want a quick static smear mesh for a fast motion accent. The first slice creates clean Unreal-friendly mesh geometry on the current frame without touching the rig.",
-    TAB_CUSTOMIZATION: "Use this when you want one place for Aminate animation colors: timeline highlight, note ranges, keyframe emphasis, and Graph Editor tangent or curve accents where Maya exposes those native color slots.",
+    TAB_CUSTOMIZATION: "Use this when you want one place for animation-data colours such as timeline highlights, note ranges, keyframe emphasis, and Graph Editor curves. These colours describe your scene; they do not change Aminate's product palette.",
+}
+TAB_WORKFLOW_STEPS = {
+    TAB_GUIDE: (
+        "Type the job you are trying to do.",
+        "Pick the tool whose description matches.",
+        "Open it, or use the picture tutorial for more help.",
+    ),
+    TAB_STUDENT_CORE: (
+        "Select the animated controls or keys.",
+        "Choose one timing or workflow button.",
+        "Check the timeline before moving on.",
+    ),
+    TAB_TIMING: (
+        "Choose the scene job you need.",
+        "Check the selected objects and timeline range.",
+        "Run one helper and read its status message.",
+    ),
+    TAB_REFERENCE_MANAGER: (
+        "Save the Maya scene.",
+        "Refresh and check the needed-file list.",
+        "Package the scene and its files into one zip.",
+    ),
+    TAB_PARENTING: (
+        "Add the prop that will change parents.",
+        "Pick and save each hand, hip, or world target.",
+        "Switch on the needed frame and check that it does not pop.",
+    ),
+    TAB_CONTACT_HOLD: (
+        "Pick the hand or foot control.",
+        "Choose the frames and axes that must stay still.",
+        "Create the hold, then switch between held and original motion.",
+    ),
+    TAB_SURFACE_CONTACT: (
+        "Pick the hand, foot, or object controls.",
+        "Pick the floor, slope, or prop meshes.",
+        "Check the setup, then create the collision.",
+    ),
+    TAB_PIVOT: (
+        "Pick the controls, then create and move the temporary pivot marker.",
+        "Highlight the frames to change, or leave the Time Slider unhighlighted for only the current frame.",
+        "Rotate the marker and turn from it. Move the same marker and repeat for the next range.",
+    ),
+    TAB_IKFK: (
+        "Pick one arm, leg, or chain.",
+        "Find or fill in its FK, IK, and switch controls.",
+        "Save the setup, then switch and check for a pop.",
+    ),
+    TAB_FACE_RETARGET: (
+        "Load the source controls.",
+        "Load the matching target controls and check the pairs.",
+        "Retarget, then scrub the result before saving.",
+    ),
+    TAB_CONTROL_PICKER: (
+        "Select the character or animal rig root, then click Scan Selected Rig.",
+        "Open a limb or tail group and choose only FK or IK before keying.",
+        "Ctrl/Shift-click groups, save useful mixes as Custom Sets, and check the live map.",
+    ),
+    TAB_ANIMATORS_PENCIL: (
+        "Choose a saved view, drawing tool, colour, and layer.",
+        "Start drawing and make the planning marks.",
+        "Switch frames or views and check that each drawing stays where it belongs.",
+    ),
+    TAB_ANIMATION_ASSISTANT: (
+        "Pick the floor and centre-of-gravity control.",
+        "Add the hands, feet, or contact controls.",
+        "Refresh and adjust the pose until the balance guide makes sense.",
+    ),
+    TAB_ANIMATION_STYLING: (
+        "Select the controls and choose a hold length.",
+        "Check the overlap warning.",
+        "Apply the hold or stepped curves, then scrub the timing.",
+    ),
+    TAB_HISTORY_TIMELINE: (
+        "Save the scene first.",
+        "Make a step or protected milestone.",
+        "Pick a restore point and restore only when you need it.",
+    ),
+    TAB_ONION: (
+        "Select the animated character or mesh.",
+        "Attach it and choose the past/future frame spacing.",
+        "Judge the arc, then clear the ghosts when finished.",
+    ),
+    TAB_ROTATION: (
+        "Select the controls with strange rotation.",
+        "Analyze before changing anything.",
+        "Use the suggested fix, then scrub through the repaired keys.",
+    ),
+    TAB_SKIN: (
+        "Choose whether you are fixing transforms or copying weights.",
+        "Load the source and target meshes carefully.",
+        "Run the safe copy, read the report, and inspect the duplicate before replacing anything.",
+    ),
+    TAB_RIG_SCALE: (
+        "Pick the rig control and top skeleton joint.",
+        "Choose the exact size or percentage.",
+        "Check the setup, make the copy, and export only the copy.",
+    ),
+    TAB_VIDEO: (
+        "Choose the active view and video or image sequence.",
+        "Set the placement, size, and start frame.",
+        "Make the tracing card and scrub to check timing.",
+    ),
+    TAB_TIMELINE: (
+        "Highlight the frame range.",
+        "Write a short title and clear note.",
+        "Add the note, then scrub into its range to check it.",
+    ),
+    TAB_SMEAR_FRAMES: (
+        "Select the animated mesh on the smear frame.",
+        "Choose the frame offsets and strength.",
+        "Create the smear and check that only the intended frame shows it.",
+    ),
+    TAB_CUSTOMIZATION: (
+        "Choose Maya Graphite or Studio Contrast.",
+        "Pick only the colours you want to change.",
+        "Apply, inspect the UI, and reset if the result is unclear.",
+    ),
+}
+TAB_TUTORIAL_SECTION_IDS = {
+    TAB_GUIDE: "quick-start",
+    TAB_STUDENT_CORE: "toolkit-bar",
+    TAB_TIMING: "scene-helpers",
+    TAB_REFERENCE_MANAGER: "reference-manager",
+    TAB_PARENTING: "dynamic-parenting",
+    TAB_CONTACT_HOLD: "hand-foot-hold",
+    TAB_SURFACE_CONTACT: "surface-contact",
+    TAB_PIVOT: "dynamic-pivot",
+    TAB_IKFK: "universal-ikfk",
+    TAB_FACE_RETARGET: "retargeter",
+    TAB_CONTROL_PICKER: "control-picker",
+    TAB_ANIMATORS_PENCIL: "animators-pencil",
+    TAB_ANIMATION_ASSISTANT: "animation-assistant",
+    TAB_ANIMATION_STYLING: "animation-styling",
+    TAB_HISTORY_TIMELINE: "history-timeline",
+    TAB_ONION: "onion-skin",
+    TAB_ROTATION: "rotation-doctor",
+    TAB_SKIN: "character-skinning",
+    TAB_RIG_SCALE: "rig-scale",
+    TAB_VIDEO: "video-reference",
+    TAB_TIMELINE: "timeline-notes",
+    TAB_SMEAR_FRAMES: "smear-frames",
+    TAB_CUSTOMIZATION: "customization",
+}
+AMINATE_EMBEDDED_PANEL_STYLESHEET = """
+QWidget[aminateEmbeddedPanel="true"],
+QWidget[aminateEmbeddedPanel="true"] QWidget,
+QWidget[aminateEmbeddedPanel="true"] QScrollArea,
+QWidget[aminateEmbeddedPanel="true"] QAbstractScrollArea,
+QWidget[aminateEmbeddedPanel="true"] QWidget#qt_scrollarea_viewport {
+    background-color: #373737;
+    color: #F1F1F1;
+}
+QWidget[aminateEmbeddedPanel="true"] QLabel,
+QWidget[aminateEmbeddedPanel="true"] QCheckBox,
+QWidget[aminateEmbeddedPanel="true"] QRadioButton {
+    background-color: transparent;
+    color: #F1F1F1;
+}
+QWidget[aminateEmbeddedPanel="true"] QScrollArea,
+QWidget[aminateEmbeddedPanel="true"] QAbstractScrollArea,
+QWidget[aminateEmbeddedPanel="true"] QWidget#qt_scrollarea_viewport {
+    border: 0px;
+}
+QWidget[aminateEmbeddedPanel="true"] QGroupBox {
+    background-color: transparent;
+    color: #F1F1F1;
+    border: 0px;
+    margin-top: 11px;
+    padding-top: 5px;
+}
+QWidget[aminateEmbeddedPanel="true"] QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 0px;
+    padding: 0px;
+    color: #D7D7D7;
+    font-weight: 700;
+}
+QWidget[aminateEmbeddedPanel="true"] QLineEdit,
+QWidget[aminateEmbeddedPanel="true"] QTextEdit,
+QWidget[aminateEmbeddedPanel="true"] QPlainTextEdit,
+QWidget[aminateEmbeddedPanel="true"] QSpinBox,
+QWidget[aminateEmbeddedPanel="true"] QDoubleSpinBox,
+QWidget[aminateEmbeddedPanel="true"] QComboBox,
+QWidget[aminateEmbeddedPanel="true"] QListView,
+QWidget[aminateEmbeddedPanel="true"] QTreeView,
+QWidget[aminateEmbeddedPanel="true"] QTableView,
+QWidget[aminateEmbeddedPanel="true"] QListWidget,
+QWidget[aminateEmbeddedPanel="true"] QTreeWidget,
+QWidget[aminateEmbeddedPanel="true"] QTableWidget {
+    background-color: #303030;
+    alternate-background-color: #3A3A3A;
+    color: #F1F1F1;
+    border: 1px solid #505050;
+    border-radius: 3px;
+    selection-background-color: #566A7A;
+    selection-color: #FFFFFF;
+}
+QWidget[aminateEmbeddedPanel="true"] QHeaderView::section {
+    background-color: #454545;
+    color: #F1F1F1;
+    border: 0px;
+    border-right: 1px solid #555555;
+    border-bottom: 1px solid #555555;
+    padding: 4px 5px;
+}
+QWidget[aminateEmbeddedPanel="true"] QPushButton {
+    background-color: #505050;
+    color: #F1F1F1;
+    border: 1px solid #5C5C5C;
+    border-radius: 3px;
+    padding: 4px 7px;
+}
+QWidget[aminateEmbeddedPanel="true"] QPushButton:hover {
+    background-color: #5A5A5A;
+    border-color: #666666;
+}
+QWidget[aminateEmbeddedPanel="true"] QPushButton:pressed {
+    background-color: #454545;
+    border-color: #5C5C5C;
+}
+QWidget[aminateEmbeddedPanel="true"] QPushButton[aminateRole="primary"] {
+    background-color: #445A6D;
+    border-color: #445A6D;
+    color: #FFFFFF;
+    font-weight: 700;
+}
+QWidget[aminateEmbeddedPanel="true"] QPushButton[aminateRole="danger"] {
+    background-color: #5A3434;
+    border-color: #5A3434;
+    color: #FFF0F0;
+}
+QWidget[aminateEmbeddedPanel="true"] QTabWidget::pane {
+    background-color: #373737;
+    border: 0px;
+}
+QWidget[aminateEmbeddedPanel="true"] QTabBar::tab {
+    background-color: #414141;
+    color: #B8B8B8;
+    border: 0px;
+    padding: 4px 7px;
+}
+QWidget[aminateEmbeddedPanel="true"] QTabBar::tab:selected {
+    background-color: #566A7A;
+    color: #FFFFFF;
+    font-weight: 700;
+}
+"""
+
+
+AMINATE_PRIMARY_ACTION_LABELS = {
+    "Package Scene To Zip",
+    "Reparent to Selected Parent",
+    "Create / Update Hold",
+    "Create / Update Collision",
+    "Turn From Pivot",
+    "Switch FK -> IK",
+    "Switch IK -> FK",
+    "Retarget All Controls",
+    "Start Drawing",
+    "Apply Hold",
+    "Save Step",
+    "Attach Selected",
+    "Use Best Fix",
+    "Track A: Copy Whole Character (Safe)",
+    "Transfer Skin (Auto)",
+    "Make Copy",
+    "Make Tracing Card",
+    "Add Note",
+    "Create Smear Frame",
+    "Apply Colors",
+}
+AMINATE_DANGER_ACTION_LABELS = {
+    "Clear Pivot",
+    "Delete Picked Switch",
+    "Delete Hold",
+    "Delete Selected",
+    "Delete All Collision",
+    "Delete Frozen Copy",
+    "Delete Export Copy",
+    "Delete Picked Note",
 }
 LEGACY_WORKFLOW_SHELF_DOC_TAGS = (
     maya_onion_skin.SHELF_BUTTON_DOC_TAG,
@@ -411,11 +1020,6 @@ def _debug(message):
 def _warning(message):
     if MAYA_AVAILABLE:
         om.MGlobal.displayWarning("[Aminate] {0}".format(message))
-
-
-def _error(message):
-    if MAYA_AVAILABLE:
-        om.MGlobal.displayError("[Aminate] {0}".format(message))
 
 
 def _qt_flag(scope_name, member_name, fallback=None):
@@ -503,24 +1107,29 @@ def _allow_tiny_shell_widget(widget):
 
 
 def _style_donate_button(button):
+    """Keep Aminate's canonical yellow Donate action compact and readable."""
     if not button or not QtWidgets:
         return
-    button.setMinimumWidth(92)
+    button.setMinimumWidth(70)
+    button.setCursor(_qt_flag("CursorShape", "PointingHandCursor", None))
     button.setStyleSheet(
         """
-        QPushButton {
+        QToolButton {
             background-color: #FFC439;
             color: #111111;
-            border: 1px solid #E0B12F;
-            border-radius: 6px;
-            padding: 6px 14px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 4px 10px;
             font-weight: 600;
         }
-        QPushButton:hover {
+        QToolButton:hover {
             background-color: #FFD35A;
         }
-        QPushButton:pressed {
+        QToolButton:pressed {
             background-color: #F0B92B;
+        }
+        QToolButton:focus {
+            border-color: #FFFFFF;
         }
         """
     )
@@ -551,6 +1160,18 @@ def _open_local_file(path):
         except Exception:
             return False
     return False
+
+
+def _open_local_file_at_fragment(path, fragment):
+    if not path or not os.path.exists(path):
+        return False
+    if QtGui and QtCore and hasattr(QtGui, "QDesktopServices"):
+        url = QtCore.QUrl.fromLocalFile(path)
+        if fragment:
+            url.setFragment(str(fragment))
+        if QtGui.QDesktopServices.openUrl(url):
+            return True
+    return _open_local_file(path)
 
 
 def _ensure_attr(node_name, attr_name, attr_type="string"):
@@ -710,31 +1331,10 @@ def _qt_object_valid(widget):
         return False
 
 
-def _safe_close_qt_widget(widget, delete_later=True):
-    if not _qt_object_valid(widget):
-        return
-    try:
-        widget.close()
-    except Exception:
-        pass
-    if not delete_later or not _qt_object_valid(widget):
-        return
-    try:
-        widget.setParent(None)
-    except Exception:
-        pass
-    try:
-        widget.deleteLater()
-    except Exception:
-        pass
-
-
-def _delete_workspace_control(name):
-    if MAYA_AVAILABLE and cmds and name and cmds.workspaceControl(name, exists=True):
-        try:
-            cmds.deleteUI(name, control=True)
-        except Exception:
-            cmds.deleteUI(name)
+def _hide_workspace_control(name):
+    # Maya 2026 can fault when a retained Aminate workspace changes native
+    # visibility.  Launch paths reuse the existing dock instead of hiding it.
+    return False
 
 
 def _workflow_widgets():
@@ -753,18 +1353,6 @@ def _workflow_widgets():
     return widgets
 
 
-def _widget_has_ancestor_object_name(widget, object_name):
-    walker = widget
-    while walker is not None:
-        try:
-            if walker.objectName() == object_name:
-                return True
-            walker = walker.parentWidget()
-        except Exception:
-            return False
-    return False
-
-
 def _widget_is_ancestor(possible_ancestor, widget):
     walker = widget
     while walker is not None:
@@ -777,13 +1365,6 @@ def _widget_is_ancestor(possible_ancestor, widget):
     return False
 
 
-def _find_docked_workflow_widget():
-    for widget in _workflow_widgets():
-        if widget.objectName() == WINDOW_OBJECT_NAME and _widget_has_ancestor_object_name(widget, WORKSPACE_CONTROL_NAME):
-            return widget
-    return None
-
-
 def _cleanup_duplicate_workflow_widgets(keep_widget=None):
     for widget in _workflow_widgets():
         if not _qt_object_valid(widget):
@@ -792,11 +1373,10 @@ def _cleanup_duplicate_workflow_widgets(keep_widget=None):
             continue
         if keep_widget is not None and _widget_is_ancestor(widget, keep_widget):
             continue
-        _safe_close_qt_widget(widget)
-    try:
-        QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
-    except Exception:
-        pass
+        try:
+            widget.hide()
+        except Exception:
+            pass
 
 
 def _ensure_single_workflow_widget(keep_widget=None):
@@ -808,63 +1388,35 @@ def _ensure_single_workflow_widget(keep_widget=None):
 
 
 def _close_existing_window():
-    global GLOBAL_CONTROLLER
-    global GLOBAL_WINDOW
-    global GLOBAL_DOCK_HOST
     if GLOBAL_WINDOW is not None and _qt_object_valid(GLOBAL_WINDOW):
+        docked_workspace = _workspace_control_exists(WORKSPACE_CONTROL_NAME)
+        if docked_workspace:
+            # Maya 2026 Qt6Core faults when retained dock visibility changes.
+            # Keep one live dock plus window for safe reuse.
+            return False
+        pencil_panel = getattr(GLOBAL_WINDOW, "animators_pencil_panel", None)
+        suspend_runtime = getattr(pencil_panel, "_deactivate_runtime_input", None)
+        if suspend_runtime:
+            try:
+                suspend_runtime()
+            except Exception:
+                pass
         try:
             hide_extras = getattr(GLOBAL_WINDOW, "_hide_toolbar_extras_if_needed", None)
             if hide_extras:
                 hide_extras()
         except Exception:
             pass
-    docked_window = GLOBAL_WINDOW is not None and _qt_object_valid(GLOBAL_WINDOW) and _widget_has_ancestor_object_name(GLOBAL_WINDOW, WORKSPACE_CONTROL_NAME)
-    if docked_window or _workspace_control_exists(WORKSPACE_CONTROL_NAME):
-        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
-        _process_qt_events()
-    else:
-        _safe_close_qt_widget(GLOBAL_WINDOW)
-    if _workspace_control_exists(LEGACY_WORKSPACE_CONTROL_NAME):
-        _delete_workspace_control(LEGACY_WORKSPACE_CONTROL_NAME)
-        _process_qt_events()
-    else:
-        _safe_close_qt_widget(GLOBAL_DOCK_HOST)
-    for module in (
-        maya_contact_hold,
-        maya_surface_contact,
-        maya_onion_skin,
-        maya_rotation_doctor,
-        maya_skin_transfer,
-        maya_skinning_cleanup,
-        maya_rig_scale_export,
-        maya_video_reference_tool,
-        maya_timeline_notes,
-        maya_timing_tools,
-        maya_face_retarget,
-    ):
         try:
-            close_fn = getattr(module, "_close_existing_window", None)
-            if close_fn:
-                close_fn()
+            GLOBAL_WINDOW._remove_key_passthrough_filter()
         except Exception:
             pass
-    GLOBAL_WINDOW = None
-    GLOBAL_DOCK_HOST = None
-    GLOBAL_CONTROLLER = None
-    if not QtWidgets:
-        return
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        return
-    try:
-        app.processEvents()
-    except Exception:
-        pass
-    _cleanup_duplicate_workflow_widgets()
-    try:
-        app.processEvents()
-    except Exception:
-        pass
+        try:
+            GLOBAL_WINDOW.setVisible(False)
+        except Exception:
+            pass
+    _process_qt_events()
+    return True
 
 
 def _matrix_from_node(node_name):
@@ -893,6 +1445,83 @@ def _set_world_translation(node_name, values):
 
 def _set_world_rotation(node_name, values):
     cmds.xform(node_name, worldSpace=True, rotation=values)
+
+
+def _angle_delta(first, second):
+    """Return the shortest Euler-angle delta in degrees."""
+    return ((float(first) - float(second) + 180.0) % 360.0) - 180.0
+
+
+def _pose_mismatches(node_name, translation, rotation):
+    """Report world-space channels that still differ after a copy attempt."""
+    mismatches = []
+    try:
+        current_translation = _world_translation(node_name)
+    except Exception:
+        current_translation = None
+    if current_translation is None or len(current_translation) < 3:
+        mismatches.extend(("translateX", "translateY", "translateZ"))
+    else:
+        for index, value in enumerate(translation[:3]):
+            if abs(float(current_translation[index]) - float(value)) > 1.0e-4:
+                mismatches.append(("translateX", "translateY", "translateZ")[index])
+    try:
+        current_rotation = _world_rotation(node_name)
+    except Exception:
+        current_rotation = None
+    if current_rotation is None or len(current_rotation) < 3:
+        mismatches.extend(("rotateX", "rotateY", "rotateZ"))
+    else:
+        for index, value in enumerate(rotation[:3]):
+            if abs(_angle_delta(current_rotation[index], value)) > 1.0e-4:
+                mismatches.append(("rotateX", "rotateY", "rotateZ")[index])
+    return mismatches
+
+
+def _copy_world_pose(target_node, source_node):
+    """Copy world translation and rotation, returning honest pose/key status.
+
+    Maya controls can expose locked translate or rotate channels.  A failed
+    xform is intentionally retained as a mismatch instead of being reported as
+    an exact match.  Callers can still finish the switch and surface the
+    actionable mismatch to the user.
+    """
+    result = {
+        "target": target_node,
+        "source": source_node,
+        "translation": False,
+        "rotation": False,
+        "mismatches": [],
+        "locked": [],
+    }
+    if not target_node or not source_node:
+        result["mismatches"] = ["missing target or source"]
+        return result
+    try:
+        translation = list(_world_translation(source_node))
+        rotation = list(_world_rotation(source_node))
+    except Exception as exc:
+        result["mismatches"] = ["could not read source pose: {0}".format(exc)]
+        return result
+    for attr_name in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"):
+        plug = "{0}.{1}".format(target_node, attr_name)
+        try:
+            if cmds.objExists(plug) and cmds.getAttr(plug, lock=True):
+                result["locked"].append(attr_name)
+        except Exception:
+            pass
+    try:
+        _set_world_translation(target_node, translation)
+        result["translation"] = True
+    except Exception:
+        pass
+    try:
+        _set_world_rotation(target_node, rotation)
+        result["rotation"] = True
+    except Exception:
+        pass
+    result["mismatches"] = _pose_mismatches(target_node, translation, rotation)
+    return result
 
 
 def _set_keyable_channels(node_name, attrs):
@@ -958,7 +1587,7 @@ def _highlighted_time_range():
             return None
         start = float(values[0])
         end = float(values[1]) - 1.0
-        if end <= start:
+        if end < start:
             return None
         return start, end
     except Exception:
@@ -1035,8 +1664,8 @@ def _pole_vector_position(start_values, middle_values, end_values):
 
 
 def _compose_around_pivot_matrix(pivot_position, rotation_degrees):
-    pivot_matrix = om.MTransformationMatrix()
-    pivot_matrix.setTranslation(om.MVector(*pivot_position), om.MSpace.kWorld)
+    inverse_pivot_matrix = om.MTransformationMatrix()
+    inverse_pivot_matrix.setTranslation(om.MVector(*[-value for value in pivot_position]), om.MSpace.kWorld)
     rotate_matrix = om.MTransformationMatrix()
     euler_rotation = om.MEulerRotation(
         math.radians(rotation_degrees[0]),
@@ -1045,15 +1674,422 @@ def _compose_around_pivot_matrix(pivot_position, rotation_degrees):
         om.MEulerRotation.kXYZ,
     )
     rotate_matrix.rotateBy(euler_rotation, om.MSpace.kTransform)
-    inverse_pivot_matrix = om.MTransformationMatrix()
-    inverse_pivot_matrix.setTranslation(om.MVector(*[-value for value in pivot_position]), om.MSpace.kWorld)
-    return pivot_matrix.asMatrix() * rotate_matrix.asMatrix() * inverse_pivot_matrix.asMatrix()
+    pivot_matrix = om.MTransformationMatrix()
+    pivot_matrix.setTranslation(om.MVector(*pivot_position), om.MSpace.kWorld)
+    # Maya points post-multiply matrices (P' = P * M), so a world-space
+    # turn around P must move by -P, rotate, then move back by +P.
+    return inverse_pivot_matrix.asMatrix() * rotate_matrix.asMatrix() * pivot_matrix.asMatrix()
 
 
-def _apply_matrix_around_pivot(node_name, pivot_position, rotation_degrees):
-    current_matrix = _matrix_from_node(node_name)
-    delta_matrix = _compose_around_pivot_matrix(pivot_position, rotation_degrees)
-    _set_world_matrix(node_name, current_matrix * delta_matrix)
+PIVOT_TR_CHANNELS = (
+    "translateX",
+    "translateY",
+    "translateZ",
+    "rotateX",
+    "rotateY",
+    "rotateZ",
+)
+
+PIVOT_PROTECTED_CHANNELS = (
+    "scaleX",
+    "scaleY",
+    "scaleZ",
+    "shearXY",
+    "shearXZ",
+    "shearYZ",
+    "rotateOrder",
+    "rotateAxisX",
+    "rotateAxisY",
+    "rotateAxisZ",
+    "rotatePivotX",
+    "rotatePivotY",
+    "rotatePivotZ",
+    "rotatePivotTranslateX",
+    "rotatePivotTranslateY",
+    "rotatePivotTranslateZ",
+    "scalePivotX",
+    "scalePivotY",
+    "scalePivotZ",
+    "scalePivotTranslateX",
+    "scalePivotTranslateY",
+    "scalePivotTranslateZ",
+    "jointOrientX",
+    "jointOrientY",
+    "jointOrientZ",
+)
+
+
+def _pivot_matrix_matches(first, second, tolerance=1.0e-4):
+    """Return whether two world matrices are numerically equal."""
+    try:
+        return all(abs(float(first[index]) - float(second[index])) <= tolerance for index in range(16))
+    except Exception:
+        return False
+
+
+def _pivot_world_rotate_pivot(node_name):
+    """Return the animator-visible rotate pivot in world space."""
+    values = cmds.xform(node_name, query=True, worldSpace=True, rotatePivot=True) or []
+    if len(values) != 3:
+        raise RuntimeError("Could not read the world rotate pivot for {0}.".format(node_name))
+    return [float(value) for value in values]
+
+
+def _pivot_point_after_delta(point, delta_matrix):
+    transformed = om.MPoint(*[float(value) for value in point]) * om.MMatrix(delta_matrix)
+    return [float(transformed.x), float(transformed.y), float(transformed.z)]
+
+
+def _pivot_protected_values(node_name):
+    """Snapshot fixed transform components Dynamic Pivot must never rewrite."""
+    values = {}
+    for attr_name in PIVOT_PROTECTED_CHANNELS:
+        plug = "{0}.{1}".format(node_name, attr_name)
+        if cmds.objExists(plug):
+            values[attr_name] = float(cmds.getAttr(plug))
+    return values
+
+
+def _pivot_protected_differences(expected, actual, tolerance=1.0e-7):
+    differences = []
+    for attr_name in sorted(set(expected) | set(actual)):
+        if attr_name not in expected or attr_name not in actual:
+            differences.append(attr_name)
+            continue
+        if abs(float(expected[attr_name]) - float(actual[attr_name])) > float(tolerance):
+            differences.append(attr_name)
+    return differences
+
+
+def _pivot_snapshot(node_name):
+    return {
+        "matrix": _matrix_from_node(node_name),
+        "world_rotate_pivot": _pivot_world_rotate_pivot(node_name),
+        "protected": _pivot_protected_values(node_name),
+    }
+
+
+def _pivot_expected_pose(snapshot, delta_matrix=None):
+    expected_matrix = snapshot["matrix"]
+    expected_rotate_pivot = list(snapshot["world_rotate_pivot"])
+    if delta_matrix is not None:
+        expected_matrix = expected_matrix * delta_matrix
+        expected_rotate_pivot = _pivot_point_after_delta(expected_rotate_pivot, delta_matrix)
+    return expected_matrix, expected_rotate_pivot
+
+
+def _pivot_node_pose_matches(
+    node_name,
+    expected_matrix,
+    expected_rotate_pivot,
+    matrix_tolerance=1.0e-4,
+    pivot_tolerance=1.0e-4,
+):
+    """Prove the full world transform and its animator-visible rotate pivot."""
+    if not _pivot_matrix_matches(_matrix_from_node(node_name), expected_matrix, tolerance=matrix_tolerance):
+        return False
+    actual_rotate_pivot = _pivot_world_rotate_pivot(node_name)
+    return max(
+        abs(float(actual_rotate_pivot[index]) - float(expected_rotate_pivot[index]))
+        for index in range(3)
+    ) <= float(pivot_tolerance)
+
+
+def _set_pivot_world_pose(node_name, expected_matrix, expected_rotate_pivot, protected_values=None):
+    """Land an exact world pose while writing only animator translation/rotation."""
+    transform = om.MTransformationMatrix(om.MMatrix(expected_matrix))
+    euler = transform.rotation(asQuaternion=True).asEulerRotation()
+    preserved = protected_values or _pivot_protected_values(node_name)
+    cmds.xform(
+        node_name,
+        worldSpace=True,
+        rotation=(
+            math.degrees(euler.x),
+            math.degrees(euler.y),
+            math.degrees(euler.z),
+        ),
+    )
+    # World translation queries include Maya's pivot compensation semantics.
+    # Move by the rotate-pivot error instead of assigning matrix translation,
+    # which would silently write rotatePivotTranslate on offset-pivot controls.
+    for _attempt in range(2):
+        actual_rotate_pivot = _pivot_world_rotate_pivot(node_name)
+        correction = [
+            float(expected_rotate_pivot[index]) - float(actual_rotate_pivot[index])
+            for index in range(3)
+        ]
+        if max(abs(value) for value in correction) <= 1.0e-7:
+            break
+        current_translation = _world_translation(node_name)
+        _set_world_translation(
+            node_name,
+            [
+                float(current_translation[index]) + correction[index]
+                for index in range(3)
+            ],
+        )
+    changed = _pivot_protected_differences(preserved, _pivot_protected_values(node_name))
+    if changed:
+        raise RuntimeError(
+            "Dynamic Pivot changed fixed transform data on {0}: {1}.".format(
+                _short_name(node_name),
+                ", ".join(changed[:6]),
+            )
+        )
+
+
+def _pivot_parent_first_targets(targets):
+    """Dedupe selected controls and order them from DAG parent to child."""
+    ordered = []
+    seen = set()
+    for target in targets:
+        if not target or not cmds.objExists(target):
+            continue
+        resolved = (cmds.ls(target, long=True) or [target])[0]
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered.append(resolved)
+    return sorted(ordered, key=lambda node_name: (node_name.count("|"), ordered.index(node_name), node_name))
+
+
+def _pivot_channel_blockers(node_name):
+    """Return locked or non-animation driven channels that cannot be baked safely."""
+    blockers = []
+    for attr_name in PIVOT_TR_CHANNELS:
+        plug = "{0}.{1}".format(node_name, attr_name)
+        if not cmds.objExists(plug):
+            blockers.append("{0} is missing".format(plug))
+            continue
+        try:
+            if cmds.getAttr(plug, lock=True):
+                blockers.append("{0} is locked".format(plug))
+        except Exception as exc:
+            blockers.append("{0} lock state could not be read: {1}".format(plug, exc))
+        try:
+            incoming = cmds.listConnections(plug, source=True, destination=False, plugs=True) or []
+        except Exception as exc:
+            blockers.append("{0} connections could not be read: {1}".format(plug, exc))
+            incoming = []
+        for source_plug in incoming:
+            source_node = source_plug.rsplit(".", 1)[0]
+            try:
+                source_type = cmds.nodeType(source_node) or ""
+            except Exception:
+                source_type = ""
+            if source_type.startswith("animCurve"):
+                continue
+            blockers.append("{0} is driven by {1}".format(plug, source_plug))
+    return blockers
+
+
+def _pivot_apply_times():
+    """Return integer sampled frames and the source range metadata."""
+    highlighted = _highlighted_time_range()
+    if highlighted:
+        start, end = highlighted
+        first = int(math.ceil(float(start) - EPSILON))
+        last = int(math.floor(float(end) + EPSILON))
+        return list(range(first, last + 1)) if last >= first else [], ("highlighted", start, end)
+    current_time = float(cmds.currentTime(query=True))
+    return [current_time], ("current", current_time, current_time)
+
+
+def _pivot_guard_times(sample_times):
+    """Return one unchanged frame on either side of a Dynamic Pivot bake."""
+    if not sample_times:
+        return []
+    ordered = sorted(float(frame_value) for frame_value in sample_times)
+    return [ordered[0] - 1.0, ordered[-1] + 1.0]
+
+
+def _pivot_range_text(range_info):
+    kind, start, end = range_info
+    if kind == "highlighted":
+        first = int(math.ceil(float(start) - EPSILON))
+        last = int(math.floor(float(end) + EPSILON))
+        if last < first:
+            return "Highlighted range has no whole frames to turn."
+        return "Highlighted frames {0}-{1}: every whole frame will be turned.".format(
+            _frame_display(first),
+            _frame_display(last),
+        )
+    return "No highlighted range: only current frame {0} will be turned.".format(_frame_display(start))
+
+
+def _key_pivot_channels(node_name, frame_value):
+    """Key every pivot TR channel and fail if Maya did not create the key."""
+    for attr_name in PIVOT_TR_CHANNELS:
+        plug = "{0}.{1}".format(node_name, attr_name)
+        try:
+            cmds.setKeyframe(node_name, attribute=attr_name, time=(frame_value, frame_value))
+        except Exception as exc:
+            raise RuntimeError("Could not key {0} at frame {1}: {2}".format(plug, _frame_display(frame_value), exc))
+        keyed_times = cmds.keyframe(
+            node_name,
+            attribute=attr_name,
+            query=True,
+            time=(frame_value, frame_value),
+            timeChange=True,
+        ) or []
+        if not any(abs(float(keyed_time) - float(frame_value)) <= EPSILON for keyed_time in keyed_times):
+            raise RuntimeError("Maya did not create the required key for {0} at frame {1}.".format(plug, _frame_display(frame_value)))
+
+
+def _pivot_first_query_value(values, default=None):
+    if isinstance(values, (list, tuple)):
+        return values[0] if values else default
+    return values if values is not None else default
+
+
+def _pivot_guard_tangent_snapshot(node_name, attr_name, frame_value, side, had_curve):
+    """Capture the outside-facing tangent after a shape-preserving guard-key insert."""
+    type_flag = "inTangentType" if side == "in" else "outTangentType"
+    angle_flag = "inAngle" if side == "in" else "outAngle"
+    weight_flag = "inWeight" if side == "in" else "outWeight"
+    query_args = {
+        "attribute": attr_name,
+        "query": True,
+        "time": (frame_value, frame_value),
+    }
+    tangent_type = _pivot_first_query_value(
+        cmds.keyTangent(node_name, **dict(query_args, **{type_flag: True})),
+        "auto",
+    )
+    angle = float(_pivot_first_query_value(
+        cmds.keyTangent(node_name, **dict(query_args, **{angle_flag: True})),
+        0.0,
+    ))
+    weight = float(_pivot_first_query_value(
+        cmds.keyTangent(node_name, **dict(query_args, **{weight_flag: True})),
+        1.0,
+    ))
+    weighted = bool(_pivot_first_query_value(
+        cmds.keyTangent(node_name, attribute=attr_name, query=True, weightedTangents=True),
+        False,
+    ))
+    return {
+        "node": node_name,
+        "attribute": attr_name,
+        "time": float(frame_value),
+        "side": side,
+        "type": tangent_type,
+        "angle": angle,
+        "weight": weight,
+        "weighted": weighted,
+        "preserve": bool(had_curve),
+    }
+
+
+def _insert_pivot_guard_keys(node_name, frame_value, side):
+    """Insert unchanged guard keys and remember their outside curve shape."""
+    snapshots = []
+    for attr_name in PIVOT_TR_CHANNELS:
+        existing_times = cmds.keyframe(node_name, attribute=attr_name, query=True, timeChange=True) or []
+        had_curve = bool(existing_times)
+        has_key_here = any(abs(float(key_time) - float(frame_value)) <= EPSILON for key_time in existing_times)
+        if not has_key_here:
+            try:
+                cmds.setKeyframe(
+                    node_name,
+                    attribute=attr_name,
+                    time=(frame_value, frame_value),
+                    insert=had_curve,
+                )
+            except Exception:
+                cmds.setKeyframe(node_name, attribute=attr_name, time=(frame_value, frame_value))
+        keyed_times = cmds.keyframe(
+            node_name,
+            attribute=attr_name,
+            query=True,
+            time=(frame_value, frame_value),
+            timeChange=True,
+        ) or []
+        if not any(abs(float(key_time) - float(frame_value)) <= EPSILON for key_time in keyed_times):
+            raise RuntimeError(
+                "Maya did not create the guard key for {0}.{1} at frame {2}.".format(
+                    node_name,
+                    attr_name,
+                    _frame_display(frame_value),
+                )
+            )
+        snapshots.append(_pivot_guard_tangent_snapshot(node_name, attr_name, frame_value, side, had_curve))
+    return snapshots
+
+
+def _restore_pivot_keyed_pose(
+    node_name,
+    frame_value,
+    expected_matrix,
+    expected_rotate_pivot,
+    protected_values,
+):
+    """Re-assert a keyed pose after every range and guard key now exists.
+
+    Maya can evaluate a keyed parent/child control differently at a guard frame
+    after new keys are inserted inside the highlighted range.  Re-applying the
+    expected world matrices once the full key topology exists stabilizes both
+    the highlighted samples and their unchanged boundary frames.  The caller
+    restores the captured outside-facing tangents afterwards.
+    """
+    _set_pivot_world_pose(
+        node_name,
+        expected_matrix,
+        expected_rotate_pivot,
+        protected_values=protected_values,
+    )
+    _key_pivot_channels(node_name, frame_value)
+    if not _pivot_node_pose_matches(node_name, expected_matrix, expected_rotate_pivot):
+        raise RuntimeError(
+            "Could not restore {0} at guard frame {1}.".format(
+                _short_name(node_name),
+                _frame_display(frame_value),
+            )
+        )
+
+
+def _restore_pivot_guard_tangent(snapshot):
+    """Keep the curve segment outside the bake range looking as it did before."""
+    if not snapshot.get("preserve"):
+        return
+    node_name = snapshot["node"]
+    attr_name = snapshot["attribute"]
+    frame_value = snapshot["time"]
+    side = snapshot["side"]
+    tangent_type = str(snapshot.get("type") or "auto")
+    type_flag = "inTangentType" if side == "in" else "outTangentType"
+    angle_flag = "inAngle" if side == "in" else "outAngle"
+    weight_flag = "inWeight" if side == "in" else "outWeight"
+    edit_args = {
+        "attribute": attr_name,
+        "edit": True,
+        "time": (frame_value, frame_value),
+        "lock": False,
+    }
+    cmds.keyTangent(node_name, **edit_args)
+    if tangent_type in ("fixed", "spline", "auto", "clamped", "plateau"):
+        fixed_args = dict(edit_args)
+        fixed_args[type_flag] = "fixed"
+        fixed_args[angle_flag] = float(snapshot.get("angle", 0.0))
+        if snapshot.get("weighted"):
+            fixed_args[weight_flag] = float(snapshot.get("weight", 1.0))
+        cmds.keyTangent(node_name, **fixed_args)
+    else:
+        typed_args = dict(edit_args)
+        typed_args[type_flag] = tangent_type
+        cmds.keyTangent(node_name, **typed_args)
+
+
+def _zero_rotation_strict(node_name):
+    for axis in ("X", "Y", "Z"):
+        plug = "{0}.rotate{1}".format(node_name, axis)
+        if not cmds.objExists(plug):
+            raise RuntimeError("Pivot marker channel {0} is missing.".format(plug))
+        if cmds.getAttr(plug, lock=True):
+            raise RuntimeError("Pivot marker channel {0} is locked.".format(plug))
+        cmds.setAttr(plug, 0.0)
+        if abs(float(cmds.getAttr(plug))) > EPSILON:
+            raise RuntimeError("Pivot marker channel {0} could not be zeroed.".format(plug))
 
 
 def _current_rotation_values(node_name):
@@ -1105,6 +2141,48 @@ def _controller_radius_from_target(node_name):
         return max((x_size + y_size + z_size) / 6.0, 0.75)
     except Exception:
         return 1.25
+
+
+def _dynamic_pivot_radius(targets):
+    """Size the temporary marker from the selected control shapes."""
+    candidates = []
+    for node_name in targets:
+        shapes = cmds.listRelatives(
+            node_name,
+            shapes=True,
+            noIntermediate=True,
+            fullPath=True,
+        ) or []
+        if not shapes:
+            continue
+        try:
+            bbox = cmds.exactWorldBoundingBox(*shapes)
+            span = max(
+                abs(float(bbox[index + 3]) - float(bbox[index]))
+                for index in range(3)
+            )
+            if math.isfinite(span) and span > EPSILON:
+                candidates.append(span * 0.35)
+        except Exception:
+            continue
+    if not candidates:
+        candidates = [
+            _controller_radius_from_target(node_name)
+            for node_name in targets
+        ]
+    return max(max(candidates or [1.6]), 1.6)
+
+
+def _style_dynamic_pivot_marker(control):
+    """Keep the temporary pivot readable through a busy character rig."""
+    for shape in cmds.listRelatives(control, shapes=True, fullPath=True) or []:
+        for attr_name, value in (("lineWidth", 3.5), ("alwaysDrawOnTop", True)):
+            plug = "{0}.{1}".format(shape, attr_name)
+            if cmds.objExists(plug):
+                try:
+                    cmds.setAttr(plug, value)
+                except Exception:
+                    pass
 
 
 def _ensure_root_hierarchy():
@@ -1414,13 +2492,15 @@ def _top_parent(node_name):
 
 def _candidate_nodes_for_profile(rig_root_hint=None):
     all_nodes = _all_transforms_and_joints()
-    if not rig_root_hint or not cmds.objExists(rig_root_hint):
+    if not rig_root_hint:
         return all_nodes
+    if not cmds.objExists(rig_root_hint):
+        return []
     filtered = []
     for node_name in all_nodes:
         if node_name == rig_root_hint or node_name.startswith(rig_root_hint + "|"):
             filtered.append(node_name)
-    return filtered or all_nodes
+    return filtered
 
 
 def _anim_control_identity_score(node_name):
@@ -1622,28 +2702,82 @@ def _detect_match_chain(nodes, side, limb):
     return results
 
 
+def _detect_ik_match_node(nodes, ik_control, side, limb):
+    if not ik_control:
+        return ""
+    ik_leaf = _strip_namespace(ik_control)
+    exact_leaf_names = {
+        ik_leaf + "_ikfk_seamless",
+        ik_leaf + "_fkik_seamless",
+        ik_leaf + "_ikfk_match",
+        ik_leaf + "_fkik_match",
+        ik_leaf + "_match",
+    }
+    exact = [
+        node_name
+        for node_name in nodes
+        if _strip_namespace(node_name) in exact_leaf_names
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    ranked = []
+    for node_name in nodes:
+        lowered = _strip_namespace(node_name).lower()
+        if ik_leaf.lower() not in lowered:
+            continue
+        if not any(token in lowered for token in ("seamless", "match")):
+            continue
+        score = _score_node_name(node_name, (side, limb, "ik"), ("seamless", "match"))
+        if "ikfk" in lowered or "fkik" in lowered:
+            score += 8
+        ranked.append((score, node_name))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    if not ranked:
+        return ""
+    best_score = ranked[0][0]
+    best = [node_name for score, node_name in ranked if score == best_score]
+    return best[0] if len(best) == 1 else ""
+
+
 def _resolve_profile_node(node_name, rig_root_hint=""):
     if not node_name:
         return ""
-    if cmds.objExists(node_name):
-        return node_name
-    stripped = _strip_namespace(node_name)
-    candidates = []
-    for candidate in _all_transforms_and_joints():
-        if _strip_namespace(candidate) != stripped:
-            continue
-        score = 0
-        if rig_root_hint and cmds.objExists(rig_root_hint):
-            if candidate.startswith(rig_root_hint + "|"):
-                score += 10
-            root_short = _strip_namespace(rig_root_hint)
-            if root_short and root_short in candidate:
-                score += 5
-        if _namespace_prefix(node_name) and _namespace_prefix(node_name) == _namespace_prefix(candidate):
-            score += 3
-        candidates.append((score, candidate))
-    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return candidates[0][1] if candidates else ""
+    all_nodes = _all_transforms_and_joints()
+
+    def _matches_name(candidate, requested):
+        requested_leaf = requested.split("|")[-1]
+        candidate_leaf = candidate.split("|")[-1]
+        if ":" in requested_leaf:
+            return candidate_leaf == requested_leaf
+        return _strip_namespace(candidate) == _strip_namespace(requested)
+
+    rig_root = rig_root_hint or ""
+    if rig_root:
+        if rig_root.startswith("|") and rig_root in all_nodes:
+            root_candidates = [rig_root]
+        else:
+            root_candidates = [candidate for candidate in all_nodes if _matches_name(candidate, rig_root)]
+        if len(root_candidates) != 1:
+            return ""
+        rig_root = root_candidates[0]
+    if node_name.startswith("|") and node_name in all_nodes:
+        candidates = [node_name]
+        if rig_root and node_name != rig_root and not node_name.startswith(rig_root + "|"):
+            candidates = []
+    else:
+        candidates = []
+    if not candidates:
+        for candidate in all_nodes:
+            if not _matches_name(candidate, node_name):
+                continue
+            if rig_root and candidate != rig_root and not candidate.startswith(rig_root + "|"):
+                continue
+            candidates.append(candidate)
+    # A short name is safe only when it resolves to one node in the selected
+    # rig root.  Never let another character with the same short name win.
+    if len(candidates) != 1:
+        return ""
+    return candidates[0]
 
 
 def _resolve_profile_attr(attr_path, rig_root_hint=""):
@@ -1657,11 +2791,24 @@ def _resolve_profile_attr(attr_path, rig_root_hint=""):
     return plug if cmds.objExists(plug) else ""
 
 
-class MayaAnimWorkflowController(object):
+def _is_generic_chain(profile):
+    """Whether a profile explicitly describes a paired multi-control chain."""
+    mode = (profile.get("chain_mode", "") or "").strip().lower()
+    if mode in ("generic", "chain", "explicit"):
+        return True
+    fk_controls = [node_name for node_name in profile.get("fk_controls", []) if node_name]
+    ik_controls = [node_name for node_name in profile.get("ik_controls", []) if node_name]
+    match_nodes = [node_name for node_name in profile.get("match_nodes", []) if node_name]
+    return len(fk_controls) >= 3 and len(fk_controls) == len(ik_controls) == len(match_nodes)
+
+
+class AminateController(object):
     def __init__(self):
         self.driver_node = ""
         self.release_space = "world"
-        self.bake_mode = "frames"
+        # Preserve the animator's source timing by default.  Dense whole-frame
+        # baking remains available as an explicit Bake Frames choice.
+        self.bake_mode = "keys"
         self.bake_range = "playback"
         self.dynamic_parenting_controller = maya_dynamic_parenting_tool.MayaDynamicParentingController() if MAYA_AVAILABLE else None
         self.contact_hold_controller = maya_contact_hold.MayaContactHoldController() if MAYA_AVAILABLE else None
@@ -2022,7 +3169,11 @@ class MayaAnimWorkflowController(object):
             return False, "Pick one or more objects first."
         self.clear_pivot(silent=True)
         _, _, pivot_group, _ = _ensure_root_hierarchy()
-        pivot_ctrl = _draw_temp_control(_unique_name(PIVOT_CTRL_NAME), 1.6)
+        pivot_ctrl = _draw_temp_control(
+            _unique_name(PIVOT_CTRL_NAME),
+            _dynamic_pivot_radius(targets),
+        )
+        _style_dynamic_pivot_marker(pivot_ctrl)
         pivot_ctrl = cmds.parent(pivot_ctrl, pivot_group)[0]
         _set_string_attr(pivot_ctrl, "adwPivotType", PIVOT_TYPE)
         _set_string_attr(pivot_ctrl, "adwPivotTargets", json.dumps(targets))
@@ -2057,12 +3208,189 @@ class MayaAnimWorkflowController(object):
         targets = [node_name for node_name in targets if cmds.objExists(node_name)]
         if not targets:
             return False, "The saved pivot objects are missing."
-        pivot_position = _world_translation(self.active_pivot)
+        targets = _pivot_parent_first_targets(targets)
+        blockers = []
         for node_name in targets:
-            _apply_matrix_around_pivot(node_name, pivot_position, rotation_values)
-            _set_keyable_channels(node_name, ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
-        _zero_rotation(self.active_pivot)
-        return True, "Rotated {0} object(s) around the pivot.".format(len(targets))
+            blockers.extend(_pivot_channel_blockers(node_name))
+        if blockers:
+            return False, "Cannot turn exactly; nothing was changed. " + "; ".join(blockers[:6])
+        pivot_position = _world_translation(self.active_pivot)
+        sample_times, range_info = _pivot_apply_times()
+        if not sample_times:
+            return False, "Cannot turn exactly; the highlighted range contains no whole frames."
+        guard_times = _pivot_guard_times(sample_times)
+        snapshot_times = sorted(set(float(frame_value) for frame_value in guard_times + sample_times))
+        current_time = float(cmds.currentTime(query=True))
+        original_selection = cmds.ls(selection=True, long=True) or []
+        try:
+            undo_enabled = bool(cmds.undoInfo(query=True, state=True))
+        except Exception as exc:
+            return False, "Cannot prove Maya Undo is available; nothing was changed. {0}".format(exc)
+        if not undo_enabled:
+            return False, "Cannot turn exactly while Maya Undo is disabled; enable Undo and try again."
+        snapshots = {}
+        delta_matrix = _compose_around_pivot_matrix(pivot_position, rotation_values)
+        try:
+            for frame_value in snapshot_times:
+                cmds.currentTime(frame_value, edit=True)
+                snapshots[frame_value] = {
+                    node_name: _pivot_snapshot(node_name)
+                    for node_name in targets
+                }
+        except Exception as exc:
+            try:
+                cmds.currentTime(current_time, edit=True)
+            except Exception:
+                pass
+            return False, "Could not read every selected pose; nothing was changed. {0}".format(exc)
+
+        undo_open = False
+        writes_started = False
+        guard_tangents = []
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="Dynamic Pivot Range")
+            undo_open = True
+            for guard_index, frame_value in enumerate(guard_times):
+                cmds.currentTime(frame_value, edit=True)
+                tangent_side = "in" if guard_index == 0 else "out"
+                for node_name in targets:
+                    snapshot = snapshots[frame_value][node_name]
+                    expected_matrix, expected_rotate_pivot = _pivot_expected_pose(snapshot)
+                    writes_started = True
+                    guard_tangents.extend(_insert_pivot_guard_keys(node_name, frame_value, tangent_side))
+                    if not _pivot_node_pose_matches(node_name, expected_matrix, expected_rotate_pivot):
+                        raise RuntimeError(
+                            "Could not protect {0} at frame {1}.".format(
+                                _short_name(node_name),
+                                _frame_display(frame_value),
+                            )
+                        )
+            for frame_value in sample_times:
+                cmds.currentTime(frame_value, edit=True)
+                for node_name in targets:
+                    snapshot = snapshots[frame_value][node_name]
+                    expected_matrix, expected_rotate_pivot = _pivot_expected_pose(snapshot, delta_matrix)
+                    writes_started = True
+                    _set_pivot_world_pose(
+                        node_name,
+                        expected_matrix,
+                        expected_rotate_pivot,
+                        protected_values=snapshot["protected"],
+                    )
+                    if not _pivot_node_pose_matches(node_name, expected_matrix, expected_rotate_pivot):
+                        raise RuntimeError(
+                            "Could not place {0} exactly at frame {1}.".format(
+                                _short_name(node_name),
+                                _frame_display(frame_value),
+                            )
+                        )
+                    _key_pivot_channels(node_name, frame_value)
+                    if not _pivot_node_pose_matches(node_name, expected_matrix, expected_rotate_pivot):
+                        raise RuntimeError(
+                            "Keying changed {0} at frame {1}.".format(
+                                _short_name(node_name),
+                                _frame_display(frame_value),
+                            )
+                        )
+            # In Maya, inserting keys can change an evaluated keyed
+            # parent/child pose.  Once every sample and guard key exists,
+            # re-assert all expected matrices against that final key topology.
+            sample_time_set = set(float(frame_value) for frame_value in sample_times)
+            for frame_value in snapshot_times:
+                cmds.currentTime(frame_value, edit=True)
+                for node_name in targets:
+                    writes_started = True
+                    snapshot = snapshots[frame_value][node_name]
+                    expected_matrix, expected_rotate_pivot = _pivot_expected_pose(
+                        snapshot,
+                        delta_matrix if float(frame_value) in sample_time_set else None,
+                    )
+                    _restore_pivot_keyed_pose(
+                        node_name,
+                        frame_value,
+                        expected_matrix,
+                        expected_rotate_pivot,
+                        snapshot["protected"],
+                    )
+            for tangent_snapshot in guard_tangents:
+                _restore_pivot_guard_tangent(tangent_snapshot)
+            for frame_value in guard_times:
+                cmds.currentTime(frame_value, edit=True)
+                for node_name in targets:
+                    snapshot = snapshots[frame_value][node_name]
+                    expected_matrix, expected_rotate_pivot = _pivot_expected_pose(snapshot)
+                    if not _pivot_node_pose_matches(node_name, expected_matrix, expected_rotate_pivot):
+                        raise RuntimeError(
+                            "The animation outside the range changed for {0} at frame {1}.".format(
+                                _short_name(node_name),
+                                _frame_display(frame_value),
+                            )
+                        )
+            for frame_value in sample_times:
+                cmds.currentTime(frame_value, edit=True)
+                for node_name in targets:
+                    snapshot = snapshots[frame_value][node_name]
+                    expected_matrix, expected_rotate_pivot = _pivot_expected_pose(snapshot, delta_matrix)
+                    if not _pivot_node_pose_matches(node_name, expected_matrix, expected_rotate_pivot):
+                        raise RuntimeError(
+                            "The keyed range pose changed for {0} at frame {1}.".format(
+                                _short_name(node_name),
+                                _frame_display(frame_value),
+                            )
+                        )
+            writes_started = True
+            _zero_rotation_strict(self.active_pivot)
+            cmds.undoInfo(closeChunk=True)
+            undo_open = False
+        except Exception as exc:
+            rollback_verified = True
+            if undo_open:
+                try:
+                    cmds.undoInfo(closeChunk=True)
+                except Exception:
+                    pass
+                undo_open = False
+                if writes_started:
+                    try:
+                        cmds.undo()
+                    except Exception:
+                        rollback_verified = False
+            if rollback_verified:
+                try:
+                    for frame_value in snapshot_times:
+                        cmds.currentTime(frame_value, edit=True)
+                        for node_name in targets:
+                            if not _pivot_matrix_matches(
+                                _matrix_from_node(node_name),
+                                snapshots[frame_value][node_name]["matrix"],
+                            ):
+                                rollback_verified = False
+                                break
+                        if not rollback_verified:
+                            break
+                except Exception:
+                    rollback_verified = False
+            if rollback_verified:
+                return False, "Could not turn the selected controls exactly; everything was rolled back. {0}".format(exc)
+            return False, "Could not turn the selected controls exactly, and rollback could not be proven. Use Undo immediately. {0}".format(exc)
+        finally:
+            if undo_open:
+                try:
+                    cmds.undoInfo(closeChunk=True)
+                except Exception:
+                    pass
+            try:
+                cmds.currentTime(current_time, edit=True)
+            except Exception:
+                pass
+            try:
+                if original_selection:
+                    cmds.select(original_selection, replace=True)
+                else:
+                    cmds.select(clear=True)
+            except Exception:
+                pass
+        return True, "Turned {0} object(s) on {1}".format(len(targets), _pivot_range_text(range_info))
 
     def clear_pivot(self, silent=False):
         pivot_name = self.active_pivot or self._find_existing_pivot()
@@ -2082,10 +3410,47 @@ class MayaAnimWorkflowController(object):
 
     def detect_profile(self):
         selected = _selected_transforms()
-        search_nodes = selected or _all_transforms_and_joints()
+        if not selected:
+            return {
+                "profile_name": "",
+                "rig_root": "",
+                "namespace_hint": "",
+                "limb_type": "arm",
+                "side": "left",
+                "fk_controls": [],
+                "ik_controls": [],
+                "ik_control": "",
+                "pole_vector_control": "",
+                "switch_attr": "",
+                "fk_value": 0.0,
+                "ik_value": 1.0,
+                "extra_controls": [],
+                "match_nodes": [],
+                "ik_match_node": "",
+            }, ["Select one or more controls from a single rig root before setting up an IK/FK switch."]
+        roots = _dedupe_preserve_order([_top_parent(node_name) for node_name in selected if node_name])
+        if len(roots) != 1:
+            return {
+                "profile_name": "",
+                "rig_root": "",
+                "namespace_hint": "",
+                "limb_type": "arm",
+                "side": "left",
+                "fk_controls": [],
+                "ik_controls": [],
+                "ik_control": "",
+                "pole_vector_control": "",
+                "switch_attr": "",
+                "fk_value": 0.0,
+                "ik_value": 1.0,
+                "extra_controls": [],
+                "match_nodes": [],
+                "ik_match_node": "",
+            }, ["Select controls from one rig root only; the current selection spans multiple rigs."]
+        search_nodes = selected
         side = _detect_side_from_nodes(search_nodes)
         limb = _detect_limb_from_nodes(search_nodes)
-        rig_root = _top_parent(selected[0]) if selected else ""
+        rig_root = roots[0]
 
         def _switch_score(plug_name):
             if not plug_name or "." not in plug_name:
@@ -2117,33 +3482,34 @@ class MayaAnimWorkflowController(object):
                 "pole_vector_control": pole_vector_control,
                 "switch_attr": _detect_switch_attr(candidates, side, limb),
                 "match_nodes": _detect_match_chain(candidates, side, limb),
+                "ik_match_node": _detect_ik_match_node(candidates, ik_control, side, limb),
             }
 
         candidates = _candidate_nodes_for_profile(rig_root_hint=rig_root)
         detected_data = _detect_from_candidates(candidates)
-        if (
-            len(detected_data["fk_controls"]) < 3
-            or not detected_data["ik_control"]
-            or not detected_data["pole_vector_control"]
-            or not detected_data["switch_attr"]
-            or len(detected_data["match_nodes"]) < 3
-        ):
-            fallback_data = _detect_from_candidates(_all_transforms_and_joints())
-            if len(fallback_data["fk_controls"]) >= len(detected_data["fk_controls"]):
-                detected_data["fk_controls"] = fallback_data["fk_controls"]
-            if _ik_end_control_score(fallback_data["ik_control"], side, limb) >= _ik_end_control_score(detected_data["ik_control"], side, limb) + 5:
-                detected_data["ik_control"] = fallback_data["ik_control"]
-            if _pole_vector_score(fallback_data["pole_vector_control"], side, limb) >= _pole_vector_score(detected_data["pole_vector_control"], side, limb) + 5:
-                detected_data["pole_vector_control"] = fallback_data["pole_vector_control"]
-            if _switch_score(fallback_data["switch_attr"]) >= _switch_score(detected_data["switch_attr"]) + 2:
-                detected_data["switch_attr"] = fallback_data["switch_attr"]
-            if _match_score(fallback_data["match_nodes"]) >= _match_score(detected_data["match_nodes"]) + 3:
-                detected_data["match_nodes"] = fallback_data["match_nodes"]
+        if not candidates:
+            return {
+                "profile_name": "{0}_{1}".format(side, limb),
+                "rig_root": rig_root,
+                "namespace_hint": _namespace_prefix(selected[0]),
+                "limb_type": limb,
+                "side": side,
+                "fk_controls": [],
+                "ik_controls": [],
+                "ik_control": "",
+                "pole_vector_control": "",
+                "switch_attr": "",
+                "fk_value": 0.0,
+                "ik_value": 1.0,
+                "extra_controls": [],
+                "match_nodes": [],
+                "ik_match_node": "",
+            }, ["Could not inspect the selected rig root; no IK/FK candidates were found inside it."]
         if detected_data["ik_control"] and detected_data["ik_control"] == detected_data["pole_vector_control"]:
-            distinct_ik = _best_ik_end_control(_all_transforms_and_joints(), side, limb, exclude=(detected_data["pole_vector_control"],))
+            distinct_ik = _best_ik_end_control(candidates, side, limb, exclude=(detected_data["pole_vector_control"],))
             if distinct_ik:
                 detected_data["ik_control"] = distinct_ik
-            distinct_pv = _best_pole_vector_control(_all_transforms_and_joints(), side, limb, exclude=(detected_data["ik_control"],))
+            distinct_pv = _best_pole_vector_control(candidates, side, limb, exclude=(detected_data["ik_control"],))
             if distinct_pv:
                 detected_data["pole_vector_control"] = distinct_pv
 
@@ -2164,6 +3530,7 @@ class MayaAnimWorkflowController(object):
             "ik_value": 1.0,
             "extra_controls": [],
             "match_nodes": detected_data["match_nodes"],
+            "ik_match_node": detected_data["ik_match_node"],
         }
         issues = []
         if len(detected_data["fk_controls"]) < 3:
@@ -2187,6 +3554,7 @@ class MayaAnimWorkflowController(object):
         normalized["namespace_hint"] = normalized.get("namespace_hint", "").strip()
         normalized["limb_type"] = (normalized.get("limb_type", "arm") or "arm").strip()
         normalized["side"] = (normalized.get("side", "left") or "left").strip()
+        normalized["chain_mode"] = (normalized.get("chain_mode", "") or "").strip().lower()
         normalized["fk_controls"] = _dedupe_preserve_order(
             [item.strip() for item in normalized.get("fk_controls", []) if item and item.strip()]
         )
@@ -2210,6 +3578,7 @@ class MayaAnimWorkflowController(object):
         normalized["match_nodes"] = _dedupe_preserve_order(
             [item.strip() for item in normalized.get("match_nodes", []) if item and item.strip()]
         )
+        normalized["ik_match_node"] = normalized.get("ik_match_node", "").strip()
         return normalized
 
     def _profile_from_fields(self, fields):
@@ -2219,6 +3588,7 @@ class MayaAnimWorkflowController(object):
             "namespace_hint": fields.get("namespace_hint", "").strip(),
             "limb_type": fields.get("limb_type", "arm").strip() or "arm",
             "side": fields.get("side", "left").strip() or "left",
+            "chain_mode": fields.get("chain_mode", "").strip().lower(),
             "fk_controls": [item.strip() for item in fields.get("fk_controls", []) if item.strip()],
             "ik_controls": [item.strip() for item in fields.get("ik_controls", []) if item.strip()],
             "ik_control": fields.get("ik_control", "").strip(),
@@ -2228,6 +3598,7 @@ class MayaAnimWorkflowController(object):
             "ik_value": float(fields.get("ik_value", 1.0)),
             "extra_controls": [item.strip() for item in fields.get("extra_controls", []) if item.strip()],
             "match_nodes": [item.strip() for item in fields.get("match_nodes", []) if item.strip()],
+            "ik_match_node": fields.get("ik_match_node", "").strip(),
         }
         return self._normalize_profile(profile)
 
@@ -2257,31 +3628,47 @@ class MayaAnimWorkflowController(object):
         profile = self._normalize_profile(profile)
         rig_root = _resolve_profile_node(profile.get("rig_root", ""), rig_root_hint=profile.get("rig_root", ""))
         resolved = dict(profile)
+        resolved["_rig_root_resolved"] = bool(rig_root)
         resolved["rig_root"] = rig_root or profile.get("rig_root", "")
         resolved["fk_controls"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("fk_controls", [])]
         resolved["ik_controls"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("ik_controls", [])]
         resolved["ik_control"] = _resolve_profile_node(profile.get("ik_control", ""), rig_root_hint=resolved["rig_root"])
         resolved["pole_vector_control"] = _resolve_profile_node(profile.get("pole_vector_control", ""), rig_root_hint=resolved["rig_root"])
         resolved["ik_controls"] = _dedupe_preserve_order(
-            [resolved["ik_control"], resolved["pole_vector_control"]] + [node_name for node_name in resolved["ik_controls"] if node_name]
+            [node_name for node_name in (resolved["ik_control"], resolved["pole_vector_control"]) if node_name]
+            + [node_name for node_name in resolved["ik_controls"] if node_name]
         )
         resolved["switch_attr"] = _resolve_profile_attr(profile.get("switch_attr", ""), rig_root_hint=resolved["rig_root"])
         resolved["extra_controls"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("extra_controls", [])]
         resolved["match_nodes"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("match_nodes", [])]
+        resolved["ik_match_node"] = _resolve_profile_node(
+            profile.get("ik_match_node", ""),
+            rig_root_hint=resolved["rig_root"],
+        )
         return resolved
 
     def _validate_profile(self, profile, direction):
+        requested_profile = self._normalize_profile(profile)
         profile = self._resolved_profile(profile)
         issues = []
+        generic_chain = _is_generic_chain(requested_profile) or _is_generic_chain(profile)
+        if profile.get("rig_root") and not profile.get("_rig_root_resolved"):
+            issues.append("Profile rig root could not be resolved uniquely; choose the exact rig root for this character.")
         if len([node_name for node_name in profile["fk_controls"] if node_name]) < 3:
-            issues.append("This saved switch needs 3 FK controls.")
-        if not profile["ik_control"]:
-            issues.append("Profile needs an IK control.")
-        if not profile["pole_vector_control"]:
-            issues.append("Profile needs a pole-vector control.")
+            issues.append("This saved switch needs at least 3 FK controls.")
+        if generic_chain:
+            if len(profile["fk_controls"]) != len(profile["ik_controls"]) or len(profile["fk_controls"]) != len(profile["match_nodes"]):
+                issues.append("Generic chain profiles need equal-length FK, IK, and match-node lists.")
+            if any(not node_name for node_name in profile["fk_controls"] + profile["ik_controls"] + profile["match_nodes"]):
+                issues.append("Generic chain profiles must resolve every paired control and match node inside the saved rig root.")
+        else:
+            if not profile["ik_control"]:
+                issues.append("Profile needs an IK control.")
+            if not profile["pole_vector_control"]:
+                issues.append("Profile needs a pole-vector control.")
         if not profile["switch_attr"]:
             issues.append("Profile needs a switch attribute.")
-        if direction == "ik_to_fk" and len([node_name for node_name in profile["match_nodes"] if node_name]) < 3:
+        if direction == "ik_to_fk" and not generic_chain and len([node_name for node_name in profile["match_nodes"] if node_name]) < 3:
             issues.append("IK -> FK requires a detected or assigned match chain.")
         return profile, issues
 
@@ -2298,19 +3685,57 @@ class MayaAnimWorkflowController(object):
                 _set_keyable_channels(node_name, ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
         cmds.currentTime(current_time, edit=True)
 
+    def _switch_generic_chain(self, profile, direction, current_time):
+        self._key_switch_context(profile, profile["fk_value"] if direction == "fk_to_ik" else profile["ik_value"], current_time)
+        if direction == "fk_to_ik":
+            pairs = zip(profile["ik_controls"], profile["match_nodes"])
+        else:
+            pairs = zip(profile["fk_controls"], profile["match_nodes"])
+        mismatches = []
+        for target_node, source_node in pairs:
+            copy_result = _copy_world_pose(target_node, source_node)
+            _set_keyable_channels(target_node, ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
+            if copy_result["mismatches"]:
+                mismatch_text = ", ".join(copy_result["mismatches"])
+                if copy_result["locked"]:
+                    mismatch_text += " (locked: {0})".format(", ".join(copy_result["locked"]))
+                mismatches.append("{0}: {1}".format(_short_name(target_node), mismatch_text))
+        node_name, attr_name = profile["switch_attr"].rsplit(".", 1)
+        cmds.setAttr(profile["switch_attr"], profile["ik_value"] if direction == "fk_to_ik" else profile["fk_value"])
+        cmds.setKeyframe(node_name, attribute=attr_name)
+        if mismatches:
+            return False, "Switched {0} on frame {1}, but exact world-pose matching was unavailable: {2}".format(
+                "FK -> IK" if direction == "fk_to_ik" else "IK -> FK",
+                int(current_time),
+                "; ".join(mismatches),
+            )
+        return True, "Switched {0} on frame {1}.".format(
+            "FK -> IK" if direction == "fk_to_ik" else "IK -> FK",
+            int(current_time),
+        )
+
     def switch_fk_to_ik(self, profile):
         profile, issues = self._validate_profile(profile, "fk_to_ik")
         if issues:
             return False, "; ".join(issues)
         current_time = float(cmds.currentTime(query=True))
+        if _is_generic_chain(profile):
+            return self._switch_generic_chain(profile, "fk_to_ik", current_time)
         self._key_switch_context(profile, profile["fk_value"], current_time)
         source_points = profile["match_nodes"] if len([node_name for node_name in profile["match_nodes"] if node_name]) >= 3 else profile["fk_controls"]
         source_points = source_points[:3]
         start_point = _world_translation(source_points[0])
         middle_point = _world_translation(source_points[1])
         end_point = _world_translation(source_points[2])
-        _set_world_translation(profile["ik_control"], end_point)
-        _set_world_rotation(profile["ik_control"], _world_rotation(source_points[2]))
+        ik_match_node = profile.get("ik_match_node") or _detect_ik_match_node(
+            _candidate_nodes_for_profile(rig_root_hint=profile.get("rig_root", "")),
+            profile["ik_control"],
+            profile.get("side", ""),
+            profile.get("limb_type", ""),
+        )
+        ik_pose_source = ik_match_node or source_points[2]
+        _set_world_translation(profile["ik_control"], _world_translation(ik_pose_source))
+        _set_world_rotation(profile["ik_control"], _world_rotation(ik_pose_source))
         _set_world_translation(profile["pole_vector_control"], _pole_vector_position(start_point, middle_point, end_point))
         _set_keyable_channels(profile["ik_control"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
         _set_keyable_channels(profile["pole_vector_control"], ("translateX", "translateY", "translateZ"))
@@ -2324,6 +3749,8 @@ class MayaAnimWorkflowController(object):
         if issues:
             return False, "; ".join(issues)
         current_time = float(cmds.currentTime(query=True))
+        if _is_generic_chain(profile):
+            return self._switch_generic_chain(profile, "ik_to_fk", current_time)
         self._key_switch_context(profile, profile["ik_value"], current_time)
         for fk_control, match_node in zip(profile["fk_controls"][:3], profile["match_nodes"][:3]):
             if fk_control and match_node:
@@ -2341,16 +3768,327 @@ if QtWidgets:
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 
         if MQtUtil.mainWindow() is not None:
-            _WindowBase = type("MayaAnimWorkflowWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
+            _WindowBase = type("AminateWindowBase", (MayaQWidgetDockableMixin, QtWidgets.QDialog), {})
         else:
-            _WindowBase = type("MayaAnimWorkflowWindowBase", (QtWidgets.QDialog,), {})
+            _WindowBase = type("AminateWindowBase", (QtWidgets.QDialog,), {})
     except Exception:
-        _WindowBase = type("MayaAnimWorkflowWindowBase", (QtWidgets.QDialog,), {})
+        _WindowBase = type("AminateWindowBase", (QtWidgets.QDialog,), {})
 
 
-    class MayaAnimWorkflowWindow(_WindowBase):
+    class AminateComboDropZone(QtWidgets.QFrame):
+        """Small child surface that makes a combo's click target obvious."""
+
+        def __init__(self, combo):
+            super(AminateComboDropZone, self).__init__(combo)
+            self._combo_ref = weakref.ref(combo)
+            self._combo_view_ref = None
+            self.setObjectName("aminateComboDropZone")
+            self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+            self.setFocusPolicy(QtCore.Qt.NoFocus)
+            self.setStyleSheet(
+                """
+QFrame#aminateComboDropZone {
+    background-color: #303C46;
+    border-left: 1px solid #536372;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+}
+QFrame#aminateComboDropZone[aminateState="active"] {
+    background-color: #24547F;
+    border-left-color: #8FD6FF;
+}
+QFrame#aminateComboDropZone[aminateState="open"] {
+    background-color: #1F4D78;
+    border-left-color: #8FD6FF;
+}
+QFrame#aminateComboDropZone[aminateState="disabled"] {
+    background-color: #29444D;
+    border-left-color: #3E4A54;
+}
+"""
+            )
+            combo.installEventFilter(self)
+            self._current_combo_view()
+            self._refresh_state()
+            self._reposition()
+
+        def _combo_view(self):
+            try:
+                view = self._combo_view_ref() if self._combo_view_ref is not None else None
+            except Exception:
+                return None
+            return view if _qt_object_valid(view) else None
+
+        def _current_combo_view(self):
+            """Return the live popup view, rebinding after Maya replaces it."""
+            combo = self._combo_ref()
+            if not _qt_object_valid(combo):
+                return None
+            try:
+                view = combo.view()
+            except Exception:
+                return None
+            if not _qt_object_valid(view):
+                return None
+            previous = self._combo_view()
+            if previous is not view:
+                if previous is not None:
+                    try:
+                        previous.removeEventFilter(self)
+                    except Exception:
+                        pass
+                try:
+                    view.installEventFilter(self)
+                except Exception:
+                    return None
+                try:
+                    self._combo_view_ref = weakref.ref(view)
+                except TypeError:
+                    # Never retain a popup wrapper strongly: Maya may delete
+                    # and replace it while lazy panels are being rebuilt.
+                    # Hosts without weak-reference support simply reacquire
+                    # the current view on the next combo event.
+                    self._combo_view_ref = None
+            return view
+
+        def _reposition(self):
+            combo = self._combo_ref()
+            if not _qt_object_valid(combo):
+                return
+            width = max(24, min(30, max(24, combo.width() - 20)))
+            self.setGeometry(max(0, combo.width() - width), 1, width, max(1, combo.height() - 2))
+            self.raise_()
+
+        def _refresh_state(self):
+            combo = self._combo_ref()
+            if not _qt_object_valid(combo):
+                return
+            view = self._current_combo_view()
+            try:
+                view_open = bool(view is not None and view.isVisible())
+            except Exception:
+                # Maya can replace a popup QListView during lazy panel build.
+                # Treat a wrapper that vanished between the validity check and
+                # this read as closed; the next call will reacquire it.
+                self._combo_view_ref = None
+                view_open = False
+            if not combo.isEnabled():
+                state = "disabled"
+                arrow_up = False
+            elif view_open:
+                state = "open"
+                arrow_up = True
+            elif combo.hasFocus() or combo.underMouse():
+                state = "active"
+                arrow_up = False
+            else:
+                state = "normal"
+                arrow_up = False
+            self.setProperty("aminateState", state)
+            self._arrow_up = arrow_up
+            style = self.style()
+            if style:
+                style.unpolish(self)
+                style.polish(self)
+            self.update()
+
+        def paintEvent(self, event):
+            super(AminateComboDropZone, self).paintEvent(event)
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(_qt_flag("RenderHint", "Antialiasing", QtGui.QPainter.Antialiasing), True)
+            state = str(self.property("aminateState") or "normal")
+            color = {
+                "active": "#F2F7FA",
+                "open": "#F7FBFC",
+                "disabled": "#74818B",
+            }.get(state, "#B8C4CD")
+            pen = QtGui.QPen(QtGui.QColor(color), 1.8)
+            pen.setCapStyle(_qt_flag("PenCapStyle", "RoundCap", QtCore.Qt.RoundCap))
+            pen.setJoinStyle(_qt_flag("PenJoinStyle", "RoundJoin", QtCore.Qt.RoundJoin))
+            painter.setPen(pen)
+            center_x = float(self.width()) * 0.5
+            center_y = float(self.height()) * 0.5 + (-1.0 if getattr(self, "_arrow_up", False) else 1.0)
+            if getattr(self, "_arrow_up", False):
+                points = (
+                    QtCore.QPointF(center_x - 4.0, center_y + 2.0),
+                    QtCore.QPointF(center_x, center_y - 2.0),
+                    QtCore.QPointF(center_x + 4.0, center_y + 2.0),
+                )
+            else:
+                points = (
+                    QtCore.QPointF(center_x - 4.0, center_y - 2.0),
+                    QtCore.QPointF(center_x, center_y + 2.0),
+                    QtCore.QPointF(center_x + 4.0, center_y - 2.0),
+                )
+            painter.drawPolyline(points)
+            painter.end()
+
+        def closeEvent(self, event):
+            # The child owns these filters. Remove them if the overlay is
+            # explicitly closed; normal parent destruction remains Qt-owned.
+            combo = self._combo_ref()
+            try:
+                if combo is not None:
+                    combo.removeEventFilter(self)
+            except Exception:
+                pass
+            view = self._combo_view()
+            if view is not None:
+                try:
+                    view.removeEventFilter(self)
+                except Exception:
+                    pass
+            return super(AminateComboDropZone, self).closeEvent(event)
+
+        def eventFilter(self, obj, event):
+            combo = self._combo_ref()
+            if obj is combo and event.type() in (
+                QtCore.QEvent.Resize,
+                QtCore.QEvent.Show,
+                QtCore.QEvent.FocusIn,
+                QtCore.QEvent.FocusOut,
+                QtCore.QEvent.Enter,
+                QtCore.QEvent.Leave,
+                QtCore.QEvent.EnabledChange,
+            ):
+                self._reposition()
+                self._refresh_state()
+            elif obj is self._combo_view() and event.type() in (QtCore.QEvent.Show, QtCore.QEvent.Hide):
+                self._refresh_state()
+            return super(AminateComboDropZone, self).eventFilter(obj, event)
+
+
+    class AminateToolPickerCombo(QtWidgets.QComboBox):
+        """Normal combo box with a reliable Maya-safe integrated chevron."""
+
+        def paintEvent(self, event):
+            super(AminateToolPickerCombo, self).paintEvent(event)
+            if not QtGui:
+                return
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            active = bool(self.hasFocus() or self.underMouse() or self.view().isVisible())
+            color = QtGui.QColor("#F1F1F1" if active else "#B8B8B8")
+            if not self.isEnabled():
+                color = QtGui.QColor("#6E6E6E")
+            pen = QtGui.QPen(color)
+            pen.setWidthF(1.8)
+            painter.setPen(pen)
+            center_x = float(self.width() - 13)
+            center_y = float(self.height()) * 0.5
+            painter.drawLine(QtCore.QPointF(center_x - 3.5, center_y - 1.5), QtCore.QPointF(center_x, center_y + 2.0))
+            painter.drawLine(QtCore.QPointF(center_x, center_y + 2.0), QtCore.QPointF(center_x + 3.5, center_y - 1.5))
+
+
+    AMINATE_COMBO_AFFORDANCE_STYLESHEET = """
+QComboBox[aminateComboAffordance="true"] {
+    background-color: #303030;
+    color: #F1F1F1;
+    border: 1px solid #555555;
+    border-radius: 3px;
+    padding: 4px 34px 4px 8px;
+    min-height: 24px;
+    selection-background-color: #566A7A;
+}
+QComboBox[aminateComboAffordance="true"]:hover {
+    background-color: #3A3A3A;
+    border-color: #626262;
+}
+QComboBox[aminateComboAffordance="true"]:focus {
+    background-color: #343434;
+    border-color: #686868;
+}
+QComboBox[aminateComboAffordance="true"]:on {
+    background-color: #414141;
+    border-color: #686868;
+}
+QComboBox[aminateComboAffordance="true"]:disabled {
+    background-color: #414141;
+    color: #858585;
+    border-color: #4B4B4B;
+}
+QComboBox[aminateComboAffordance="true"]::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 30px;
+    border: 0px;
+    background: transparent;
+}
+QComboBox[aminateComboAffordance="true"] QAbstractItemView {
+    background-color: #414141;
+    color: #F1F1F1;
+    border: 1px solid #5C5C5C;
+    selection-background-color: #566A7A;
+    selection-color: #FFFFFF;
+    outline: 0px;
+    padding: 3px;
+}
+"""
+
+
+    def _style_aminate_combo_box(combo):
+        """Apply the shared drop-zone affordance to one Aminate combo.
+
+        The Jump To control owns a more prominent custom chevron and is the
+        one intentional exception.  All other QComboBox instances use this
+        helper, including combos inside lazily-built embedded panels.
+        """
+        if not isinstance(combo, QtWidgets.QComboBox):
+            return False
+        if isinstance(combo, AminateToolPickerCombo) or combo.objectName() == "aminateToolPicker":
+            return False
+        if bool(combo.property("aminateComboAffordance")):
+            return True
+        combo.setProperty("aminateComboAffordance", True)
+        combo.setProperty("aminateComboAffordanceWidth", 30)
+        combo.setMinimumWidth(0)
+        try:
+            size_policy = combo.sizePolicy()
+            size_policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Ignored)
+            combo.setSizePolicy(size_policy)
+            combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        except Exception:
+            pass
+        existing_stylesheet = combo.styleSheet().strip()
+        combo.setStyleSheet(
+            (existing_stylesheet + "\n" if existing_stylesheet else "")
+            + AMINATE_COMBO_AFFORDANCE_STYLESHEET
+        )
+        try:
+            drop_zone = AminateComboDropZone(combo)
+            combo._aminate_combo_drop_zone = drop_zone
+            drop_zone.show()
+            drop_zone.raise_()
+        except Exception:
+            # Keep the stylesheet fallback if a host-specific Qt child cannot
+            # be created. The native popup and selection still work.
+            pass
+        combo.setToolTip(combo.toolTip() or "Choose an option. Click the arrow to open the list.")
+        combo.update()
+        return True
+
+
+    def _apply_aminate_combo_affordances(root):
+        """Style every combo currently owned by an Aminate widget tree."""
+        if not root or not QtWidgets:
+            return 0
+        combos = []
+        if isinstance(root, QtWidgets.QComboBox):
+            combos.append(root)
+        try:
+            combos.extend(root.findChildren(QtWidgets.QComboBox))
+        except Exception:
+            return 0
+        styled = 0
+        for combo in combos:
+            if _style_aminate_combo_box(combo):
+                styled += 1
+        return styled
+
+
+    class AminateWindow(_WindowBase):
         def __init__(self, controller, parent=None, initial_tab=0):
-            super(MayaAnimWorkflowWindow, self).__init__(parent)
+            super(AminateWindow, self).__init__(parent)
             self.controller = controller
             self._toolbar_extras_hidden_for_close = False
             self.setObjectName(WINDOW_OBJECT_NAME)
@@ -2366,6 +4104,7 @@ if QtWidgets:
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
             self._build_ui()
+            _apply_aminate_combo_affordances(self)
             self._populate_profile_names()
             self._set_initial_tab(initial_tab)
             self._key_filter_installed = False
@@ -2445,16 +4184,40 @@ if QtWidgets:
                         return True
             except Exception:
                 pass
-            return super(MayaAnimWorkflowWindow, self).eventFilter(obj, event)
+            return super(AminateWindow, self).eventFilter(obj, event)
+
+        def resizeEvent(self, event):
+            try:
+                super(AminateWindow, self).resizeEvent(event)
+            except TypeError:
+                QtWidgets.QDialog.resizeEvent(self, event)
+            self._update_responsive_navigation()
+
+        def _update_responsive_navigation(self):
+            tab_widget = getattr(self, "tab_widget", None)
+            if tab_widget is None:
+                return
+            width = max(0, int(self.width()))
+            compact = width < 720
+            tab_bar = tab_widget.tabBar()
+            if tab_bar is not None:
+                # Twenty-three web-style tabs compete with the work itself.
+                # The searchable tool picker is the single navigation surface
+                # at every width; QTabWidget remains only as the page stack.
+                tab_bar.setVisible(False)
+            navigation_label = getattr(self, "tool_navigation_label", None)
+            if navigation_label is not None:
+                navigation_label.setVisible(width >= 400)
+            self.setProperty("aminateCompactNavigation", bool(compact))
 
         def _make_scroll_tab(self):
             page = QtWidgets.QWidget()
-            page.setObjectName("mayaAnimWorkflowTabPage")
+            page.setObjectName("aminateTabPage")
             page.setProperty("aminateTabPage", True)
             if hasattr(page, "setSizePolicy"):
                 page.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             scroll = QtWidgets.QScrollArea()
-            scroll.setObjectName("mayaAnimWorkflowTabScroll")
+            scroll.setObjectName("aminateTabScroll")
             scroll.setMinimumSize(0, 0)
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -2466,21 +4229,42 @@ if QtWidgets:
             return page, scroll
 
         def _build_ui(self):
-            self.setStyleSheet(AMINATE_WINDOW_STYLESHEET)
+            # Keep the large shared QSS readable, then append the small set of
+            # token-backed semantic role rules.  This makes the token map the
+            # source of truth for category titles and action/status roles.
+            self.setStyleSheet(AMINATE_WINDOW_STYLESHEET + _render_aminate_semantic_stylesheet())
             main_layout = QtWidgets.QVBoxLayout(self)
             _set_no_size_constraint(main_layout)
-            main_layout.setContentsMargins(8, 8, 8, 8)
-            main_layout.setSpacing(8)
+            main_layout.setContentsMargins(6, 6, 6, 5)
+            main_layout.setSpacing(6)
+            self.tool_navigation_widget = QtWidgets.QWidget()
+            self.tool_navigation_widget.setObjectName("aminateToolNavigation")
+            tool_navigation_layout = QtWidgets.QHBoxLayout(self.tool_navigation_widget)
+            tool_navigation_layout.setContentsMargins(5, 4, 5, 4)
+            tool_navigation_layout.setSpacing(5)
+            self.tool_navigation_label = QtWidgets.QLabel("Tool")
+            self.tool_navigation_label.setObjectName("aminateToolNavigationLabel")
+            tool_navigation_layout.addWidget(self.tool_navigation_label)
+            self.tool_picker_combo = AminateToolPickerCombo()
+            self.tool_picker_combo.setObjectName("aminateToolPicker")
+            self.tool_picker_combo.setEditable(False)
+            self.tool_picker_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            self.tool_picker_combo.setMinimumContentsLength(12)
+            self.tool_picker_combo.setMinimumWidth(0)
+            self.tool_picker_combo.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+            self.tool_picker_combo.setAccessibleName("Jump to Aminate tool")
+            self.tool_picker_combo.setToolTip("Choose any Aminate tool directly. Use the arrow keys or type a tool name.")
+            tool_navigation_layout.addWidget(self.tool_picker_combo, 1)
+            main_layout.addWidget(self.tool_navigation_widget)
             self.tab_widget = QtWidgets.QTabWidget()
-            self.tab_widget.setObjectName("mayaAnimWorkflowTabWidget")
+            self.tab_widget.setObjectName("aminateTabWidget")
             _allow_tiny_shell_widget(self.tab_widget)
-            self.tab_widget.setUsesScrollButtons(False)
-            self.tab_widget.setMovable(True)
+            self.tab_widget.setUsesScrollButtons(True)
+            self.tab_widget.setMovable(False)
             self.tab_widget.setElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
             self._configure_main_tab_bar()
-            self.tab_widget.setCornerWidget(self._build_tab_navigation_button(-1), QtCore.Qt.TopLeftCorner)
-            self.tab_widget.setCornerWidget(self._build_tab_navigation_button(1), QtCore.Qt.TopRightCorner)
             main_layout.addWidget(self.tab_widget, 1)
+            self.embedded_toolkit_bar = None
             self.parenting_page, self.parenting_tab = self._make_scroll_tab()
             self.contact_hold_page, self.contact_hold_tab = self._make_scroll_tab()
             self.surface_contact_page, self.surface_contact_tab = self._make_scroll_tab()
@@ -2527,6 +4311,17 @@ if QtWidgets:
             self.tab_widget.addTab(self.timeline_tab, TAB_TIMELINE)
             self.tab_widget.addTab(self.smear_frames_tab, TAB_SMEAR_FRAMES)
             self.tab_widget.addTab(self.customization_tab, TAB_CUSTOMIZATION)
+            # Every page keeps its stable manifest tool id for icons,
+            # navigation, and compatibility. Themes no longer colour-code the
+            # whole active tool.
+            for tab_index in range(self.tab_widget.count()):
+                page = self.tab_widget.widget(tab_index)
+                tool_id = maya_aminate_theme.tool_id_for_tab(self.tab_widget.tabText(tab_index))
+                if page is not None and tool_id:
+                    page.setProperty("aminateToolId", tool_id)
+            for tab_index in range(self.tab_widget.count()):
+                self.tool_picker_combo.addItem(self.tab_widget.tabText(tab_index), tab_index)
+            self.tool_picker_combo.currentIndexChanged.connect(self._jump_to_tool_picker_index)
             self._refresh_tab_tooltips()
             self.tab_intro_labels = {}
             self._built_tab_names = set()
@@ -2556,35 +4351,89 @@ if QtWidgets:
                 TAB_CUSTOMIZATION: self._build_customization_tab,
             }
             self._ensure_tab_content(self.tab_widget.currentIndex())
-            self.tab_widget.currentChanged.connect(self._update_tab_navigation_buttons)
+            self.tab_widget.currentChanged.connect(self._sync_tool_picker)
+            self.tab_widget.currentChanged.connect(self._sync_bottom_toolbar_selection)
             self.tab_widget.currentChanged.connect(self._ensure_tab_content)
-            self._update_tab_navigation_buttons()
+            self._sync_tool_picker(self.tab_widget.currentIndex())
+            self._sync_bottom_toolbar_selection(self.tab_widget.currentIndex())
             self.status_label = QtWidgets.QLabel("Ready.")
-            self.status_label.setObjectName("mayaAnimWorkflowStatusLabel")
+            self.status_label.setObjectName("aminateStatusLabel")
             _allow_tiny_shell_widget(self.status_label)
             self.status_label.setWordWrap(True)
+            self.status_label.hide()
             main_layout.addWidget(self.status_label)
             footer_layout = QtWidgets.QHBoxLayout()
             _set_no_size_constraint(footer_layout)
-            self.brand_label = QtWidgets.QLabel('Built by Amir. Follow Amir at <a href="{0}">followamir.com</a>.'.format(FOLLOW_AMIR_URL))
-            self.brand_label.setObjectName("mayaAnimWorkflowBrandLabel")
+            footer_layout.setSpacing(5)
+            self.brand_label = QtWidgets.QLabel(
+                'Made by Amir · <a href="{0}" style="color:#F1F1F1; text-decoration:underline; font-weight:600;">'
+                "followamir.com ↗</a>".format(FOLLOW_AMIR_URL)
+            )
+            self.brand_label.setObjectName("aminateBrandLabel")
             _allow_tiny_shell_widget(self.brand_label)
+            self.brand_label.setTextFormat(_qt_flag("TextFormat", "RichText", getattr(QtCore.Qt, "RichText", None)))
+            link_mouse = _qt_flag(
+                "TextInteractionFlag",
+                "LinksAccessibleByMouse",
+                getattr(QtCore.Qt, "LinksAccessibleByMouse", None),
+            )
+            link_keyboard = _qt_flag(
+                "TextInteractionFlag",
+                "LinksAccessibleByKeyboard",
+                getattr(QtCore.Qt, "LinksAccessibleByKeyboard", None),
+            )
+            if link_mouse is not None and link_keyboard is not None:
+                self.brand_label.setTextInteractionFlags(link_mouse | link_keyboard)
             self.brand_label.setOpenExternalLinks(False)
             self.brand_label.linkActivated.connect(self._open_follow_url)
-            self.brand_label.setWordWrap(True)
+            self.brand_label.setWordWrap(False)
+            self.brand_label.setAccessibleName("Made by Amir. Open followamir.com.")
+            self.brand_label.setToolTip("Open followamir.com in your web browser.")
+            self.brand_label.setCursor(_qt_flag("CursorShape", "PointingHandCursor", None))
+            self.brand_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             footer_layout.addWidget(self.brand_label, 1)
             self.version_label = QtWidgets.QLabel(VERSION_LABEL)
-            self.version_label.setObjectName("mayaAnimWorkflowVersionLabel")
-            _allow_tiny_shell_widget(self.version_label)
+            self.version_label.setObjectName("aminateVersionLabel")
+            self.version_label.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
             self.version_label.setToolTip("Current public student release label.")
             footer_layout.addWidget(self.version_label)
-            self.donate_button = QtWidgets.QPushButton("Donate")
-            self.donate_button.setMinimumWidth(0)
+            self.donate_button = QtWidgets.QToolButton()
+            self.donate_button.setObjectName("aminateSupportButton")
+            self.donate_button.setText("Donate")
+            self.donate_button.setAccessibleName("Donate to support the free Aminate tool")
+            self.donate_button.setToolTip("Aminate is free. Open Amir's optional PayPal donation link.")
+            self.donate_button.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
             _style_donate_button(self.donate_button)
-            self.donate_button.setToolTip("Open Amir's PayPal donate link. Set AMIR_PAYPAL_DONATE_URL or AMIR_DONATE_URL to customize it.")
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+            self.apply_aminate_theme(maya_aminate_theme.load_theme_name())
+            self._update_responsive_navigation()
+
+        def apply_aminate_theme(self, theme_name=None):
+            """Apply the selected neutral workbench theme immediately."""
+            name = theme_name or self.property("aminateTheme") or maya_aminate_theme.load_theme_name()
+            active_tool_id = ""
+            if getattr(self, "tab_widget", None) is not None:
+                current_index = self.tab_widget.currentIndex()
+                if current_index >= 0:
+                    active_tool_id = maya_aminate_theme.tool_id_for_tab(self.tab_widget.tabText(current_index))
+            try:
+                self.setProperty("aminateActiveTool", active_tool_id)
+                navigation = getattr(self, "tool_navigation_widget", None)
+                if navigation is not None:
+                    navigation.setProperty("aminateActiveTool", active_tool_id)
+                tab_bar = self.tab_widget.tabBar() if getattr(self, "tab_widget", None) is not None else None
+                if tab_bar is not None:
+                    tab_bar.setProperty("aminateActiveTool", active_tool_id)
+                return maya_aminate_theme.apply_theme_to_window(
+                    self,
+                    name,
+                    active_tool_id=active_tool_id,
+                    active_accent=maya_aminate_theme.accent_map().get(active_tool_id),
+                )
+            except Exception:
+                return name
 
         def _ensure_tab_content(self, index):
             if not hasattr(self, "tab_widget") or index is None or index < 0:
@@ -2598,6 +4447,7 @@ if QtWidgets:
             try:
                 builder()
                 self._built_tab_names.add(tab_name)
+                _apply_aminate_combo_affordances(self.tab_widget.widget(index))
             except Exception as exc:
                 page = self.tab_widget.widget(index)
                 if page and not page.layout():
@@ -2616,7 +4466,7 @@ if QtWidgets:
             except Exception:
                 pass
             try:
-                tab_bar.setUsesScrollButtons(False)
+                tab_bar.setUsesScrollButtons(True)
             except Exception:
                 pass
             try:
@@ -2639,55 +4489,157 @@ if QtWidgets:
                 except Exception:
                     pass
 
-        def _build_tab_navigation_button(self, direction):
-            button = QtWidgets.QToolButton()
-            button.setObjectName("mayaAnimWorkflowTabNavButton")
-            if direction < 0:
-                button.setText("<<")
-                button.setToolTip("Go to the tab on the left.")
-                button.clicked.connect(lambda: self._step_tab_navigation(-1))
-                self.tab_nav_left_button = button
-            else:
-                button.setText(">>")
-                button.setToolTip("Go to the tab on the right.")
-                button.clicked.connect(lambda: self._step_tab_navigation(1))
-                self.tab_nav_right_button = button
-            return button
-
-        def _step_tab_navigation(self, direction):
-            if not self.tab_widget:
+        def _jump_to_tool_picker_index(self, picker_index):
+            if not self.tab_widget or not self.tool_picker_combo:
                 return
-            current_index = self.tab_widget.currentIndex()
-            max_index = max(0, self.tab_widget.count() - 1)
-            target_index = max(0, min(max_index, current_index + int(direction)))
-            if target_index != current_index:
-                self.tab_widget.setCurrentIndex(target_index)
+            tab_index = self.tool_picker_combo.itemData(int(picker_index))
+            try:
+                tab_index = int(tab_index)
+            except (TypeError, ValueError):
+                tab_index = int(picker_index)
+            if 0 <= tab_index < self.tab_widget.count():
+                self.tab_widget.setCurrentIndex(tab_index)
 
-        def _update_tab_navigation_buttons(self, *_args):
-            if not self.tab_widget:
+        def _sync_tool_picker(self, tab_index):
+            if not getattr(self, "tool_picker_combo", None):
                 return
-            current_index = self.tab_widget.currentIndex()
-            max_index = max(0, self.tab_widget.count() - 1)
-            if hasattr(self, "tab_nav_left_button") and self.tab_nav_left_button:
-                self.tab_nav_left_button.setEnabled(current_index > 0)
-            if hasattr(self, "tab_nav_right_button") and self.tab_nav_right_button:
-                self.tab_nav_right_button.setEnabled(current_index < max_index)
+            picker_index = self.tool_picker_combo.findData(int(tab_index))
+            if picker_index < 0:
+                return
+            self.tool_picker_combo.blockSignals(True)
+            self.tool_picker_combo.setCurrentIndex(picker_index)
+            self.tool_picker_combo.blockSignals(False)
+
+        def _sync_bottom_toolbar_selection(self, tab_index):
+            if not self.tab_widget or tab_index < 0 or tab_index >= self.tab_widget.count():
+                return
+            tab_label = self.tab_widget.tabText(tab_index)
+            self.apply_aminate_theme()
+            tab_alias_by_label = {
+                TAB_GUIDE: "quick_start",
+                TAB_STUDENT_CORE: "toolkit_bar",
+                TAB_TIMING: "scene_helpers",
+                TAB_REFERENCE_MANAGER: "reference_manager",
+                TAB_PARENTING: "dynamic_parenting",
+                TAB_CONTACT_HOLD: "hand_foot_hold",
+                TAB_SURFACE_CONTACT: "surface_contact",
+                TAB_PIVOT: "dynamic_pivot",
+                TAB_IKFK: "ikfk",
+                TAB_FACE_RETARGET: "controls_retargeter",
+                TAB_CONTROL_PICKER: "control_picker",
+                TAB_ANIMATORS_PENCIL: "animators_pencil",
+                TAB_ANIMATION_ASSISTANT: "animation_assistant",
+                TAB_ANIMATION_STYLING: "animation_styling",
+                TAB_HISTORY_TIMELINE: "history_timeline",
+                TAB_ONION: "onion_skin",
+                TAB_ROTATION: "rotation_doctor",
+                TAB_SKIN: "skinning_cleanup",
+                TAB_RIG_SCALE: "rig_scale",
+                TAB_VIDEO: "video_reference",
+                TAB_TIMELINE: "timeline_notes",
+                TAB_SMEAR_FRAMES: "smear_frames",
+                TAB_CUSTOMIZATION: "customization",
+            }
+            maya_timing_tools.sync_workflow_toolbar_selection(tab_alias_by_label.get(tab_label, self._tab_key(tab_label)))
 
         def _build_tab_intro(self, tab_name):
             frame = QtWidgets.QFrame()
-            frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-            frame.setObjectName("mayaAnimWorkflowTabIntro")
+            frame.setFrameShape(QtWidgets.QFrame.NoFrame)
+            frame.setObjectName("aminateTabIntro")
+            tool_id = maya_aminate_theme.tool_id_for_tab(tab_name)
+            if tool_id:
+                frame.setProperty("aminateToolId", tool_id)
+            frame.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Maximum)
             inner = QtWidgets.QVBoxLayout(frame)
-            inner.setContentsMargins(10, 8, 10, 8)
-            inner.setSpacing(4)
-            title = QtWidgets.QLabel("What This Tab Helps With")
-            title.setObjectName("mayaAnimWorkflowIntroTitle")
+            inner.setContentsMargins(2, 2, 2, 3)
+            inner.setSpacing(3)
+            title_row = QtWidgets.QHBoxLayout()
+            title_row.setSpacing(6)
+            title = QtWidgets.QLabel(tab_name)
+            title.setObjectName("aminateIntroTitle")
+            if tool_id:
+                title.setProperty("aminateToolId", tool_id)
+            category = AMINATE_TAB_CATEGORY.get(tab_name, "primary")
+            if category not in AMINATE_CATEGORY_TOKEN_KEYS:
+                category = "primary"
+            title.setProperty("aminateCategory", category)
+            toggle = QtWidgets.QToolButton()
+            toggle.setObjectName("aminateIntroToggle")
+            toggle.setCheckable(True)
+            toggle.setChecked(False)
+            toggle.setText("Help")
+            toggle.setArrowType(_qt_flag("ArrowType", "RightArrow", QtCore.Qt.RightArrow))
+            toggle.setToolButtonStyle(_qt_flag("ToolButtonStyle", "ToolButtonTextBesideIcon", QtCore.Qt.ToolButtonTextBesideIcon))
+            toggle.setAccessibleName("Show or hide help for {0}".format(tab_name))
+            toggle.setToolTip("Show a short explanation and the three-step workflow.")
+            title_row.addWidget(title, 1)
+            title_row.addWidget(toggle)
+            inner.addLayout(title_row)
+
+            help_panel = QtWidgets.QWidget()
+            help_panel.setObjectName("aminateIntroHelp")
+            help_panel.setVisible(False)
+            help_layout = QtWidgets.QVBoxLayout(help_panel)
+            help_layout.setContentsMargins(8, 6, 8, 6)
+            help_layout.setSpacing(5)
             body = QtWidgets.QLabel(TAB_HELP_TEXT.get(tab_name, ""))
             body.setWordWrap(True)
-            inner.addWidget(title)
-            inner.addWidget(body)
+            body.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            help_layout.addWidget(body)
+
+            coach = QtWidgets.QFrame()
+            coach.setObjectName("aminateCoach")
+            coach.setFrameShape(QtWidgets.QFrame.NoFrame)
+            coach_layout = QtWidgets.QVBoxLayout(coach)
+            coach_layout.setContentsMargins(0, 2, 0, 0)
+            coach_layout.setSpacing(3)
+            coach_title = QtWidgets.QLabel("Do this in three small steps")
+            coach_title.setObjectName("aminateCoachTitle")
+            coach_layout.addWidget(coach_title)
+            for step_number, step_text in enumerate(TAB_WORKFLOW_STEPS.get(tab_name, ()), 1):
+                step = QtWidgets.QLabel("{0}. {1}".format(step_number, step_text))
+                step.setObjectName("aminateCoachStep")
+                step.setWordWrap(True)
+                step.setAccessibleName("Step {0}: {1}".format(step_number, step_text))
+                coach_layout.addWidget(step)
+            help_layout.addWidget(coach)
+
+            tutorial_button = QtWidgets.QPushButton(
+                "Open tutorials and FAQ" if tab_name == TAB_GUIDE else "Open full tutorial"
+            )
+            tutorial_button.setObjectName("aminateTutorialButton")
+            tutorial_button.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
+            tutorial_button.setToolTip("Open the offline Aminate tutorial at this tool.")
+            tutorial_button.clicked.connect(
+                lambda _checked=False, name=tab_name: self._open_tutorial_section(name)
+            )
+            help_layout.addWidget(tutorial_button)
+            help_panel.setVisible(False)
+            inner.addWidget(help_panel)
+            toggle.toggled.connect(
+                lambda visible, panel=help_panel, button=toggle: self._toggle_tab_intro_help(
+                    visible,
+                    panel,
+                    button,
+                )
+            )
             self.tab_intro_labels[tab_name] = body
             return frame
+
+        @staticmethod
+        def _toggle_tab_intro_help(visible, label, button):
+            label.setVisible(bool(visible))
+            button.setText("Hide help" if visible else "Help")
+            button.setArrowType(
+                _qt_flag("ArrowType", "DownArrow", QtCore.Qt.DownArrow)
+                if visible
+                else _qt_flag("ArrowType", "RightArrow", QtCore.Qt.RightArrow)
+            )
+            button.setToolTip(
+                "Hide this explanation when you need more working space."
+                if visible
+                else "Show the plain-language explanation for this tool."
+            )
 
         def _embed_tool_panel(self, panel, host_parent):
             if panel is None:
@@ -2709,6 +4661,8 @@ if QtWidgets:
                 panel.setProperty("aminateEmbeddedPanel", True)
             except Exception:
                 pass
+            self._apply_embedded_dark_surface(panel)
+            self._apply_embedded_action_hierarchy(panel)
             panel.setMinimumWidth(0)
             panel.setMinimumHeight(0)
             if hasattr(panel, "setSizePolicy"):
@@ -2718,6 +4672,77 @@ if QtWidgets:
             except Exception:
                 pass
             return panel
+
+        @staticmethod
+        def _apply_embedded_dark_surface(panel):
+            widgets = [panel]
+            try:
+                palette = QtGui.QPalette(panel.palette())
+                role_colors = (
+                    (QtGui.QPalette.Window, "#373737"),
+                    (QtGui.QPalette.WindowText, "#F1F1F1"),
+                    (QtGui.QPalette.Base, "#303030"),
+                    (QtGui.QPalette.AlternateBase, "#3A3A3A"),
+                    (QtGui.QPalette.ToolTipBase, "#414141"),
+                    (QtGui.QPalette.ToolTipText, "#F1F1F1"),
+                    (QtGui.QPalette.Text, "#F1F1F1"),
+                    (QtGui.QPalette.Button, "#505050"),
+                    (QtGui.QPalette.ButtonText, "#F1F1F1"),
+                    (QtGui.QPalette.Highlight, "#566A7A"),
+                    (QtGui.QPalette.HighlightedText, "#FFFFFF"),
+                    (QtGui.QPalette.Link, "#C7D7E4"),
+                )
+                for role, color in role_colors:
+                    palette.setColor(role, QtGui.QColor(color))
+                widgets.extend(panel.findChildren(QtWidgets.QWidget))
+                for widget in widgets:
+                    widget.setPalette(palette)
+                for scroll_area in panel.findChildren(QtWidgets.QAbstractScrollArea):
+                    viewport = scroll_area.viewport()
+                    if viewport is not None:
+                        viewport.setPalette(palette)
+                        viewport.setAutoFillBackground(True)
+            except Exception:
+                pass
+            try:
+                style_roots = [panel]
+                style_roots.extend(
+                    widget
+                    for widget in widgets[1:]
+                    if widget.styleSheet().strip()
+                    and widget.findChildren(QtWidgets.QWidget)
+                )
+                for style_root in style_roots:
+                    style_root.setProperty("aminateEmbeddedPanel", True)
+                    existing = style_root.styleSheet().strip()
+                    style_root.setStyleSheet(
+                        (existing + "\n" if existing else "")
+                        + AMINATE_EMBEDDED_PANEL_STYLESHEET
+                    )
+                    style_root.style().unpolish(style_root)
+                    style_root.style().polish(style_root)
+            except Exception:
+                pass
+
+        @staticmethod
+        def _apply_embedded_action_hierarchy(panel):
+            try:
+                buttons = panel.findChildren(QtWidgets.QPushButton)
+            except Exception:
+                return
+            for button in buttons:
+                label = str(button.text() or "").strip()
+                if label in AMINATE_PRIMARY_ACTION_LABELS:
+                    button.setProperty("aminateRole", "primary")
+                elif label in AMINATE_DANGER_ACTION_LABELS:
+                    button.setProperty("aminateRole", "danger")
+                else:
+                    continue
+                try:
+                    button.style().unpolish(button)
+                    button.style().polish(button)
+                except Exception:
+                    pass
 
         def _build_parenting_tab(self):
             layout = QtWidgets.QVBoxLayout(self.parenting_page)
@@ -2731,33 +4756,50 @@ if QtWidgets:
 
         def _build_pivot_tab(self):
             layout = QtWidgets.QVBoxLayout(self.pivot_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(8)
             layout.addWidget(self._build_tab_intro(TAB_PIVOT))
-            layout.addWidget(QtWidgets.QLabel("Make a temporary turn point anywhere, spin around it, then remove it when you are done."))
-            row = QtWidgets.QHBoxLayout()
+            summary = QtWidgets.QLabel("Pick controls, place one temporary pivot, choose the range, then turn the controls.")
+            summary.setWordWrap(True)
+            layout.addWidget(summary)
+            pivot_group = QtWidgets.QGroupBox("Pivot Setup")
+            pivot_form = QtWidgets.QFormLayout(pivot_group)
             self.pivot_mode_combo = QtWidgets.QComboBox()
             self.pivot_mode_combo.addItems(list(PIVOT_MODES.keys()))
             self.pivot_mode_combo.setToolTip("Choose where the turn point starts before you move it by hand.")
-            row.addWidget(QtWidgets.QLabel("Start Pivot At"))
-            row.addWidget(self.pivot_mode_combo, 1)
-            layout.addLayout(row)
-            buttons = QtWidgets.QGridLayout()
-            self.create_pivot_button = QtWidgets.QPushButton("Create Pivot")
-            self.create_pivot_button.setToolTip("Make a temporary pivot marker for the selected objects.")
+            pivot_form.addRow("Start Pivot At", self.pivot_mode_combo)
+            layout.addWidget(pivot_group)
+            buttons = QtWidgets.QVBoxLayout()
+            self.create_pivot_button = QtWidgets.QPushButton("Create & Move Pivot")
+            self.create_pivot_button.setProperty("aminateRole", "primary")
+            self.create_pivot_button.setToolTip("Make a temporary pivot for the selected objects, then select it for moving.")
             self.edit_pivot_button = QtWidgets.QPushButton("Move Pivot")
             self.edit_pivot_button.setToolTip("Select the pivot marker so you can move it where you want.")
             self.apply_pivot_button = QtWidgets.QPushButton("Turn From Pivot")
-            self.apply_pivot_button.setToolTip("Rotate the selected objects around the pivot marker you just moved.")
+            self.apply_pivot_button.setProperty("aminateRole", "primary")
+            self.apply_pivot_button.setToolTip(
+                "Turn every whole frame in the highlighted Time Slider range; with no highlight, turn only the current frame."
+            )
             self.clear_pivot_button = QtWidgets.QPushButton("Clear Pivot")
+            self.clear_pivot_button.setProperty("aminateRole", "danger")
             self.clear_pivot_button.setToolTip("Remove the temporary pivot marker.")
-            buttons.addWidget(self.create_pivot_button, 0, 0)
-            buttons.addWidget(self.edit_pivot_button, 0, 1)
-            buttons.addWidget(self.apply_pivot_button, 1, 0)
-            buttons.addWidget(self.clear_pivot_button, 1, 1)
+            buttons.addWidget(self.create_pivot_button)
+            buttons.addWidget(self.edit_pivot_button)
+            buttons.addWidget(self.apply_pivot_button)
+            buttons.addWidget(self.clear_pivot_button)
             layout.addLayout(buttons)
-            self.pivot_help = QtWidgets.QPlainTextEdit()
-            self.pivot_help.setReadOnly(True)
-            self.pivot_help.setPlainText("1. Pick the object or objects.\n2. Click Create Pivot.\n3. Click Move Pivot and place it where you want.\n4. Rotate the pivot marker.\n5. Click Turn From Pivot.\n6. Click Clear Pivot when you are done.")
-            layout.addWidget(self.pivot_help, 1)
+            self.pivot_range_status = QtWidgets.QLabel(_pivot_range_text(_pivot_apply_times()[1]))
+            self.pivot_range_status.setWordWrap(True)
+            self.pivot_range_status.setProperty("aminateRole", "muted")
+            layout.addWidget(self.pivot_range_status)
+            self.pivot_help = QtWidgets.QLabel(
+                "Highlighted range = turn on all those frames. No highlight = only the current frame. "
+                "Move the same pivot and apply again for the next range. Rotate the marker to choose the turn."
+            )
+            self.pivot_help.setWordWrap(True)
+            self.pivot_help.setProperty("aminateRole", "muted")
+            layout.addWidget(self.pivot_help)
+            layout.addStretch(1)
             self.create_pivot_button.clicked.connect(self._create_pivot)
             self.edit_pivot_button.clicked.connect(self._edit_pivot)
             self.apply_pivot_button.clicked.connect(self._apply_pivot)
@@ -2788,21 +4830,28 @@ if QtWidgets:
 
         def _build_ikfk_tab(self):
             layout = QtWidgets.QVBoxLayout(self.ikfk_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(8)
             layout.addWidget(self._build_tab_intro(TAB_IKFK))
-            layout.addWidget(QtWidgets.QLabel("Find an arm or leg switch setup, check it, save it, and switch without a pop."))
-            top = QtWidgets.QHBoxLayout()
+            summary = QtWidgets.QLabel("Pick one arm or leg, set it up once, then switch without a visible pop.")
+            summary.setWordWrap(True)
+            layout.addWidget(summary)
+            saved_group = QtWidgets.QGroupBox("Saved Switch")
+            saved_layout = QtWidgets.QVBoxLayout(saved_group)
             self.profile_combo = QtWidgets.QComboBox()
             self.refresh_profiles_button = QtWidgets.QPushButton("Refresh")
             self.load_profile_button = QtWidgets.QPushButton("Load")
             self.profile_combo.setToolTip("Saved switches you can reuse later.")
             self.refresh_profiles_button.setToolTip("Reload the saved switch list.")
             self.load_profile_button.setToolTip("Load the saved switch into the boxes below.")
-            top.addWidget(QtWidgets.QLabel("Saved Switch"))
-            top.addWidget(self.profile_combo, 1)
-            top.addWidget(self.refresh_profiles_button)
-            top.addWidget(self.load_profile_button)
-            layout.addLayout(top)
-            meta_form = QtWidgets.QGridLayout()
+            saved_layout.addWidget(self.profile_combo)
+            saved_buttons = QtWidgets.QHBoxLayout()
+            saved_buttons.addWidget(self.load_profile_button, 1)
+            saved_buttons.addWidget(self.refresh_profiles_button, 1)
+            saved_layout.addLayout(saved_buttons)
+            layout.addWidget(saved_group)
+            setup_group = QtWidgets.QGroupBox("Switch Setup")
+            meta_form = QtWidgets.QFormLayout(setup_group)
             self.profile_name_line = QtWidgets.QLineEdit()
             self.rig_root_line = QtWidgets.QLineEdit()
             self.namespace_line = QtWidgets.QLineEdit()
@@ -2811,23 +4860,17 @@ if QtWidgets:
             self.side_combo = QtWidgets.QComboBox()
             self.side_combo.addItems(["left", "right"])
             self.switch_attr_line = QtWidgets.QLineEdit()
-            meta_rows = [
-                ("Switch Name", self.profile_name_line, "Main Rig", self.rig_root_line),
-                ("Limb Type", self.limb_type_combo, "Side", self.side_combo),
-                ("Name Tag", self.namespace_line, "Switch Setting", self.switch_attr_line),
-            ]
             self.profile_name_line.setToolTip("A name so you can save and load this switch later.")
             self.rig_root_line.setToolTip("The main top object for this rig. This is usually filled in for you.")
             self.namespace_line.setToolTip("Only needed if the rig names have extra tags and auto-find needs help.")
             self.switch_attr_line.setToolTip("The setting that changes the arm or leg between IK and FK.")
-            for row_index, row in enumerate(meta_rows):
-                meta_form.addWidget(QtWidgets.QLabel(row[0]), row_index, 0)
-                meta_form.addWidget(row[1], row_index, 1)
-                meta_form.addWidget(QtWidgets.QLabel(row[2]), row_index, 2)
-                meta_form.addWidget(row[3], row_index, 3)
-            layout.addLayout(meta_form)
-
-            columns = QtWidgets.QHBoxLayout()
+            meta_form.addRow("Switch Name", self.profile_name_line)
+            meta_form.addRow("Main Rig", self.rig_root_line)
+            meta_form.addRow("Limb Type", self.limb_type_combo)
+            meta_form.addRow("Side", self.side_combo)
+            meta_form.addRow("Name Tag", self.namespace_line)
+            meta_form.addRow("Switch Setting", self.switch_attr_line)
+            layout.addWidget(setup_group)
 
             fk_group = QtWidgets.QGroupBox("FK")
             fk_form = QtWidgets.QFormLayout(fk_group)
@@ -2840,7 +4883,6 @@ if QtWidgets:
             self.fk_value_spin.setRange(-9999.0, 9999.0)
             self.fk_value_spin.setToolTip("The switch value that means FK is on.")
             fk_form.addRow("FK Value", self.fk_value_spin)
-            columns.addWidget(fk_group, 1)
 
             ik_group = QtWidgets.QGroupBox("IK")
             ik_form = QtWidgets.QFormLayout(ik_group)
@@ -2860,44 +4902,46 @@ if QtWidgets:
             self.ik_value_spin.setValue(1.0)
             self.ik_value_spin.setToolTip("The switch value that means IK is on.")
             ik_form.addRow("IK Value", self.ik_value_spin)
-            columns.addWidget(ik_group, 1)
+            layout.addWidget(fk_group)
+            layout.addWidget(ik_group)
 
-            layout.addLayout(columns)
-
-            details_form = QtWidgets.QGridLayout()
+            details_group = QtWidgets.QGroupBox("Advanced Matching")
+            details_form = QtWidgets.QFormLayout(details_group)
             self.extra_controls_line = QtWidgets.QLineEdit()
             self.extra_controls_line.setPlaceholderText("optional extra controls to key")
             self.extra_controls_line.setToolTip("Any extra controls that should also get keys when you switch.")
             self.match_nodes_line = QtWidgets.QLineEdit()
             self.match_nodes_line.setPlaceholderText("match_shoulder, match_elbow, match_wrist")
             self.match_nodes_line.setToolTip("The points the FK controls should copy when you switch.")
-            detail_rows = [
-                ("Match Controls", self.match_nodes_line, "Extra Controls To Key", self.extra_controls_line),
-            ]
-            for row_index, row in enumerate(detail_rows):
-                details_form.addWidget(QtWidgets.QLabel(row[0]), row_index, 0)
-                details_form.addWidget(row[1], row_index, 1)
-                if row[2]:
-                    details_form.addWidget(QtWidgets.QLabel(row[2]), row_index, 2)
-                    details_form.addWidget(row[3], row_index, 3)
-            layout.addLayout(details_form)
-            buttons = QtWidgets.QGridLayout()
-            self.detect_profile_button = QtWidgets.QPushButton("Find From What You Picked")
-            self.detect_profile_button.setToolTip("Make a first guess from the selected arm or leg controls.")
+            self.ik_match_node_line = QtWidgets.QLineEdit()
+            self.ik_match_node_line.setPlaceholderText("optional IK hand/foot match control")
+            self.ik_match_node_line.setToolTip("Optional rig-provided point whose full world pose the IK hand or foot control should copy.")
+            details_form.addRow("Match Controls", self.match_nodes_line)
+            details_form.addRow("IK Match Control", self.ik_match_node_line)
+            details_form.addRow("Extra Controls To Key", self.extra_controls_line)
+            layout.addWidget(details_group)
+            buttons = QtWidgets.QVBoxLayout()
+            self.detect_profile_button = QtWidgets.QPushButton("Set Up From Selection")
+            self.detect_profile_button.setProperty("aminateRole", "primary")
+            self.detect_profile_button.setToolTip("Detect the selected arm or leg. Complete setups are saved automatically.")
             self.save_profile_button = QtWidgets.QPushButton("Save Switch")
             self.save_profile_button.setToolTip("Save the current boxes as a switch you can load later.")
             self.switch_fk_to_ik_button = QtWidgets.QPushButton("Switch FK -> IK")
+            self.switch_fk_to_ik_button.setProperty("aminateRole", "primary")
             self.switch_fk_to_ik_button.setToolTip("Match the IK controls to the current FK pose and switch on this frame.")
             self.switch_ik_to_fk_button = QtWidgets.QPushButton("Switch IK -> FK")
+            self.switch_ik_to_fk_button.setProperty("aminateRole", "primary")
             self.switch_ik_to_fk_button.setToolTip("Match the FK controls to the current IK pose and switch on this frame.")
-            buttons.addWidget(self.detect_profile_button, 0, 0)
-            buttons.addWidget(self.save_profile_button, 0, 1)
-            buttons.addWidget(self.switch_fk_to_ik_button, 1, 0)
-            buttons.addWidget(self.switch_ik_to_fk_button, 1, 1)
+            buttons.addWidget(self.detect_profile_button)
+            buttons.addWidget(self.save_profile_button)
+            buttons.addWidget(self.switch_fk_to_ik_button)
+            buttons.addWidget(self.switch_ik_to_fk_button)
             layout.addLayout(buttons)
-            self.ikfk_help = QtWidgets.QPlainTextEdit()
-            self.ikfk_help.setReadOnly(True)
-            layout.addWidget(self.ikfk_help, 1)
+            self.ikfk_help = QtWidgets.QLabel("Select controls, then use Set Up From Selection.")
+            self.ikfk_help.setWordWrap(True)
+            self.ikfk_help.setProperty("aminateRole", "muted")
+            layout.addWidget(self.ikfk_help)
+            layout.addStretch(1)
             self.refresh_profiles_button.clicked.connect(self._populate_profile_names)
             self.load_profile_button.clicked.connect(self._load_selected_profile)
             self.detect_profile_button.clicked.connect(self._detect_profile)
@@ -2909,7 +4953,7 @@ if QtWidgets:
             layout = QtWidgets.QVBoxLayout(self.face_retarget_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_FACE_RETARGET))
-            face_hint = QtWidgets.QLabel("Fill paired rows: source control on the left, target control on the right. A new empty row appears automatically and empty rows are ignored. Auto Map By Name pairs matching names quickly. Retarget All Controls bakes every completed row.")
+            face_hint = QtWidgets.QLabel("Fill paired rows: source control on the left, target control on the right. A new empty row appears automatically and empty rows are ignored. Auto Map By Name pairs matching names quickly. Retarget All Controls matches the source starting pose and copies only the source's original key times.")
             face_hint.setWordWrap(True)
             layout.addWidget(face_hint)
             self.face_retarget_panel = self._embed_tool_panel(
@@ -2934,6 +4978,8 @@ if QtWidgets:
             layout.addWidget(self._build_tab_intro(TAB_ANIMATORS_PENCIL))
             self.animators_pencil_panel = maya_animators_pencil.AnimatorsPencilPanel(
                 controller=self.controller.animators_pencil_controller,
+                video_reference_controller=self.controller.video_reference_controller,
+                reference_package_controller=self.controller.reference_manager_controller,
                 parent=self.animators_pencil_page,
             )
             layout.addWidget(self.animators_pencil_panel, 1)
@@ -3078,164 +5124,118 @@ if QtWidgets:
         def _build_guide_tab(self):
             layout = QtWidgets.QVBoxLayout(self.guide_page)
             layout.addWidget(self._build_tab_intro(TAB_GUIDE))
-            tutorials_button = QtWidgets.QPushButton("Open Tutorials")
-            tutorials_button.setToolTip("Open Aminate local tutorials and button docs.")
-            tutorials_button.clicked.connect(self._open_tutorials_docs)
-            layout.addWidget(tutorials_button)
-            guide = QtWidgets.QPlainTextEdit()
-            guide.setReadOnly(True)
-            guide.setPlainText(
-                "Toolkit Bar\n"
-                "- Use this when you want compact, color-coded, animBot-style buttons for the basic animation jobs students repeat all day.\n"
-                "- Use -1 and +1 to nudge selected Graph Editor keys, or all keys on selected controls.\n"
-                "- Use In to add an inbetween key on the current frame, and Cut to remove keys on the current frame.\n"
-                "- Use Zero to reset selected controls, 2s to bake selected controls every two frames, Anim to pick animated controls, and Clean to remove static curves.\n"
-                "- Open the Toolkit Bar tab when you want the full docked Toolkit Bar strip inside the main Aminate window.\n\n"
-                "Scene Helpers\n"
-                "- Use this when you want Auto Key, Auto Snap To Frames, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Camera Offset controls, and Camera Preset quick buttons.\n"
-                "- Use Auto Key when you want Maya to key changes as you animate.\n"
-                "- Leave Auto Snap To Frames on if you want the tool to watch for timing changes for you.\n"
-                "- Click Snap Selected Keys To Frames if keys are already off-frame.\n"
-                "- Click Load Textures when scene textures exist locally but Maya has not refreshed or repathed them yet.\n"
-                "- Click Open Last Autosave if Maya crashed and you want to jump straight back to the latest autosave.\n"
-                "- Click Game Animation Mode in Scene Helpers or the blue button at the far right of the Toolkit Bar to prep the scene for 30 fps, real-time playback, autosave, five backups, and a texture refresh.\n\n"
-                "- Click Set Up Render Environment to build the cyclorama helper in Python and add the sky light, bookmarks, and render cameras around the selected character.\n"
-                "- The camera preset menu starts on Perspective, then lets you jump to Front, Side, or Three Quarter.\n"
-                "- Click Delete Render Environment to remove the whole render setup again when you want to start over.\n"
-                "- Use Camera Height Offset and Camera Dolly Offset to move all helper cameras up/down or in/out together.\n"
-                "- Use Camera Preset to jump between Perspective, Front, Side, and Three Quarter after the setup is built.\n\n"
-                "Reference Manager\n"
-                "- Use this when you want one zip that contains the saved scene and every referenced file the scene needs.\n"
-                "- Save the shot once first so Maya knows where the scene lives.\n"
-                "- Click Refresh Needed Files to check Maya references, textures, image planes, audio, and caches.\n"
-                "- Click Package Scene To Zip.\n"
-                "- The zip contains a packaged Maya ASCII scene, copied files, and a manifest listing anything missing.\n\n"
-                "Dynamic Parenting\n"
-                "- Use this when a prop or control needs to switch between hand, gun, world, or mixed parents without popping.\n"
-                "- Pick the moving thing, like the magazine.\n"
-                "- Leave Stay In Current Position At Start? on if you want it to stay where it is when you first add it.\n"
-                "- Click Add Object.\n"
-                "- Pick the new parent, like the gun or the hand, and click Pick Parent.\n"
-                "- If you want it to jump onto that parent right now, click Snap To Parent.\n"
-                "- If you want to place it yourself, move it where you want, leave Maintain Current Offset on, and click Switch to this Parent.\n"
-                "- Click World if it should stop following everything.\n"
-                "- Example: pick the magazine, leave Stay In Current Position At Start? on, click Add Object, pick the gun, click Pick Parent, place the magazine exactly where you want it, then click Switch to this Parent. On the next frame it follows the gun but stays in that exact place.\n"
-                "- Open More if you want to remember extra parents, blend two parents, fix a jump, or delete saved switches.\n"
-                "- To delete one saved switch, open More, pick it in History, and click Delete Picked Switch.\n"
-                "- Remove Object deletes this tool's constraints, saved parents, and saved switches for that object.\n\n"
-                "Controls Retargeter (Face and Body)\n"
-                "- Use this when you want face or body controls from one rig copied onto another rig.\n"
-                "- Pick the source face controls first, then click Load Selected Source.\n"
-                "- Pick the target face controls second, then click Load Selected Target.\n"
-                "- If you pick too many, select the extra source or target control and click Remove Selected Source or Remove Selected Target.\n"
-                "- Keep the same order on both sides. Source item 1 maps to Target item 1, source item 2 maps to target item 2, and so on.\n"
-                "- Example: brow, eye, mouth, jaw, or body controls can still pair even if one rig says source_brow_CTRL and the other says target_brow_CTRL.\n"
-                "- If you need to fix one saved row, click its row first and use Quick Pair Edit. It only changes the selected row.\n"
-                "- Click Pair By Order for order matching, or Auto Map By Name for loose name matching.\n"
-                "- Click Retarget Selected Controls for one control pair row or Retarget All Controls for every control pair row.\n"
-                "- The target controls get the keys, so you can still edit them after the transfer.\n\n"
-                "Animators Pencil\n"
-                "- Use this when you want Blue Pencil-style drawing for animation notes, arcs, contact fixes, or frame planning.\n"
-                "- Drawings are real Maya curves and text placed in front of the current camera, so the scene still shows the marks without this script installed.\n"
-                "- Click Add Layer, pick a tool, choose color, size, and opacity, then click Create Mark.\n"
-                "- Use Static layers for notes that stay visible, Animation layers for frame-based drawings, and Locked layers when you do not want accidental edits.\n"
-                "- Use Add Key, Duplicate Previous Key, Retime, Frame Marker, and Ghosts for drawing animation timing.\n"
-                "- Use Copy, Cut, Paste, Erase Selected, or Maya's Move/Rotate/Scale tools to edit marks.\n\n"
-                "History Timeline\n"
-                "- Use this when you want ZBrush-style restore points that are safer than a long Maya undo chain.\n"
-                "- Save the Maya scene once first so Aminate knows where to keep the history folder.\n"
-                "- Click Save Step for normal work states or Save Milestone for protected important poses.\n"
-                "- Click a block in the Toolkit Bar history strip, or pick a row in the History Timeline tab and click Restore.\n"
-                "- Restoring saves a safety snapshot first, then opens the chosen full-scene snapshot.\n"
-                "- Snapshot metadata is recorded for changed nodes, animation curves, constraints, branches, and notes.\n\n"
-                "Hand / Foot Hold\n"
-                "- Use this when a planted hand or foot should stay in the same place on chosen world axes while the body keeps moving.\n"
-                "- Pick the hand or foot control.\n"
-                "- If you want both sides, click Add Matching Other Side.\n"
-                "- If you are not sure about the contact range, click Suggest Range first.\n"
-                "- Go to the first frame where it sticks and click Use Current For Contact Start.\n"
-                "- Go to the frame where it stops sticking and click Use Current For Lift End.\n"
-                "- Turn on the world axes you want to keep still, like Z for forward travel.\n"
-                "- Click Create / Update Hold.\n"
-                "- Use Use Hold to turn the saved hold on again, Use Original Motion to turn it off, and Delete Hold to remove it.\n\n"
-                "Surface Contact\n"
-                "- Use this when a hand, foot, or other control should stay clamped to a selected mesh surface.\n"
-                "- Pick the control first, then pick the surface mesh.\n"
-                "- Turn on Follow Surface Normal if you want the control to turn with the surface.\n"
-                "- Click Check Setup to make sure the control and surface are ready.\n"
-                "- Click Create / Update Contact to make the clamp live.\n"
-                "- Use Turn On Selected and Turn Off Selected to turn saved contacts on and off.\n"
-                "- Use Key State if you want Maya to remember that on or off state on the current frame.\n"
-                "- Use Refresh Now if you want the current frame solved again right away.\n\n"
-                "Dynamic Pivot\n"
-                "- Use this when you want a temporary turn point without changing the real pivot.\n"
-                "- Pick the object or objects.\n"
-                "- Click Create Pivot.\n"
-                "- Click Move Pivot and place the pivot marker where you want to turn from.\n"
-                "- Rotate the pivot marker.\n"
-                "- Click Turn From Pivot.\n"
-                "- Click Clear Pivot when you are done.\n\n"
-                "Universal Arm/Leg Switch\n"
-                "- Use this when you need to switch an arm or leg between IK and FK without a visible pop.\n"
-                "- Pick the arm or leg controls.\n"
-                "- Click Find From What You Picked.\n"
-                "- Check that the FK box has the FK controls and the IK box has the hand or foot control plus the elbow or knee guide.\n"
-                "- Click Save Switch if it looks right.\n"
-                "- Use the switch buttons when you want to change modes. The tool also keys the frame before so it stays clean.\n\n"
-                "Onion Skin\n"
-                "- Use this when you want to see past and future poses as ghosts.\n"
-                "- Pick a character and click Attach Selected.\n"
-                "- The see-through copies show where the character was and where it will be.\n"
-                "- Use Frame Step if you only want to see every second or third frame.\n\n"
-                "Rotation Doctor\n"
-                "- Use this when rotations are flipping or gimbaling and you want help fixing them.\n"
-                "- Pick the animated controls and click Analyze Selected.\n"
-                "- Read the warning list.\n"
-                "- Click Use Best Fix for the safest quick fix, or choose a specific fix button if you know what you want.\n\n"
-                "Character Skinning\n"
-                "- Use this when a skinned mesh has bad translate, rotate, or scale values and you want a clean replacement copy.\n"
-                "- Pick one skinned mesh, for example low on a RapidRig character.\n"
-                "- Click Replace Mesh With Frozen Transform Mesh.\n"
-                "- Aminate makes a checked frozen mesh, swaps it in, keeps skin weights, and hides the old mesh as a backup.\n\n"
-                "- To copy exact skinning, select the skinned source mesh first, select the matching target mesh second, and click Copy Selected Pair Now.\n\n"
-                "Rig Scale\n"
-                "- Use this when you need an export-safe scaled copy for Unreal or another game engine.\n"
-                "- Pick the character root or any object under the character and click Use Selected Character.\n"
-                "- Pick the top skeleton joint and click Use Selected Skeleton.\n"
-                "- Type the new Size Multiplier.\n"
-                "- Click Check Setup.\n"
-                "- Click Make Export Copy.\n"
-                "- Export the copied group to Unreal, not the original rig.\n\n"
-                "Video Reference\n"
-                "- Use this when you want scene-based video reference for tracing or timing.\n"
-                "- Click the viewport you want to trace in, then click Use Active View.\n"
-                "- Pick the video or image sequence.\n"
-                "- If you want the card behind the character, pick the control or object and click Use Selected Object.\n"
-                "- Choose Behind Picked Object, Follow Picked Object, or Camera Overlay.\n"
-                "- Set the Start Frame offset. If the card is already there, changing this field retimes that card.\n"
-                "- If you want matching sound, turn on Import Audio Too and pick the audio file.\n"
-                "- Click Make Tracing Card.\n"
-                "- Use Open Drawing Manager and Start Drawing to add quick note lines even when Blue Pencil is missing.\n\n"
-                "Timeline Notes\n"
-                "- Use this when you want timeline notes you can read while scrubbing.\n"
-                "- Highlight a time range on Maya's timeline.\n"
-                "- Type a short title, pick a color, and write your note.\n"
-                "- Leave Auto Use Highlighted Range on if you want the tool to follow the highlighted range for you.\n"
-                "- Click Add Note.\n"
-                "- Hover the colored range on the timeline or read the Notes At Current Frame box while you scrub.\n"
-                "- Use Export Notes if you want to reuse them in another scene.\n\n"
-                "Troubleshooting\n"
-                "- If a grab or let-go pops, go to that frame and click Fix Jumps.\n"
-                "- If the arm or leg switch finds the wrong controls, fix the boxes by hand and save the switch.\n"
-                "- If the timeline note or video tools are not visible in the combined window, reopen Aminate after the latest script reload.\n\n"
-                "Special Thanks\n"
-                "- Brogan Bowen, for helping test the Controls Retargeter.\n"
-                "- Alex Potter, for helping test Character Skinning reset.\n"
-                "- Alex Lee, for the idea behind Tween Machine.\n"
-                "- V Gerrard Lawless, for the idea behind the frozen character skinning system.\n"
-                "- Wiktor Wisniewski, for the idea behind Dynamic Parenting."
+            self.quick_start_search = QtWidgets.QLineEdit()
+            self.quick_start_search.setClearButtonEnabled(True)
+            self.quick_start_search.setPlaceholderText("What do you want to do? Try: draw, skin, switch, notes")
+            self.quick_start_search.setAccessibleName("Search Aminate tools")
+            layout.addWidget(self.quick_start_search)
+
+            self.quick_start_count_label = QtWidgets.QLabel()
+            self.quick_start_count_label.setObjectName("aminateQuickStartCount")
+            self.quick_start_count_label.setProperty("aminateRole", "muted")
+            layout.addWidget(self.quick_start_count_label)
+
+            self.quick_start_tool_list = QtWidgets.QListWidget()
+            self.quick_start_tool_list.setObjectName("aminateQuickStartToolList")
+            self.quick_start_tool_list.setAlternatingRowColors(True)
+            self.quick_start_tool_list.setMinimumHeight(200)
+            self.quick_start_tool_list.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Expanding,
             )
-            layout.addWidget(guide)
+            role = _qt_flag("ItemDataRole", "UserRole", 32)
+            for tab_index in range(1, self.tab_widget.count()):
+                tab_name = self.tab_widget.tabText(tab_index)
+                item = QtWidgets.QListWidgetItem(tab_name)
+                item.setData(role, tab_index)
+                item.setToolTip(TAB_HELP_TEXT.get(tab_name, ""))
+                self.quick_start_tool_list.addItem(item)
+            layout.addWidget(self.quick_start_tool_list, 1)
+
+            self.quick_start_description = QtWidgets.QLabel()
+            self.quick_start_description.setObjectName("aminateQuickStartDescription")
+            self.quick_start_description.setWordWrap(True)
+            self.quick_start_description.setMinimumHeight(64)
+            self.quick_start_description.setAlignment(
+                _qt_flag("AlignmentFlag", "AlignTop", QtCore.Qt.AlignTop)
+                | _qt_flag("AlignmentFlag", "AlignLeft", QtCore.Qt.AlignLeft)
+            )
+            layout.addWidget(self.quick_start_description)
+
+            self.quick_start_open_button = QtWidgets.QPushButton("Open Selected Tool")
+            self.quick_start_open_button.setProperty("aminateRole", "primary")
+            self.quick_start_open_button.setToolTip("Jump straight to the selected Aminate tool.")
+            layout.addWidget(self.quick_start_open_button)
+
+            self.quick_start_search.textChanged.connect(self._filter_quick_start_tools)
+            self.quick_start_tool_list.currentItemChanged.connect(self._refresh_quick_start_description)
+            self.quick_start_tool_list.itemDoubleClicked.connect(self._open_quick_start_tool)
+            self.quick_start_open_button.clicked.connect(self._open_quick_start_tool)
+            if self.quick_start_tool_list.count():
+                self.quick_start_tool_list.setCurrentRow(0)
+            self._filter_quick_start_tools("")
+            return
+
+        def _filter_quick_start_tools(self, query):
+            if not hasattr(self, "quick_start_tool_list"):
+                return
+            query = str(query or "").strip().lower()
+            first_visible = None
+            visible_count = 0
+            role = _qt_flag("ItemDataRole", "UserRole", 32)
+            for row in range(self.quick_start_tool_list.count()):
+                item = self.quick_start_tool_list.item(row)
+                try:
+                    tab_index = int(item.data(role))
+                except (TypeError, ValueError):
+                    tab_index = -1
+                description = TAB_HELP_TEXT.get(self.tab_widget.tabText(tab_index), "") if tab_index >= 0 else ""
+                visible = not query or query in item.text().lower() or query in description.lower()
+                item.setHidden(not visible)
+                if visible and first_visible is None:
+                    first_visible = item
+                if visible:
+                    visible_count += 1
+            current = self.quick_start_tool_list.currentItem()
+            if current is None or current.isHidden():
+                self.quick_start_tool_list.setCurrentItem(first_visible)
+            self.quick_start_open_button.setEnabled(first_visible is not None)
+            if hasattr(self, "quick_start_count_label"):
+                self.quick_start_count_label.setText(
+                    "{0} matching tool{1}".format(visible_count, "" if visible_count == 1 else "s")
+                )
+            if first_visible is None:
+                self.quick_start_description.setText("No matching tool. Try a shorter task word.")
+
+        def _refresh_quick_start_description(self, current, _previous=None):
+            if not hasattr(self, "quick_start_description"):
+                return
+            if current is None:
+                self.quick_start_description.setText("Choose a tool to see what it does.")
+                return
+            role = _qt_flag("ItemDataRole", "UserRole", 32)
+            try:
+                tab_index = int(current.data(role))
+            except (TypeError, ValueError):
+                tab_index = -1
+            tab_name = self.tab_widget.tabText(tab_index) if 0 <= tab_index < self.tab_widget.count() else current.text()
+            self.quick_start_description.setText(TAB_HELP_TEXT.get(tab_name, "Choose this tool to continue."))
+
+        def _open_quick_start_tool(self, item=None):
+            if not hasattr(self, "quick_start_tool_list"):
+                return
+            current = item if isinstance(item, QtWidgets.QListWidgetItem) else self.quick_start_tool_list.currentItem()
+            if current is None:
+                self._set_status("Choose a tool first.", False)
+                return
+            role = _qt_flag("ItemDataRole", "UserRole", 32)
+            try:
+                tab_index = int(current.data(role))
+            except (TypeError, ValueError):
+                tab_index = -1
+            if 0 <= tab_index < self.tab_widget.count():
+                self.tab_widget.setCurrentIndex(tab_index)
+                self._set_status("Opened {0}.".format(self.tab_widget.tabText(tab_index)), True)
 
         def _build_student_core_tab(self):
             layout = QtWidgets.QVBoxLayout(self.student_core_page)
@@ -3256,29 +5256,29 @@ if QtWidgets:
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
             help_box.setPlainText(
-                "This tab mirrors the docked Toolkit Bar above Maya's timeline.\n\n"
+                "This tab mirrors the fixed Toolkit Bar at the bottom of Maya.\n\n"
                 "- The History strip, Animation Layer controls, timing buttons, workflow icons, package zip, and Game Animation Mode button are all shown here.\n"
-                "- Changes made from this tab use the same controller as the docked bar, so Game Animation Mode and animation layer state stay synced.\n"
-                "- Use the docked bar for fast timeline work, or this tab when you want the same controls inside Aminate."
+                "- Changes made from this tab use the same controller as the fixed bar, so Game Animation Mode and animation layer state stay synced.\n"
+                "- The bottom bar is pinned to Maya, cannot float or drag, and scrolls horizontally on narrow screens."
             )
-            help_box.setMaximumHeight(135)
-            layout.addWidget(help_box)
-            open_button = QtWidgets.QPushButton("Open Bottom Toolkit Bar")
-            open_button.setToolTip("Dock the small Toolkit Bar into the bottom of Maya near the native timeline.")
+            help_box.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+            layout.addWidget(help_box, 1)
+            open_button = QtWidgets.QPushButton("Show Fixed Bottom Toolkit Bar")
+            open_button.setToolTip("Show the non-draggable Toolkit Bar at the bottom of Maya.")
             open_button.clicked.connect(self._open_student_core_toolbar)
             layout.addWidget(open_button)
             layout.addStretch(1)
 
         def _open_student_core_toolbar(self):
             try:
-                maya_timing_tools.launch_student_timeline_button_bar(
+                self.embedded_toolkit_bar = maya_timing_tools.launch_student_timeline_button_bar(
                     dock=True,
                     controller=self.controller.get_timing_controller(),
                     status_callback=self._set_status,
                 )
-                self._set_status("Toolkit Bar docked to the bottom of Maya.", True)
+                self._set_status("Toolkit Bar is pinned to the bottom of Maya.", True)
             except Exception as exc:
-                self._set_status("Could not open Toolkit Bar: {0}".format(exc), False)
+                self._set_status("Could not show fixed bottom Toolkit Bar: {0}".format(exc), False)
 
         def _build_timing_tab(self):
             layout = QtWidgets.QVBoxLayout(self.timing_page)
@@ -3297,10 +5297,13 @@ if QtWidgets:
             layout = QtWidgets.QVBoxLayout(self.reference_manager_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_REFERENCE_MANAGER))
-            self.reference_manager_panel = maya_reference_manager.ReferenceManagerPanel(
-                controller=self.controller.reference_manager_controller,
-                status_callback=self._set_status,
-                parent=self.reference_manager_page,
+            self.reference_manager_panel = self._embed_tool_panel(
+                maya_reference_manager.ReferenceManagerPanel(
+                    controller=self.controller.reference_manager_controller,
+                    status_callback=self._set_status,
+                    parent=self.reference_manager_page,
+                ),
+                self.reference_manager_page,
             )
             layout.addWidget(self.reference_manager_panel, 1)
 
@@ -3315,11 +5318,13 @@ if QtWidgets:
             lookup = {
                 "guide": "quick_start",
                 "quick_start": "quick_start",
-                "student": "student_core",
-                "student_core": "student_core",
-                "core": "student_core",
-                "temp_buttons": "student_core",
-                "timeline_buttons": "student_core",
+                "student": "toolkit_bar",
+                "student_core": "toolkit_bar",
+                "toolkit": "toolkit_bar",
+                "toolkit_bar": "toolkit_bar",
+                "core": "toolkit_bar",
+                "temp_buttons": "toolkit_bar",
+                "timeline_buttons": "toolkit_bar",
                 "timing": "scene_helpers",
                 "timing_helpers": "scene_helpers",
                 "scene": "scene_helpers",
@@ -3426,10 +5431,16 @@ if QtWidgets:
             if not hasattr(self, "status_label"):
                 return
             self.status_label.setText(message)
+            self.status_label.setVisible(bool(str(message or "").strip()))
+            self.status_label.setProperty("aminateRole", "success" if success else "error")
             palette = self.status_label.palette()
             role = self.status_label.foregroundRole()
-            palette.setColor(role, QtGui.QColor("#24A148" if success else "#DA1E28"))
+            palette.setColor(role, QtGui.QColor(AMINATE_UI_TOKENS["success" if success else "error"]))
             self.status_label.setPalette(palette)
+            style = self.status_label.style()
+            if style:
+                style.unpolish(self.status_label)
+                style.polish(self.status_label)
 
         def _refresh_parenting_summary(self):
             setups = self.controller.parenting_setups(from_selection=False)
@@ -3496,6 +5507,7 @@ if QtWidgets:
                 "ik_value": self.ik_value_spin.value(),
                 "extra_controls": [item.strip() for item in self.extra_controls_line.text().split(",") if item.strip()],
                 "match_nodes": [item.strip() for item in self.match_nodes_line.text().split(",") if item.strip()],
+                "ik_match_node": self.ik_match_node_line.text(),
             }
 
         def _populate_profile_fields(self, profile):
@@ -3513,6 +5525,7 @@ if QtWidgets:
             self.ik_value_spin.setValue(float(profile.get("ik_value", 1.0)))
             self.extra_controls_line.setText(", ".join(profile.get("extra_controls", [])))
             self.match_nodes_line.setText(", ".join(profile.get("match_nodes", [])))
+            self.ik_match_node_line.setText(profile.get("ik_match_node", ""))
 
         def _populate_profile_names(self):
             if not hasattr(self, "profile_combo"):
@@ -3612,18 +5625,26 @@ if QtWidgets:
 
         def _create_pivot(self):
             success, message = self.controller.create_pivot(PIVOT_MODES[self.pivot_mode_combo.currentText()])
+            if success:
+                selected, select_message = self.controller.edit_pivot_position()
+                if selected:
+                    message = "{0} {1}".format(message, select_message)
+            self.pivot_range_status.setText(_pivot_range_text(_pivot_apply_times()[1]))
             self._set_status(message, success)
 
         def _edit_pivot(self):
             success, message = self.controller.edit_pivot_position()
+            self.pivot_range_status.setText(_pivot_range_text(_pivot_apply_times()[1]))
             self._set_status(message, success)
 
         def _apply_pivot(self):
             success, message = self.controller.apply_pivot_rotation()
+            self.pivot_range_status.setText(_pivot_range_text(_pivot_apply_times()[1]))
             self._set_status(message, success)
 
         def _clear_pivot(self):
             success, message = self.controller.clear_pivot()
+            self.pivot_range_status.setText(_pivot_range_text(_pivot_apply_times()[1]))
             self._set_status(message, success)
 
         def _load_selected_profile(self):
@@ -3641,13 +5662,21 @@ if QtWidgets:
         def _detect_profile(self):
             profile, issues = self.controller.detect_profile()
             self._populate_profile_fields(profile)
-            lines = ["We made a first guess from what is selected."]
-            lines.append("Check both the FK Controls and IK Controls boxes before you save.")
+            lines = ["Setup detected from current selection."]
             if issues:
-                lines.append("")
                 lines.extend("- " + issue for issue in issues)
-            self.ikfk_help.setPlainText("\n".join(lines))
-            self._set_status("First guess found. Check the boxes before saving.", True)
+                lines.append("Fix highlighted details, then use Save Switch.")
+                self.ikfk_help.setText("\n".join(lines))
+                self._set_status("Setup found with details to check before saving.", False)
+                return
+            success, message = self.controller.save_profile(self._profile_fields())
+            self._populate_profile_names()
+            if success:
+                lines.append("Complete setup saved. Switch buttons are ready.")
+            else:
+                lines.append(message)
+            self.ikfk_help.setText("\n".join(lines))
+            self._set_status(message, success)
 
         def _save_profile(self):
             success, message = self.controller.save_profile(self._profile_fields())
@@ -3697,7 +5726,7 @@ if QtWidgets:
                         continue
                     if widget.isVisible():
                         hidden += 1
-                    widget.close()
+                    widget.hide()
                 except Exception:
                     pass
             return hidden
@@ -3717,42 +5746,67 @@ if QtWidgets:
             docs_path = _tutorials_index_path()
             if _open_local_file(docs_path):
                 self._set_status("Opened Aminate tutorials.", True)
+            elif _open_external_url(TUTORIAL_RELEASE_URL):
+                self._set_status("Opened the separate offline tutorial download.", True)
+            else:
+                self._set_status("Could not open Aminate tutorials: {0}".format(docs_path), False)
+
+        def _open_tutorial_section(self, tab_name):
+            docs_path = _tutorials_index_path()
+            section_id = TAB_TUTORIAL_SECTION_IDS.get(tab_name, "")
+            if _open_local_file_at_fragment(docs_path, section_id):
+                self._set_status("Opened the {0} tutorial.".format(tab_name), True)
+            elif _open_external_url(TUTORIAL_RELEASE_URL):
+                self._set_status("Opened the separate offline tutorial download.", True)
             else:
                 self._set_status("Could not open Aminate tutorials: {0}".format(docs_path), False)
 
         def hideEvent(self, event):
-            self._hide_toolbar_extras_if_needed()
             try:
-                super(MayaAnimWorkflowWindow, self).hideEvent(event)
+                super(AminateWindow, self).hideEvent(event)
             except TypeError:
                 QtWidgets.QDialog.hideEvent(self, event)
 
         def showEvent(self, event):
             self._toolbar_extras_hidden_for_close = False
             try:
-                super(MayaAnimWorkflowWindow, self).showEvent(event)
+                super(AminateWindow, self).showEvent(event)
             except TypeError:
                 QtWidgets.QDialog.showEvent(self, event)
 
         def setVisible(self, visible):
+            if not bool(visible) and _workspace_control_exists(WORKSPACE_CONTROL_NAME):
+                return
             if not bool(visible):
+                pencil_panel = getattr(self, "animators_pencil_panel", None)
+                suspend_runtime = getattr(pencil_panel, "_deactivate_runtime_input", None)
+                if suspend_runtime:
+                    try:
+                        suspend_runtime()
+                    except Exception:
+                        pass
                 self._hide_toolbar_extras_if_needed()
             try:
-                super(MayaAnimWorkflowWindow, self).setVisible(visible)
+                super(AminateWindow, self).setVisible(visible)
             except TypeError:
                 QtWidgets.QDialog.setVisible(self, visible)
 
+        def close(self):
+            # Retained dock stays visible. Re-launch reuses this exact window.
+            return False
+
         def closeEvent(self, event):
-            self._hide_toolbar_extras_if_needed()
-            self._remove_key_passthrough_filter()
-            try:
-                self.controller.shutdown()
-            except Exception:
-                pass
-            super(MayaAnimWorkflowWindow, self).closeEvent(event)
+            # Never let Maya destroy this live dock wrapper from its native close event.
+            event.ignore()
 
 def _workspace_control_exists(name=WORKSPACE_CONTROL_NAME):
     return bool(MAYA_AVAILABLE and cmds and name and cmds.workspaceControl(name, exists=True))
+
+
+def _normalize_main_dock_request(dock):
+    # Compatibility-only argument: old shelf buttons may still pass False,
+    # but the main Aminate panel has no supported floating mode.
+    return True
 
 
 def _process_qt_events():
@@ -3767,62 +5821,61 @@ def _process_qt_events():
         pass
 
 
-def _show_window_dockable(window, floating=True, area="right"):
+def _show_window_dockable(window, area="right"):
     if not window:
         return False, "No Aminate window is available to show."
     try:
-        window.show(dockable=True, floating=bool(floating), area=area)
+        window.show(dockable=True, floating=False, area=area)
         _process_qt_events()
     except Exception as exc:
-        try:
-            window.show()
-        except Exception:
-            pass
-        return False, "Could not show the workflow tools as a dockable Maya panel: {0}".format(exc)
+        return False, "Could not show the Aminate as a dockable Maya panel: {0}".format(exc)
     if not _workspace_control_exists(WORKSPACE_CONTROL_NAME):
         return False, "The Maya workspace control did not open."
-    return True, "Opened the workflow tools through Maya's dockable workspace control."
-
-
-def _dock_workspace_control(name=WORKSPACE_CONTROL_NAME, area="right", tab=False):
-    if not _workspace_control_exists(name):
-        return False, "The dockable Maya workspace control is not open yet."
     try:
-        cmds.workspaceControl(name, edit=True, dockToMainWindow=(area, bool(tab)))
-        cmds.workspaceControl(name, edit=True, restore=True)
-        for flag in ("minimumWidth", "initialWidth", "width", "resizeWidth"):
-            try:
-                cmds.workspaceControl(name, edit=True, **{flag: DOCKED_WORKFLOW_MIN_WIDTH})
-            except Exception:
-                pass
-        _process_qt_events()
-        floating = bool(cmds.workspaceControl(name, query=True, floating=True))
+        # Shelf-like workspace controls do not expose Maya's crash-prone close affordance.
+        cmds.workspaceControl(
+            WORKSPACE_CONTROL_NAME,
+            edit=True,
+            retain=True,
+            actLikeMayaUIElement=True,
+        )
+    except Exception:
+        pass
+    try:
+        workspace_floating = bool(cmds.workspaceControl(WORKSPACE_CONTROL_NAME, query=True, floating=True))
     except Exception as exc:
-        return False, "Could not dock the Maya workspace control: {0}".format(exc)
-    if floating:
-        return False, "Maya kept the workflow panel floating instead of docking it."
-    return True, "Docked the workflow panel into Maya's {0} layout.".format(area)
+        return False, "Could not verify the Maya workspace control state: {0}".format(exc)
+    if workspace_floating:
+        try:
+            window.setVisible(False)
+        except Exception:
+            pass
+        return False, "Maya kept the Aminate floating instead of docking them."
+    return True, "Opened the Aminate through Maya's dockable workspace control."
+def _size_workspace_control(name=WORKSPACE_CONTROL_NAME):
+    if not _workspace_control_exists(name):
+        return
+    for flag in ("minimumWidth", "initialWidth", "width", "resizeWidth"):
+        try:
+            cmds.workspaceControl(name, edit=True, **{flag: DOCKED_WORKFLOW_MIN_WIDTH})
+        except Exception:
+            pass
+    try:
+        cmds.workspaceControl(name, edit=True, visible=True)
+    except Exception:
+        pass
+    _process_qt_events()
 
 
 def _shelf_button_command(repo_path):
     return (
         "import sys\n"
         "repo_path = r\"{0}\"\n"
-        "for _aminate_module_name in ('maya_dynamic_parent_pivot', 'maya_anim_workflow_tools'):\n"
-        "    _aminate_module = sys.modules.get(_aminate_module_name)\n"
-        "    if _aminate_module:\n"
-        "        _aminate_impl = getattr(_aminate_module, '_impl', _aminate_module)\n"
-        "        _aminate_close = getattr(_aminate_impl, '_close_existing_window', None)\n"
-        "        if _aminate_close:\n"
-        "            try:\n"
-        "                _aminate_close()\n"
-        "            except Exception:\n"
-        "                pass\n"
         "while repo_path in sys.path:\n"
         "    sys.path.remove(repo_path)\n"
         "sys.path.insert(0, repo_path)\n"
-        "import maya_anim_workflow_tools\n"
-        "maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=True)\n"
+        "import aminate\n"
+        "aminate.launch_aminate(dock=True)\n"
     ).format(repo_path.replace("\\", "\\\\"))
 
 
@@ -3849,6 +5902,9 @@ def install_maya_dynamic_parent_pivot_shelf_button(shelf_name=DEFAULT_SHELF_NAME
         image=_shelf_icon_path(repo_path),
         image_overlay_label=SHELF_ICON_OVERLAY_LABEL,
         shelf_name=shelf_name,
+        style=SHELF_BUTTON_STYLE,
+        width=SHELF_BUTTON_WIDTH,
+        height=SHELF_BUTTON_HEIGHT,
     )
     return metadata["button"]
 
@@ -3861,81 +5917,78 @@ def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
         raise RuntimeError("maya_dynamic_parent_pivot.launch_maya_dynamic_parent_pivot() must run inside Autodesk Maya.")
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
+    # Old saved shelf buttons and old verifiers passed dock=False. Keep the
+    # argument for compatibility, but permanently normalize the main panel to
+    # the required docked mode.
+    dock = _normalize_main_dock_request(dock)
     if GLOBAL_WINDOW is not None and not _qt_object_valid(GLOBAL_WINDOW):
         GLOBAL_WINDOW = None
     if GLOBAL_DOCK_HOST is not None and not _qt_object_valid(GLOBAL_DOCK_HOST):
         GLOBAL_DOCK_HOST = None
     if GLOBAL_WINDOW is not None:
         try:
-            if dock and _workspace_control_exists(WORKSPACE_CONTROL_NAME):
-                cmds.workspaceControl(WORKSPACE_CONTROL_NAME, edit=True, visible=True)
-                _dock_workspace_control(WORKSPACE_CONTROL_NAME, area="right", tab=False)
-                GLOBAL_WINDOW.show()
-                _process_qt_events()
-                if hasattr(GLOBAL_WINDOW, "_set_initial_tab"):
-                    GLOBAL_WINDOW._set_initial_tab(initial_tab)
-                return GLOBAL_WINDOW
-            if not dock:
-                GLOBAL_WINDOW.show()
-                _process_qt_events()
-                if hasattr(GLOBAL_WINDOW, "_set_initial_tab"):
-                    GLOBAL_WINDOW._set_initial_tab(initial_tab)
-                return GLOBAL_WINDOW
+            if _workspace_control_exists(WORKSPACE_CONTROL_NAME):
+                workspace_floating = bool(cmds.workspaceControl(WORKSPACE_CONTROL_NAME, query=True, floating=True))
+                if workspace_floating:
+                    # Never redock, hide, close, or delete a live Maya 2026
+                    # workspace here. Native dock-state mutation can fault
+                    # Qt6Core. New launches cannot create this state; this
+                    # branch only reports a retained legacy workspace.
+                    _warning("Aminate is using a legacy floating workspace. Restart Maya once after updating the shelf button.")
+                    GLOBAL_WINDOW.show()
+                else:
+                    _size_workspace_control(WORKSPACE_CONTROL_NAME)
+                    GLOBAL_WINDOW.show()
+            else:
+                success, message = _show_window_dockable(GLOBAL_WINDOW, area="right")
+                if not success:
+                    _warning(message)
+            if _workspace_control_exists(WORKSPACE_CONTROL_NAME):
+                _size_workspace_control(WORKSPACE_CONTROL_NAME)
+            _process_qt_events()
+            if hasattr(GLOBAL_WINDOW, "_set_initial_tab"):
+                GLOBAL_WINDOW._set_initial_tab(initial_tab)
+            return GLOBAL_WINDOW
         except Exception:
             pass
     _close_existing_window()
     app = QtWidgets.QApplication.instance()
     _process_qt_events()
-    GLOBAL_CONTROLLER = MayaAnimWorkflowController()
-    GLOBAL_WINDOW = MayaAnimWorkflowWindow(GLOBAL_CONTROLLER, parent=_maya_main_window(), initial_tab=initial_tab)
+    GLOBAL_CONTROLLER = AminateController()
+    GLOBAL_WINDOW = AminateWindow(GLOBAL_CONTROLLER, parent=_maya_main_window(), initial_tab=initial_tab)
     GLOBAL_DOCK_HOST = None
-    if dock:
-        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
-        _delete_workspace_control(LEGACY_WORKSPACE_CONTROL_NAME)
-    success, _message = _show_window_dockable(GLOBAL_WINDOW, floating=not bool(dock), area="right")
-    if dock and success:
-        _dock_workspace_control(WORKSPACE_CONTROL_NAME, area="right", tab=False)
-        if os.environ.get("AMINATE_AUTO_OPEN_TOOLKIT_BAR", "1") != "0":
-            def _open_default_toolkit_bar():
-                try:
-                    if not _qt_object_valid(GLOBAL_WINDOW):
-                        return
-                    timing_controller = GLOBAL_CONTROLLER.get_timing_controller()
-                    try:
-                        timing_controller.set_keep_toolbar_extras_on_hide(True)
-                    except Exception:
-                        pass
-                    bar_window = maya_timing_tools.launch_student_timeline_button_bar(
-                        dock=True,
-                        controller=timing_controller,
-                        status_callback=GLOBAL_WINDOW._set_status,
-                    )
-                    def _reshow_default_toolkit_bar():
-                        try:
-                            if maya_timing_tools._qt_object_valid(bar_window):
-                                maya_timing_tools._show_timeline_bar_as_safe_window(bar_window)
-                        except Exception:
-                            pass
-                    try:
-                        QtCore.QTimer.singleShot(900, _reshow_default_toolkit_bar)
-                    except Exception:
-                        _reshow_default_toolkit_bar()
-                except Exception as exc:
-                    _warning("Could not open Toolkit Bar: {0}".format(exc))
-
+    _hide_workspace_control(LEGACY_WORKSPACE_CONTROL_NAME)
+    success, _message = _show_window_dockable(GLOBAL_WINDOW, area="right")
+    if success:
+        _size_workspace_control(WORKSPACE_CONTROL_NAME)
+    auto_open_setting = str(os.environ.get("AMINATE_AUTO_OPEN_TOOLKIT_BAR", "1") or "1").strip().lower()
+    auto_open_toolkit_bar = auto_open_setting not in ("0", "false", "off", "no")
+    if success and auto_open_toolkit_bar:
+        def _open_default_toolkit_bar():
             try:
-                QtCore.QTimer.singleShot(1500, _open_default_toolkit_bar)
-            except Exception:
-                _open_default_toolkit_bar()
+                if not _qt_object_valid(GLOBAL_WINDOW):
+                    return
+                timing_controller = GLOBAL_CONTROLLER.get_timing_controller()
+                try:
+                    timing_controller.set_keep_toolbar_extras_on_hide(True)
+                except Exception:
+                    pass
+                bar_window = maya_timing_tools.launch_student_timeline_button_bar(
+                    dock=auto_open_setting != "window",
+                    controller=timing_controller,
+                    status_callback=GLOBAL_WINDOW._set_status,
+                )
+                GLOBAL_WINDOW.embedded_toolkit_bar = bar_window
+            except Exception as exc:
+                _warning("Could not open Toolkit Bar: {0}".format(exc))
+
+        try:
+            QtCore.QTimer.singleShot(350, _open_default_toolkit_bar)
+        except Exception:
+            _open_default_toolkit_bar()
     elif not success:
-        GLOBAL_WINDOW.show()
+        _warning(_message)
         _process_qt_events()
-    try:
-        if not dock:
-            GLOBAL_WINDOW.raise_()
-            GLOBAL_WINDOW.activateWindow()
-    except Exception:
-        pass
     _ensure_single_workflow_widget(keep_widget=GLOBAL_WINDOW)
     return GLOBAL_WINDOW
 
@@ -3943,5 +5996,5 @@ def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
 __all__ = [
     "launch_maya_dynamic_parent_pivot",
     "install_maya_dynamic_parent_pivot_shelf_button",
-    "MayaAnimWorkflowController",
+    "AminateController",
 ]

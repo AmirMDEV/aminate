@@ -14,6 +14,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import tempfile
 import time
 import uuid
 
@@ -52,11 +54,13 @@ HISTORY_SECURITY_PROMPT_OPTION_VARS = (
     "TrustCenterPathOption",
 )
 AUTO_SNAPSHOT_SETTLE_SECONDS = 1.5
-DEFAULT_AUTO_SNAPSHOT_ENABLED = False
+AUTO_SNAPSHOT_UNCHANGED_SIGNATURE_SCAN_SECONDS = 30.0
+DEFAULT_AUTO_SNAPSHOT_ENABLED = True
+DEFAULT_AUTO_SNAPSHOT_INTERVAL_SECONDS = 180.0
 DEFAULT_STEP_COLOR = "#4CC9F0"
 DEFAULT_MILESTONE_COLOR = "#F6C85F"
 DEFAULT_AUTO_COLOR = "#8D99AE"
-DEFAULT_SNAPSHOT_CAP = 50
+DEFAULT_SNAPSHOT_CAP = 90
 MAX_HISTORY_STRIP_MARKERS = 120
 MAX_HISTORY_TABLE_ROWS = 500
 DEFAULT_AUTO_SNAPSHOT_MODE = "all"
@@ -352,26 +356,7 @@ def _quiet_scene_file_prompts_for_history():
         pass
     for option_name in HISTORY_SECURITY_PROMPT_OPTION_VARS:
         try:
-            if cmds.optionVar(exists=option_name):
-                cmds.optionVar(intValue=(option_name, 0))
-        except Exception:
-            pass
-
-
-def _show_auto_history_security_warning(parent=None):
-    message = (
-        "Auto History may not work well with rigs like Amanda that trigger many Maya security popups.\n\n"
-        "Those popups can block snapshot loading and saving during restore. If this rig is trusted, use Scene Helpers > Disable Maya Security Popups first, or keep Auto History off and save manual steps."
-    )
-    if QtWidgets:
-        try:
-            QtWidgets.QMessageBox.warning(parent, "Auto History And Security Popups", message)
-            return
-        except Exception:
-            pass
-    if om:
-        try:
-            om.MGlobal.displayWarning(message.replace("\n\n", " "))
+            cmds.optionVar(intValue=(option_name, 0))
         except Exception:
             pass
 
@@ -400,25 +385,69 @@ def _normalize_undo_name(value):
     return " ".join(str(value or "").lower().strip().split())
 
 
-def _is_camera_transform_node(node_name):
-    if not MAYA_AVAILABLE or not node_name:
-        return False
+def _scene_node_type_pairs():
+    """Return all scene nodes and types with one Maya command when possible."""
     try:
-        if cmds.nodeType(node_name) != "transform":
-            return False
+        typed_nodes = cmds.ls(long=True, showType=True) or []
     except Exception:
-        return False
-    try:
-        shapes = cmds.listRelatives(node_name, shapes=True, fullPath=True) or []
-    except Exception:
-        shapes = []
-    for shape_name in shapes:
+        typed_nodes = []
+    if typed_nodes and len(typed_nodes) % 2 == 0:
+        return list(zip(typed_nodes[0::2], typed_nodes[1::2]))
+    nodes = cmds.ls(long=True) or []
+    pairs = []
+    for node_name in nodes:
         try:
-            if cmds.nodeType(shape_name) == "camera":
-                return True
+            node_type = cmds.nodeType(node_name)
+        except Exception:
+            node_type = "unknown"
+        pairs.append((node_name, node_type))
+    return pairs
+
+
+def _camera_transform_nodes():
+    camera_transforms = set()
+    try:
+        camera_shapes = cmds.ls(type="camera", long=True) or []
+    except Exception:
+        camera_shapes = []
+    for shape_name in camera_shapes:
+        try:
+            camera_transforms.update(cmds.listRelatives(shape_name, parent=True, fullPath=True) or [])
         except Exception:
             pass
-    return False
+    return camera_transforms
+
+
+def _transform_trs_values(node_name):
+    values = []
+    compounds = (
+        ("translate", ("translateX", "translateY", "translateZ")),
+        ("rotate", ("rotateX", "rotateY", "rotateZ")),
+        ("scale", ("scaleX", "scaleY", "scaleZ")),
+    )
+    for compound_name, attr_names in compounds:
+        compound_values = None
+        try:
+            raw_value = cmds.getAttr(node_name + "." + compound_name)
+            if isinstance(raw_value, (list, tuple)) and len(raw_value) == 1 and isinstance(raw_value[0], (list, tuple)):
+                raw_value = raw_value[0]
+            if isinstance(raw_value, (list, tuple)) and len(raw_value) >= 3:
+                compound_values = raw_value[:3]
+        except Exception:
+            compound_values = None
+        if compound_values is not None:
+            for value in compound_values:
+                try:
+                    values.append("{0:.5f}".format(float(value)))
+                except Exception:
+                    values.append("x")
+            continue
+        for attr_name in attr_names:
+            try:
+                values.append("{0:.5f}".format(float(cmds.getAttr(node_name + "." + attr_name))))
+            except Exception:
+                values.append("x")
+    return values
 
 
 def _qt_flag(scope_name, member_name, fallback=None):
@@ -609,6 +638,7 @@ class MayaHistoryTimelineController(object):
         self._last_action_signature = None
         self._last_auto_snapshot_time = 0.0
         self._last_action_summary = None
+        self._last_full_summary_check_time = 0.0
         self._pending_action_signature = None
         self._pending_action_started_time = 0.0
         self._pending_action_changed_time = 0.0
@@ -618,6 +648,7 @@ class MayaHistoryTimelineController(object):
         self._restored_snapshot_summary = None
         self._restore_settle_until = 0.0
         self._last_context_warning_time = 0.0
+        self._last_auto_snapshot_error = ""
 
     def set_status_callback(self, callback):
         self.status_callback = callback
@@ -652,7 +683,7 @@ class MayaHistoryTimelineController(object):
                             pass
 
     def start_default_action_snapshots(self, parent=None, interval_ms=2000):
-        """Default v1 behaviour: save a sidecar step after each new Maya action."""
+        """Watch for eligible edits and checkpoint them at the configured cadence."""
         if not MAYA_AVAILABLE or not QtCore:
             return False, "Auto history needs Maya and Qt."
         if not _auto_snapshot_enabled():
@@ -667,6 +698,8 @@ class MayaHistoryTimelineController(object):
             self._emit_status(context.get("message", "Save the Maya scene first."), False, display=False)
         self._last_action_signature = self._current_action_signature()
         self._last_action_summary = self._restored_snapshot_summary or self._scene_summary()
+        self._last_auto_snapshot_time = time.time()
+        self._last_full_summary_check_time = self._last_auto_snapshot_time
         self._clear_pending_auto_snapshot()
         self._action_timer = QtCore.QTimer(parent)
         self._action_timer.setObjectName("aminateHistoryDefaultActionSnapshotTimer")
@@ -674,7 +707,7 @@ class MayaHistoryTimelineController(object):
         self._action_timer.timeout.connect(self._maybe_snapshot_after_action)
         self._action_timer.start()
         HISTORY_ACTION_TIMER_CONTROLLERS.append(self)
-        return True, "Auto history now saves after Maya actions."
+        return True, "Auto History is watching eligible changes; checkpoints use the configured interval."
 
     def stop_default_action_snapshots(self):
         timer = self._action_timer
@@ -711,6 +744,32 @@ class MayaHistoryTimelineController(object):
         self._emit_status(message, True, display=False)
         _notify_history_ui_changed()
         return True, message
+
+    def auto_snapshot_interval_seconds(self):
+        context = self._context()
+        if not context.get("ok"):
+            return DEFAULT_AUTO_SNAPSHOT_INTERVAL_SECONDS
+        manifest = self._load_manifest(context)
+        try:
+            value = float(manifest.get("auto_snapshot_interval_seconds", DEFAULT_AUTO_SNAPSHOT_INTERVAL_SECONDS))
+        except Exception:
+            value = DEFAULT_AUTO_SNAPSHOT_INTERVAL_SECONDS
+        return max(1.0, value)
+
+    def set_auto_snapshot_interval_seconds(self, seconds):
+        context = self._context()
+        if not context.get("ok"):
+            return False, context.get("message", "Could not update Auto History interval.")
+        try:
+            seconds = max(1.0, float(seconds))
+        except Exception:
+            return False, "Auto History interval must be a positive number of seconds."
+        manifest = self._load_manifest(context)
+        manifest["auto_snapshot_interval_seconds"] = seconds
+        manifest.setdefault("events", []).append({"type": "auto_snapshot_interval", "timestamp": _now_iso(), "seconds": seconds})
+        self._save_manifest(context, manifest)
+        _notify_history_ui_changed()
+        return True, "Auto History checkpoint interval set to {0:g} seconds.".format(seconds)
 
     def _current_action_signature(self):
         if not MAYA_AVAILABLE:
@@ -764,7 +823,7 @@ class MayaHistoryTimelineController(object):
         manifest["auto_snapshot_triggers"] = merged
         manifest.setdefault("events", []).append({"type": "auto_snapshot_settings", "timestamp": _now_iso(), "mode": mode})
         self._save_manifest(context, manifest)
-        message = "Auto History saves after every Maya action." if mode == AUTO_SNAPSHOT_MODE_ALL else "Auto History uses the checked custom triggers."
+        message = "Auto History queues eligible changes and checkpoints them at the configured interval." if mode == AUTO_SNAPSHOT_MODE_ALL else "Auto History queues checked custom triggers for the configured interval."
         self._emit_status(message, True)
         return True, message
 
@@ -920,37 +979,52 @@ class MayaHistoryTimelineController(object):
             return
         signature = self._current_action_signature()
         now = time.time()
-        if self._pending_action_signature and now - self._pending_action_changed_time >= AUTO_SNAPSHOT_SETTLE_SECONDS:
+        if not signature:
+            return
+        undo_name = "Maya action"
+        try:
+            undo_name = cmds.undoInfo(query=True, undoName=True) or "Maya action"
+        except Exception:
+            pass
+        if self._pending_action_signature:
+            if self._is_view_camera_navigation_action(undo_name) or self._is_timeline_scrub_action(undo_name):
+                return
+            if signature != self._pending_action_signature:
+                self._pending_action_signature = signature
+                self._pending_action_changed_time = now
+                if undo_name and undo_name not in self._pending_action_undo_names:
+                    self._pending_action_undo_names.append(undo_name)
+                return
+            if now - self._pending_action_changed_time < AUTO_SNAPSHOT_SETTLE_SECONDS:
+                return
+            interval = self.auto_snapshot_interval_seconds()
+            if self._last_auto_snapshot_time and now - self._last_auto_snapshot_time < interval:
+                return
             self._auto_snapshot_busy = True
             try:
                 manifest = self._load_manifest(context)
+                self._pending_action_current_summary = self._scene_summary()
+                self._last_full_summary_check_time = now
                 self._flush_pending_auto_snapshot(context, manifest, now)
             finally:
                 self._auto_snapshot_busy = False
             return
-        if not signature:
-            return
         if (
             signature == self._last_action_signature
-            and not self._pending_action_signature
-            and not self._restored_snapshot_summary
+            and self._last_full_summary_check_time
+            and now - self._last_full_summary_check_time < AUTO_SNAPSHOT_UNCHANGED_SIGNATURE_SCAN_SECONDS
         ):
             return
         self._auto_snapshot_busy = True
         try:
-            undo_name = "Maya action"
-            try:
-                undo_name = cmds.undoInfo(query=True, undoName=True) or "Maya action"
-            except Exception:
-                pass
             if self._is_view_camera_navigation_action(undo_name):
                 self._last_action_signature = signature
                 self._restored_snapshot_summary = None
                 self._last_auto_snapshot_time = now
                 self._clear_pending_auto_snapshot()
                 return
-            manifest = self._load_manifest(context)
             current_summary = self._scene_summary()
+            self._last_full_summary_check_time = now
             if self._is_restore_settling(current_summary, now, undo_name, signature != self._last_action_signature):
                 self._last_action_signature = signature
                 self._last_action_summary = current_summary
@@ -986,6 +1060,7 @@ class MayaHistoryTimelineController(object):
             if context.get("ok"):
                 manifest = self._load_manifest(context)
                 current_summary = self._scene_summary()
+                self._last_full_summary_check_time = time.time()
                 if not _scene_summary_changed(self._last_action_summary, current_summary):
                     self._last_action_signature = self._current_action_signature()
                     self._last_action_summary = current_summary
@@ -1000,6 +1075,7 @@ class MayaHistoryTimelineController(object):
             self._last_action_signature = self._current_action_signature()
             self._last_action_summary = self._scene_summary()
             self._last_auto_snapshot_time = time.time()
+            self._last_full_summary_check_time = self._last_auto_snapshot_time
             return success, message, record
         finally:
             self._auto_snapshot_busy = False
@@ -1008,6 +1084,7 @@ class MayaHistoryTimelineController(object):
         self._last_action_signature = self._current_action_signature()
         self._last_action_summary = summary or self._scene_summary()
         self._last_auto_snapshot_time = time.time()
+        self._last_full_summary_check_time = self._last_auto_snapshot_time
         self._clear_pending_auto_snapshot()
 
     def _mark_restore_baseline(self, summary=None, settle_seconds=6.0):
@@ -1120,12 +1197,26 @@ class MayaHistoryTimelineController(object):
             self._clear_pending_auto_snapshot()
             return False
         should_save, reason = self._should_auto_snapshot_for_action(manifest, undo_name, base_summary, current_summary)
-        self._clear_pending_auto_snapshot()
         if not should_save:
+            self._clear_pending_auto_snapshot()
             return False
-        self._last_auto_snapshot_time = now
+        interval = self.auto_snapshot_interval_seconds()
+        if self._last_auto_snapshot_time and now - self._last_auto_snapshot_time < interval:
+            # Keep the newest eligible scene state queued until the cadence is due.
+            return False
         label, note = self._action_label_and_note(base_summary, current_summary, undo_name)
-        self.create_auto_snapshot(reason or _safe_name(undo_name) or "Maya action", label=label, note=note)
+        success, message, _record = self.create_auto_snapshot(
+            reason or _safe_name(undo_name) or "Maya action",
+            label=label,
+            note=note,
+        )
+        if not success:
+            self._last_auto_snapshot_error = message or "Auto History checkpoint failed."
+            self._emit_status(self._last_auto_snapshot_error, False, display=False)
+            return False
+        self._last_auto_snapshot_error = ""
+        self._last_auto_snapshot_time = now
+        self._clear_pending_auto_snapshot()
         return True
 
     def _emit_status(self, message, success=True, display=True):
@@ -1190,14 +1281,35 @@ class MayaHistoryTimelineController(object):
 
     def _load_manifest(self, context):
         manifest_path = context.get("manifest_path", "")
+        recovered = False
         if manifest_path and os.path.exists(manifest_path):
             try:
-                with open(manifest_path, "r") as handle:
+                with open(manifest_path, "r", encoding="utf-8") as handle:
                     manifest = json.load(handle)
             except Exception:
-                manifest = {}
+                manifest = None
+                backup_path = manifest_path + ".bak"
+                if os.path.exists(backup_path):
+                    try:
+                        with open(backup_path, "r", encoding="utf-8") as handle:
+                            manifest = json.load(handle)
+                        recovered = isinstance(manifest, dict)
+                    except Exception:
+                        manifest = None
+                if not isinstance(manifest, dict):
+                    manifest = {}
         else:
-            manifest = {}
+            manifest = None
+            backup_path = manifest_path + ".bak" if manifest_path else ""
+            if backup_path and os.path.exists(backup_path):
+                try:
+                    with open(backup_path, "r", encoding="utf-8") as handle:
+                        manifest = json.load(handle)
+                    recovered = isinstance(manifest, dict)
+                except Exception:
+                    manifest = None
+            if not isinstance(manifest, dict):
+                manifest = {}
         manifest.setdefault("version", MANIFEST_VERSION)
         manifest.setdefault("aminate_history_version", AMINATE_HISTORY_VERSION)
         manifest.setdefault("original_scene_path", context.get("original_scene_path", ""))
@@ -1205,10 +1317,13 @@ class MayaHistoryTimelineController(object):
         manifest.setdefault("active_branch_id", "main")
         manifest.setdefault("snapshot_cap", DEFAULT_SNAPSHOT_CAP)
         manifest.setdefault("auto_snapshot_mode", DEFAULT_AUTO_SNAPSHOT_MODE)
+        manifest.setdefault("auto_snapshot_interval_seconds", DEFAULT_AUTO_SNAPSHOT_INTERVAL_SECONDS)
         manifest.setdefault("auto_snapshot_triggers", dict(DEFAULT_AUTO_SNAPSHOT_TRIGGERS))
         manifest.setdefault("branches", {})
         manifest.setdefault("snapshots", [])
         manifest.setdefault("events", [])
+        if recovered:
+            manifest["_recovered_from_backup"] = True
         self._ensure_branch_records(manifest)
         return manifest
 
@@ -1299,8 +1414,28 @@ class MayaHistoryTimelineController(object):
         manifest["snapshot_count"] = len(manifest.get("snapshots") or [])
         manifest["history_storage_size_bytes"] = _manifest_storage_size(manifest)
         manifest["updated_at"] = _now_iso()
-        with open(context["manifest_path"], "w") as handle:
-            json.dump(manifest, handle, indent=2, sort_keys=True)
+        manifest_path = context["manifest_path"]
+        backup_path = manifest_path + ".bak"
+        recovered = bool(manifest.pop("_recovered_from_backup", False))
+        payload = json.dumps(manifest, indent=2, sort_keys=True)
+        fd, temporary_path = tempfile.mkstemp(prefix="history_manifest_", suffix=".tmp", dir=context["history_root"])
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.path.exists(manifest_path) and not recovered:
+                try:
+                    shutil.copy2(manifest_path, backup_path)
+                except Exception:
+                    pass
+            os.replace(temporary_path, manifest_path)
+        finally:
+            if os.path.exists(temporary_path):
+                try:
+                    os.remove(temporary_path)
+                except Exception:
+                    pass
         _write_meta(context, manifest)
 
     def _snapshot_for_id(self, manifest, snapshot_id):
@@ -1317,7 +1452,9 @@ class MayaHistoryTimelineController(object):
             current_time = float(cmds.currentTime(query=True))
         except Exception:
             current_time = 0.0
-        nodes = cmds.ls(long=True) or []
+        node_type_pairs = _scene_node_type_pairs()
+        nodes = [node_name for node_name, _node_type in node_type_pairs]
+        camera_transforms = _camera_transform_nodes()
         node_types = {}
         interesting = []
         constraints = []
@@ -1343,11 +1480,7 @@ class MayaHistoryTimelineController(object):
             "place2dTexture",
             "shadingEngine",
         }
-        for node_name in nodes:
-            try:
-                node_type = cmds.nodeType(node_name)
-            except Exception:
-                node_type = "unknown"
+        for node_name, node_type in node_type_pairs:
             node_types[node_type] = node_types.get(node_type, 0) + 1
             short = _short_name(node_name).lower()
             if node_type.startswith("animCurve"):
@@ -1386,13 +1519,8 @@ class MayaHistoryTimelineController(object):
                 material_value = "{0}:{1}".format(node_name, ";".join(attr_values))
                 material_values.append(material_value)
                 material_value_map[node_name] = material_value
-            if node_type == "transform" and not _is_camera_transform_node(node_name):
-                values = []
-                for attr_name in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"):
-                    try:
-                        values.append("{0:.5f}".format(float(cmds.getAttr(node_name + "." + attr_name))))
-                    except Exception:
-                        values.append("x")
+            if node_type == "transform" and node_name not in camera_transforms:
+                values = _transform_trs_values(node_name)
                 transform_value = "{0}:{1}".format(node_name, ",".join(values))
                 transform_values.append(transform_value)
                 transform_value_map[node_name] = transform_value
@@ -1424,14 +1552,14 @@ class MayaHistoryTimelineController(object):
         }
 
     def _delta_from_previous(self, manifest, summary):
-        snapshots = manifest.get("snapshots") or []
-        if not snapshots:
+        parent = self._snapshot_for_id(manifest, manifest.get("current_snapshot_id", ""))
+        if not parent:
             return {
                 "created_nodes": [],
                 "deleted_nodes": [],
                 "changed_counts": True,
             }
-        previous = snapshots[-1].get("scene_summary") or {}
+        previous = parent.get("scene_summary") or {}
         previous_nodes = set(previous.get("interesting_nodes") or [])
         current_nodes = set(summary.get("interesting_nodes") or [])
         return {
@@ -1616,20 +1744,46 @@ class MayaHistoryTimelineController(object):
         cap = int(manifest.get("snapshot_cap") or 0)
         snapshots = manifest.get("snapshots") or []
         if cap <= 0 or len(snapshots) <= cap:
+            manifest["cap_exceeded"] = False
             self._save_manifest(context, manifest)
             return
         keep_ids = set(item.get("id") for item in snapshots if item.get("milestone") or item.get("locked"))
+        # Full-scene snapshots can safely skip an intermediate graph node. Keep
+        # protected points, and reparent surviving children when an old ordinary
+        # point is pruned so no future branch is orphaned.
+        keep_ids.add(manifest.get("current_snapshot_id", ""))
+        branch_heads = {}
+        for item in snapshots:
+            branch_heads[item.get("branch_id") or "main"] = item.get("id")
+        keep_ids.update(value for value in branch_heads.values() if value)
         removable = [item for item in snapshots if item.get("id") not in keep_ids]
+        failed = []
         while len(snapshots) > cap and removable:
             victim = removable.pop(0)
+            victim_id = victim.get("id")
+            replacement_parent_id = victim.get("parent_id") or ""
             snapshot_path = victim.get("snapshot_path", "")
             if snapshot_path and os.path.exists(snapshot_path):
                 try:
                     os.remove(snapshot_path)
                 except Exception:
-                    pass
-            snapshots = [item for item in snapshots if item.get("id") != victim.get("id")]
+                    failed.append(victim_id)
+                    continue
+            for child in snapshots:
+                if child.get("parent_id") == victim_id:
+                    child["parent_id"] = replacement_parent_id
+                if child.get("branched_from_id") == victim_id:
+                    child["branched_from_id"] = replacement_parent_id
+                    parent = next((item for item in snapshots if item.get("id") == replacement_parent_id), None)
+                    child["branched_from_label"] = parent.get("label", replacement_parent_id) if parent else replacement_parent_id
+            for branch in (manifest.get("branches") or {}).values():
+                if branch.get("parent_id") == victim_id:
+                    branch["parent_id"] = replacement_parent_id
+            snapshots = [item for item in snapshots if item.get("id") != victim_id]
         manifest["snapshots"] = snapshots
+        manifest["cap_exceeded"] = bool(len(snapshots) > cap)
+        if failed:
+            manifest.setdefault("events", []).append({"type": "cap_cleanup_failed", "timestamp": _now_iso(), "snapshot_ids": failed})
         current_id = manifest.get("current_snapshot_id", "")
         if current_id and current_id not in [item.get("id") for item in snapshots]:
             manifest["current_snapshot_id"] = snapshots[-1]["id"] if snapshots else ""
@@ -1693,6 +1847,17 @@ class MayaHistoryTimelineController(object):
         snapshot_path = record.get("snapshot_path", "")
         if not snapshot_path or not os.path.exists(snapshot_path):
             return False, "Snapshot file is missing: {0}".format(snapshot_path)
+        if save_current_first:
+            recovery_label = "Recovery before jump"
+            recovery_note = "Automatic recovery checkpoint created before restoring {0}.".format(record.get("label", snapshot_id))
+            recovery_ok, recovery_message, _recovery = self.create_snapshot(
+                label=recovery_label,
+                note=recovery_note,
+                auto=True,
+                reason="Recovery before jump",
+            )
+            if not recovery_ok:
+                return False, "Restore cancelled because the recovery checkpoint failed: {0}".format(recovery_message)
         was_watching = self._action_timer is not None
         _suppress_auto_snapshots_for(6.0)
         self.stop_default_action_snapshots()
@@ -1788,15 +1953,22 @@ class MayaHistoryTimelineController(object):
             return False, "Pick a History Timeline snapshot to delete."
         if record.get("locked") and not force:
             return False, "Milestone snapshots are locked. Unlock it before deleting."
+        snapshots = manifest.get("snapshots", [])
+        child_ids = [item.get("id") for item in snapshots if item.get("parent_id") == snapshot_id]
+        branch_heads = {}
+        for item in snapshots:
+            branch_heads[item.get("branch_id") or "main"] = item.get("id")
+        if child_ids:
+            return False, "Cannot delete this snapshot while branch children still depend on it."
+        if manifest.get("current_snapshot_id") == snapshot_id or snapshot_id in branch_heads.values():
+            return False, "Cannot delete the current or branch-head snapshot. Restore or create a newer point first."
         snapshot_path = record.get("snapshot_path", "")
         if snapshot_path and os.path.exists(snapshot_path):
             try:
                 os.remove(snapshot_path)
             except Exception as exc:
                 return False, "Could not delete snapshot file: {0}".format(exc)
-        manifest["snapshots"] = [item for item in manifest.get("snapshots", []) if item.get("id") != snapshot_id]
-        if manifest.get("current_snapshot_id") == snapshot_id:
-            manifest["current_snapshot_id"] = manifest["snapshots"][-1]["id"] if manifest.get("snapshots") else ""
+        manifest["snapshots"] = [item for item in snapshots if item.get("id") != snapshot_id]
         manifest.setdefault("events", []).append({"type": "delete", "snapshot_id": snapshot_id, "timestamp": _now_iso()})
         self._save_manifest(context, manifest)
         self._mark_action_baseline()
@@ -1894,6 +2066,7 @@ class MayaHistoryTimelineController(object):
                     "active": bool(branch_id == active),
                     "count": count,
                     "parent_id": record.get("parent_id", ""),
+                    "index": int(record.get("index") or 0),
                 }
             )
         return choices
@@ -1973,7 +2146,10 @@ class MayaHistoryTimelineController(object):
         manifest["snapshot_cap"] = max(0, cap)
         self._apply_snapshot_cap(context, manifest)
         _notify_history_ui_changed()
-        message = "History Timeline snapshot cap set to {0}. Milestones are preserved.".format(manifest["snapshot_cap"])
+        if manifest["snapshot_cap"]:
+            message = "History Timeline snapshot cap set to {0}. Milestones and branch heads are preserved.".format(manifest["snapshot_cap"])
+        else:
+            message = "History Timeline snapshot cap removed. All snapshots are kept."
         self._emit_status(message, True)
         return True, message
 
@@ -2012,6 +2188,30 @@ def snapshots_has_future(manifest, snapshot_id, branch_id=None):
         if item.get("id") == snapshot_id:
             return index < len(snapshots) - 1
     return False
+
+
+def _restore_choice(parent=None, label="snapshot"):
+    """Return ``save``, ``discard`` or ``cancel`` for every whole-scene jump."""
+    if not QtWidgets:
+        return "cancel"
+    box = QtWidgets.QMessageBox(parent)
+    box.setWindowTitle("Jump to History Snapshot")
+    box.setText("Choose how to jump to {0}.".format(label or "this snapshot"))
+    box.setInformativeText("Saving recovery keeps the current scene as a new point. Discard removes unsaved current changes. Cancel stays here.")
+    save_button = box.addButton("Save recovery and jump", QtWidgets.QMessageBox.AcceptRole)
+    discard_button = box.addButton("Discard current changes", QtWidgets.QMessageBox.DestructiveRole)
+    cancel_button = box.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
+    box.setDefaultButton(cancel_button)
+    run_dialog = getattr(box, "exec", None) or getattr(box, "exec_", None)
+    if not run_dialog:
+        return "cancel"
+    run_dialog()
+    clicked = box.clickedButton()
+    if clicked is save_button:
+        return "save"
+    if clicked is discard_button:
+        return "discard"
+    return "cancel"
 
 
 if QtWidgets:
@@ -2154,8 +2354,6 @@ if QtWidgets:
             self.refresh()
 
         def _toggle_auto_history(self, checked):
-            if checked:
-                _show_auto_history_security_warning(self)
             success, message = self.controller.set_auto_snapshot_enabled(bool(checked), parent=self, interval_ms=2000)
             self._set_status(message, success)
             self.refresh()
@@ -2165,8 +2363,11 @@ if QtWidgets:
                 handled = self.marker_click_callback(snapshot_id)
                 if handled is not False:
                     self.refresh()
-                    return
-            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=False)
+                return
+            choice = _restore_choice(self, "the selected snapshot")
+            if choice == "cancel":
+                return
+            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=(choice == "save"))
             self._set_status(message, success)
             self.refresh()
 
@@ -2256,6 +2457,117 @@ if QtWidgets:
             self.marker_layout.addStretch(1)
 
 
+    class HistoryTimelineGraph(QtWidgets.QWidget):
+        """Compact branch-lane graph that keeps the existing dot interaction."""
+
+        def __init__(self, controller, node_click_callback=None, parent=None):
+            super(HistoryTimelineGraph, self).__init__(parent)
+            self.controller = controller
+            self.node_click_callback = node_click_callback
+            self._records = []
+            self._points = []
+            self.setMinimumHeight(72)
+            self.setMaximumHeight(120)
+            self.setMouseTracking(True)
+            self.refresh()
+
+        def refresh(self):
+            self._records = self.controller.list_snapshots(branch_id="__all__")[-MAX_HISTORY_STRIP_MARKERS:]
+            self._points = []
+            branch_count = len({record.get("branch_id") or "main" for record in self._records})
+            graph_height = max(72, min(220, 34 + branch_count * 18))
+            self.setMinimumHeight(graph_height)
+            self.setMaximumHeight(graph_height)
+            self.update()
+
+        def _layout_points(self):
+            branch_indices = {
+                branch.get("id"): int(branch.get("index") or 0)
+                for branch in self.controller.branch_choices()
+            }
+            branches = sorted(
+                {record.get("branch_id") or "main" for record in self._records},
+                key=lambda branch_id: (branch_indices.get(branch_id, 999999), branch_id),
+            )
+            lane_for = {branch: index for index, branch in enumerate(branches)}
+            lane_height = 18
+            top = 22
+            left = 18
+            width = max(1, self.width() - 36)
+            count = max(1, len(self._records) - 1)
+            points = []
+            for index, record in enumerate(self._records):
+                x = left + int(width * index / count)
+                lane = lane_for.get(record.get("branch_id") or "main", 0)
+                y = top + lane * lane_height
+                points.append((x, y, record))
+            return points, lane_for
+
+        def paintEvent(self, _event):
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.fillRect(self.rect(), QtGui.QColor("#1E1E1E"))
+            points, lane_for = self._layout_points()
+            self._points = points
+            active_id = self.controller.current_snapshot_id()
+            active_branch_id = self.controller.active_branch_id()
+            branch_label = active_branch_id
+            for branch in self.controller.branch_choices():
+                if branch.get("id") == active_branch_id:
+                    branch_label = branch.get("label") or active_branch_id
+                    break
+            active_record = next((record for record in self._records if record.get("id") == active_id), None)
+            painter.setPen(QtGui.QColor("#D8EFFF"))
+            head_text = "HEAD: {0}".format(branch_label or "Main")
+            if active_record:
+                head_text += " | {0}".format(active_record.get("label") or active_id)
+            painter.drawText(6, 14, head_text)
+            for branch, lane in lane_for.items():
+                y = 22 + lane * 18
+                painter.setPen(QtGui.QColor("#3A3A3A"))
+                painter.drawLine(8, y, max(8, self.width() - 8), y)
+            point_by_id = {record.get("id"): (x, y, record) for x, y, record in points}
+            for x, y, record in points:
+                parent_id = record.get("parent_id") or record.get("branched_from_id")
+                parent = point_by_id.get(parent_id)
+                if parent:
+                    parent_branch = parent[2].get("branch_id") or "main"
+                    record_branch = record.get("branch_id") or "main"
+                    line_style = (
+                        _qt_flag("PenStyle", "DashLine", getattr(QtCore.Qt, "DashLine", 1))
+                        if parent_branch != record_branch
+                        else _qt_flag("PenStyle", "SolidLine", getattr(QtCore.Qt, "SolidLine", 1))
+                    )
+                    painter.setPen(QtGui.QPen(QtGui.QColor(record.get("branch_color") or DEFAULT_STEP_COLOR), 2, line_style))
+                    painter.drawLine(parent[0], parent[1], x, y)
+                painter.setBrush(QtGui.QColor(record.get("color") or DEFAULT_STEP_COLOR))
+                painter.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF") if record.get("id") == active_id else QtGui.QColor("#252525"), 2))
+                painter.drawEllipse(QtCore.QPoint(x, y), 5, 5)
+
+        def mouseMoveEvent(self, event):
+            nearest = self._nearest(event.position().x() if hasattr(event, "position") else event.x(), event.position().y() if hasattr(event, "position") else event.y())
+            if nearest:
+                record = nearest[2]
+                self.setToolTip("{0}\nBranch: {1}\nFrame: {2}\n{3}".format(record.get("label", "Snapshot"), record.get("branch_label", "Main"), int(round(float(record.get("frame", 0.0)))), record.get("note", "")))
+            else:
+                self.setToolTip("")
+            super(HistoryTimelineGraph, self).mouseMoveEvent(event)
+
+        def _nearest(self, x, y):
+            if not self._points:
+                self._points, _lanes = self._layout_points()
+            candidates = sorted(self._points, key=lambda point: ((point[0] - x) ** 2 + (point[1] - y) ** 2))
+            return candidates[0] if candidates and ((candidates[0][0] - x) ** 2 + (candidates[0][1] - y) ** 2) <= 14 ** 2 else None
+
+        def mousePressEvent(self, event):
+            x = event.position().x() if hasattr(event, "position") else event.x()
+            y = event.position().y() if hasattr(event, "position") else event.y()
+            nearest = self._nearest(x, y)
+            if nearest and self.node_click_callback:
+                self.node_click_callback(nearest[2].get("id"))
+            super(HistoryTimelineGraph, self).mousePressEvent(event)
+
+
     class MayaHistoryTimelinePanel(QtWidgets.QFrame):
         def __init__(self, controller=None, status_callback=None, parent=None):
             super(MayaHistoryTimelinePanel, self).__init__(parent)
@@ -2279,6 +2591,13 @@ if QtWidgets:
                 QFrame#mayaHistoryTimelinePanel {
                     background-color: #2B2B2B;
                     color: #E8E8E8;
+                }
+                QScrollArea#historyTimelineContentScroll,
+                QScrollArea#historyTimelineContentScroll QWidget#qt_scrollarea_viewport,
+                QWidget#historyTimelineContent {
+                    background-color: #2B2B2B;
+                    color: #E8E8E8;
+                    border: 0px;
                 }
                 QTableWidget {
                     background-color: #202020;
@@ -2307,7 +2626,18 @@ if QtWidgets:
                 }
                 """
             )
-            layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("historyTimelineContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
+            content = QtWidgets.QWidget()
+            content.setObjectName("historyTimelineContent")
+            content.setMinimumWidth(0)
+            layout = QtWidgets.QVBoxLayout(content)
             layout.setContentsMargins(8, 8, 8, 8)
             layout.setSpacing(6)
 
@@ -2325,6 +2655,10 @@ if QtWidgets:
                 marker_click_callback=self._restore_from_marker,
             )
             layout.addWidget(self.strip)
+            self.branch_graph = HistoryTimelineGraph(self.controller, self._restore_from_marker, parent=self)
+            self.branch_graph.setObjectName("historyTimelineBranchGraph")
+            self.branch_graph.setToolTip("Colored dots show snapshots. Dashed connectors show branch forks. Click a dot to choose a safe jump.")
+            layout.addWidget(self.branch_graph)
 
             branch_row = QtWidgets.QGridLayout()
             self.branch_combo = QtWidgets.QComboBox()
@@ -2373,11 +2707,16 @@ if QtWidgets:
             form.setColumnStretch(3, 1)
             layout.addLayout(form)
 
-            settings_row = QtWidgets.QGridLayout()
+            settings_box = QtWidgets.QGroupBox("History Timeline Settings")
+            settings_box.setObjectName("historyTimelineSettingsBox")
+            settings_row = QtWidgets.QGridLayout(settings_box)
             self.snapshot_cap_spin = QtWidgets.QSpinBox()
             self.snapshot_cap_spin.setObjectName("historyTimelineSnapshotCapSpin")
             self.snapshot_cap_spin.setRange(0, 1000)
-            self.snapshot_cap_spin.setToolTip("Maximum snapshots to keep for this Maya scene. 0 means no cap. Milestones are preserved.")
+            self.snapshot_cap_spin.setToolTip(
+                "Maximum full Maya scene backups to keep for this scene. The default is 90. "
+                "0 means no cap. Milestones are preserved."
+            )
             self.snapshot_cap_spin.setValue(DEFAULT_SNAPSHOT_CAP)
             self.apply_cap_button = QtWidgets.QPushButton("Set Snapshot Cap")
             self.apply_cap_button.setObjectName("historyTimelineSetSnapshotCapButton")
@@ -2385,7 +2724,8 @@ if QtWidgets:
             self.storage_size_label.setObjectName("historyTimelineStorageSizeLabel")
             self.storage_size_label.setToolTip("Total disk size of all saved History Timeline scene snapshots for this Maya scene.")
             self.warning_label = QtWidgets.QLabel(
-                "Warning: every snapshot is a full Maya scene copy. Large scenes make large history folders. Set a cap to keep file size under control."
+                "File size warning: every backup is a full Maya scene copy. The default cap is 90 backups; "
+                "older saves are deleted as the cap is exceeded while protected milestones and branch heads are preserved."
             )
             self.warning_label.setWordWrap(True)
             settings_row.addWidget(QtWidgets.QLabel("Max snapshots"), 0, 0)
@@ -2394,7 +2734,7 @@ if QtWidgets:
             settings_row.addWidget(self.storage_size_label, 0, 3)
             settings_row.addWidget(self.warning_label, 1, 0, 1, 4)
             settings_row.setColumnStretch(3, 1)
-            layout.addLayout(settings_row)
+            layout.addWidget(settings_box)
 
             auto_box = QtWidgets.QGroupBox("Auto History Save Rules")
             auto_box.setObjectName("historyTimelineAutoRulesBox")
@@ -2403,12 +2743,24 @@ if QtWidgets:
             self.auto_enabled_checkbox.setObjectName("historyTimelineAutoEnabledCheckBox")
             self.auto_enabled_checkbox.setToolTip("Turn this off to stop the History background watcher completely. Manual Save Step and Save Milestone still work.")
             auto_layout.addWidget(self.auto_enabled_checkbox)
-            self.auto_full_checkbox = QtWidgets.QCheckBox("Save snapshot after every Maya action")
+            interval_row = QtWidgets.QHBoxLayout()
+            interval_row.addWidget(QtWidgets.QLabel("Checkpoint interval (minutes)"))
+            self.auto_interval_spin = QtWidgets.QDoubleSpinBox()
+            self.auto_interval_spin.setObjectName("historyTimelineAutoIntervalMinutesSpin")
+            self.auto_interval_spin.setRange(0.1, 1440.0)
+            self.auto_interval_spin.setSingleStep(0.5)
+            self.auto_interval_spin.setDecimals(1)
+            self.auto_interval_spin.setValue(DEFAULT_AUTO_SNAPSHOT_INTERVAL_SECONDS / 60.0)
+            self.auto_interval_spin.setToolTip("Eligible changes wait for this long before one settled full-scene recovery checkpoint is written. Default: 3 minutes.")
+            interval_row.addWidget(self.auto_interval_spin)
+            interval_row.addStretch(1)
+            auto_layout.addLayout(interval_row)
+            self.auto_full_checkbox = QtWidgets.QCheckBox("Queue all eligible Maya edits")
             self.auto_full_checkbox.setObjectName("historyTimelineAutoAllCheckBox")
-            self.auto_full_checkbox.setToolTip("Default mode. Aminate saves a full scene snapshot after each Maya action when the scene has been saved.")
+            self.auto_full_checkbox.setToolTip("Default mode. Eligible edits accumulate and one full-scene checkpoint is saved at the configured interval.")
             auto_layout.addWidget(self.auto_full_checkbox)
             self.auto_rules_help_label = QtWidgets.QLabel(
-                "Turn this off for custom rules, then tick only the events that should create snapshots. Full snapshots can use a lot of disk space on large scenes."
+                "Trusted-rig note: History Timeline suppresses Maya Safe Mode and Trust Center prompts so saves and jumps are not blocked. Turn full-save mode off for custom rules, then tick only the events that should create eligible checkpoints."
             )
             self.auto_rules_help_label.setObjectName("historyTimelineAutoRulesHelpLabel")
             self.auto_rules_help_label.setWordWrap(True)
@@ -2470,7 +2822,10 @@ if QtWidgets:
             for index, button in enumerate(buttons):
                 button_row.addWidget(button, index // 5, index % 5)
                 button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            layout.addLayout(button_row)
+            actions_box = QtWidgets.QGroupBox("Save / Restore")
+            actions_box.setObjectName("historyTimelineActionsBox")
+            actions_box.setLayout(button_row)
+            layout.addWidget(actions_box)
 
             self.table = QtWidgets.QTableWidget(0, 9)
             self.table.setObjectName("historyTimelineSnapshotTable")
@@ -2492,11 +2847,18 @@ if QtWidgets:
                     self.table.horizontalHeader().setStretchLastSection(True)
                 except Exception:
                     pass
-            layout.addWidget(self.table, 1)
+            table_box = QtWidgets.QGroupBox("Snapshot List")
+            table_box.setObjectName("historyTimelineSnapshotListBox")
+            table_layout = QtWidgets.QVBoxLayout(table_box)
+            table_layout.setContentsMargins(4, 4, 4, 4)
+            table_layout.addWidget(self.table, 1)
+            layout.addWidget(table_box, 1)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
             layout.addWidget(self.status_label)
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
 
             self.save_step_button.clicked.connect(self._save_step)
             self.save_milestone_button.clicked.connect(self._save_milestone)
@@ -2614,6 +2976,10 @@ if QtWidgets:
                 pass
             if context_message:
                 self.status_label.setText(context_message)
+            elif context.get("ok") and self.controller._load_manifest(context).get("cap_exceeded"):
+                self.status_label.setText(
+                    "Snapshot cap is exceeded because branch heads, ancestors, or locked milestones are protected."
+                )
             elif self._total_snapshot_count > self._visible_snapshot_count:
                 self.status_label.setText(
                     "Showing {0} of {1} snapshots. Latest snapshots stay visible; selected older snapshot stays pinned.".format(
@@ -2671,11 +3037,18 @@ if QtWidgets:
                 self.table.clearSelection()
                 self.toggle_milestone_button.setText("Mark Milestone")
             self.strip.refresh()
+            self.branch_graph.refresh()
 
         def _refresh_auto_snapshot_controls(self):
             settings = self.controller.auto_snapshot_settings()
             enabled = self.controller.auto_snapshot_enabled()
             is_full = settings.get("mode") == AUTO_SNAPSHOT_MODE_ALL
+            try:
+                self.auto_interval_spin.blockSignals(True)
+                self.auto_interval_spin.setValue(float(self.controller.auto_snapshot_interval_seconds()) / 60.0)
+                self.auto_interval_spin.blockSignals(False)
+            except Exception:
+                pass
             try:
                 self.auto_enabled_checkbox.blockSignals(True)
                 self.auto_enabled_checkbox.setChecked(bool(enabled))
@@ -2705,8 +3078,6 @@ if QtWidgets:
                 checkbox.setEnabled(self.controller.auto_snapshot_enabled() and not checked)
 
         def _auto_enabled_toggled(self, checked):
-            if checked:
-                _show_auto_history_security_warning(self)
             success, message = self.controller.set_auto_snapshot_enabled(bool(checked), parent=self, interval_ms=2000)
             self._set_status(message, success)
             self._refresh_auto_snapshot_controls()
@@ -2719,6 +3090,9 @@ if QtWidgets:
             mode = AUTO_SNAPSHOT_MODE_ALL if self.auto_full_checkbox.isChecked() else AUTO_SNAPSHOT_MODE_CUSTOM
             triggers = {trigger_id: checkbox.isChecked() for trigger_id, checkbox in self.auto_trigger_checkboxes.items()}
             success, message = self.controller.set_auto_snapshot_settings(mode=mode, triggers=triggers)
+            interval_success, interval_message = self.controller.set_auto_snapshot_interval_seconds(self.auto_interval_spin.value() * 60.0)
+            if not interval_success:
+                success, message = interval_success, interval_message
             self._set_status(message, success)
             self.refresh()
 
@@ -2776,7 +3150,15 @@ if QtWidgets:
             if not branch_id or branch_id == "__all__":
                 self._set_status("Pick a single branch before switching.", False)
                 return
-            success, message = self.controller.restore_latest_in_branch(branch_id)
+            records = self.controller.list_snapshots(branch_id=branch_id)
+            if not records:
+                self._set_status("That branch has no snapshots yet.", False)
+                return
+            snapshot_id = records[-1].get("id")
+            choice = self._choose_restore_mode(snapshot_id)
+            if choice == "cancel":
+                return
+            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=(choice == "save"))
             self._set_status(message, success)
             self.refresh()
 
@@ -2815,26 +3197,27 @@ if QtWidgets:
         def _restore_from_marker(self, snapshot_id):
             if snapshot_id:
                 self._selected_snapshot_id = snapshot_id
-            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=False)
+            choice = self._choose_restore_mode(snapshot_id)
+            if choice == "cancel":
+                return False
+            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=(choice == "save"))
             self._set_status(message, success)
             self.refresh()
             return True
+
+        def _choose_restore_mode(self, snapshot_id):
+            record = self._record_for_id(snapshot_id)
+            return _restore_choice(self, (record or {}).get("label", "the selected snapshot"))
 
         def _restore(self):
             snapshot_id = self.selected_snapshot_id()
             if not snapshot_id:
                 self._set_status("Pick a snapshot in the History list or click a History toolbar square first.", False)
                 return
-            answer = QtWidgets.QMessageBox.question(
-                self,
-                "Restore History Snapshot",
-                "Jump the whole Maya scene to the selected snapshot? This restores the saved state without creating a new snapshot.",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                QtWidgets.QMessageBox.No,
-            )
-            if answer != QtWidgets.QMessageBox.Yes:
+            choice = self._choose_restore_mode(snapshot_id)
+            if choice == "cancel":
                 return
-            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=False)
+            success, message = self.controller.restore_snapshot(snapshot_id, save_current_first=(choice == "save"))
             self._set_status(message, success)
             self.refresh()
 
@@ -2941,9 +3324,17 @@ if QtWidgets:
             self.controller = controller or MayaHistoryTimelineController()
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("History Timeline")
+            self.setMinimumSize(360, 420)
+            self.resize(900, 720)
             layout = QtWidgets.QVBoxLayout(self)
             self.panel = MayaHistoryTimelinePanel(self.controller, parent=self)
             layout.addWidget(self.panel)
+
+        def closeEvent(self, event):
+            # Hide and reuse instead of destroying controller timers or Maya
+            # owned Qt wrappers during a native close.
+            self.hide()
+            event.ignore()
 
 
 GLOBAL_CONTROLLER = None
@@ -2957,6 +3348,15 @@ def launch_maya_history_timeline():
         raise RuntimeError("History Timeline must run inside Maya.")
     if not QtWidgets:
         raise RuntimeError("History Timeline needs PySide.")
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
     GLOBAL_CONTROLLER = MayaHistoryTimelineController()
     GLOBAL_WINDOW = MayaHistoryTimelineWindow(GLOBAL_CONTROLLER)
     GLOBAL_WINDOW.show()
@@ -2968,5 +3368,6 @@ __all__ = [
     "MayaHistoryTimelinePanel",
     "MayaHistoryTimelineWindow",
     "HistoryTimelineStrip",
+    "HistoryTimelineGraph",
     "launch_maya_history_timeline",
 ]

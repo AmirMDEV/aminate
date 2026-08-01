@@ -8,6 +8,7 @@ and jump into Maya's native drawing tools for frame-by-frame notes.
 from __future__ import absolute_import, division, print_function
 
 import hashlib
+import glob
 import json
 import os
 import re
@@ -21,33 +22,28 @@ import maya_skinning_cleanup as skin_cleanup
 try:
     import maya.cmds as cmds
     import maya.api.OpenMaya as om
-    import maya.OpenMayaUI as omui
     import maya.mel as mel
 
     MAYA_AVAILABLE = True
 except Exception:
     cmds = None
     om = None
-    omui = None
     mel = None
     MAYA_AVAILABLE = False
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
-    import shiboken6 as shiboken
 
     QT_BINDING = "PySide6"
 except Exception:
     try:
         from PySide2 import QtCore, QtGui, QtWidgets
-        import shiboken2 as shiboken
 
         QT_BINDING = "PySide2"
     except Exception:
         QtCore = None
         QtGui = None
         QtWidgets = None
-        shiboken = None
         QT_BINDING = None
 
 
@@ -56,14 +52,16 @@ WORKSPACE_CONTROL_NAME = WINDOW_OBJECT_NAME + "WorkspaceControl"
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-MEDIA_FILTER = "Media Files (*.mov *.mp4 *.avi *.m4v *.png *.jpg *.jpeg *.tif *.tiff *.exr *.iff *.bmp *.gif)"
+MEDIA_FILTER = "Media Files (*.mov *.mp4 *.avi *.m4v *.mkv *.png *.jpg *.jpeg *.tif *.tiff *.exr *.iff *.bmp *.gif)"
 AUDIO_FILTER = "Audio Files (*.wav *.aiff *.aif *.mp3)"
 REFERENCE_GROUP_NAME = "amirVideoReference_GRP"
 ANNOTATION_GROUP_NAME = "amirVideoAnnotations_GRP"
 ANNOTATION_SURFACE_MATERIAL = "amirVideoAnnotationSurface_MAT"
 ANNOTATION_WINDOW_OBJECT_NAME = "mayaVideoAnnotationManagerWindow"
+VIDEO_OPACITY_ATTR = "amirVideoOpacity"
+VIDEO_AUDIO_ENABLED_ATTR = "amirVideoAudioEnabled"
 PROXY_CACHE_DIR_NAME = "amir_maya_video_reference"
-VIDEO_EXTENSIONS = {".mov", ".mp4", ".avi", ".m4v", ".mpg", ".mpeg", ".wmv", ".webm"}
+VIDEO_EXTENSIONS = {".mov", ".mp4", ".avi", ".m4v", ".mkv", ".mpg", ".mpeg", ".wmv", ".webm"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr", ".iff", ".bmp", ".gif"}
 QIMAGE_REQUIRED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"}
 MAX_PROXY_FRAME_COUNT = 1800
@@ -85,45 +83,6 @@ _style_donate_button = skin_cleanup._style_donate_button
 _open_external_url = skin_cleanup._open_external_url
 _maya_main_window = skin_cleanup._maya_main_window
 _short_name = skin_cleanup._short_name
-
-
-def _qt_object_valid(widget):
-    if widget is None:
-        return False
-    if shiboken is not None and hasattr(shiboken, "isValid"):
-        try:
-            return bool(shiboken.isValid(widget))
-        except Exception:
-            return False
-    return True
-
-
-def _flush_qt_deferred_delete():
-    if not QtWidgets or not QtCore:
-        return
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        return
-    try:
-        app.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
-    except Exception:
-        pass
-
-
-def _safe_close_qt_widget(widget):
-    if not _qt_object_valid(widget):
-        return
-    try:
-        widget.close()
-    except Exception:
-        pass
-    if not _qt_object_valid(widget):
-        return
-    try:
-        widget.deleteLater()
-    except Exception:
-        pass
-    _flush_qt_deferred_delete()
 
 
 def _debug(message):
@@ -173,6 +132,28 @@ def _camera_shape(camera_name):
     return shapes[0] if shapes else ""
 
 
+def _isolate_camera_overlay_to_assigned_view(shape_name):
+    """Make a camera-attached overlay invisible from every other viewport.
+
+    Maya image planes default to appearing in other model panels even when
+    they are connected to a camera.  Animator's Pencil uses a retained model
+    panel for reference, so its overlay must be visible only while that exact
+    Pencil View camera is current.
+    """
+    if not shape_name or not cmds.objExists(shape_name):
+        return False, "Camera overlay image plane is missing."
+    attribute = shape_name + ".displayOnlyIfCurrent"
+    if not cmds.objExists(attribute):
+        return False, "This image plane cannot be limited to its assigned camera."
+    try:
+        cmds.setAttr(attribute, True)
+        if not bool(cmds.getAttr(attribute)):
+            return False, "Maya did not keep the camera-only overlay setting."
+    except Exception as exc:
+        return False, "Could not limit the camera overlay to its Pencil View: {0}".format(exc)
+    return True, "Camera overlay is visible only in its assigned view."
+
+
 def _ensure_reference_group():
     if cmds.objExists(REFERENCE_GROUP_NAME):
         return REFERENCE_GROUP_NAME
@@ -209,6 +190,31 @@ def _playback_slider():
     return ""
 
 
+def _camera_transform_from_image_plane(shape_name):
+    if not MAYA_AVAILABLE or not shape_name or not cmds.objExists(shape_name):
+        return ""
+    connections = []
+    for attr_name in ("camera", "lookThroughCamera"):
+        try:
+            if cmds.attributeQuery(attr_name, node=shape_name, exists=True):
+                connections.extend(cmds.listConnections(shape_name + "." + attr_name, source=True, destination=False) or [])
+        except Exception:
+            continue
+    try:
+        connections.extend(cmds.listConnections(shape_name, type="camera") or [])
+    except Exception:
+        pass
+    for connection in connections:
+        if not connection or not cmds.objExists(connection):
+            continue
+        if cmds.nodeType(connection) == "camera":
+            parents = cmds.listRelatives(connection, parent=True, fullPath=True) or []
+            return _long_name(parents[0] if parents else connection)
+        if cmds.nodeType(connection) == "transform":
+            return _long_name(connection)
+    return ""
+
+
 def _ensure_string_attr(node_name, attr_name):
     if not cmds.attributeQuery(attr_name, node=node_name, exists=True):
         cmds.addAttr(node_name, longName=attr_name, dataType="string")
@@ -217,6 +223,20 @@ def _ensure_string_attr(node_name, attr_name):
 def _ensure_long_attr(node_name, attr_name):
     if not cmds.attributeQuery(attr_name, node=node_name, exists=True):
         cmds.addAttr(node_name, longName=attr_name, attributeType="long")
+
+
+def _ensure_double_attr(node_name, attr_name):
+    if not node_name or not cmds.objExists(node_name):
+        return
+    if not cmds.attributeQuery(attr_name, node=node_name, exists=True):
+        cmds.addAttr(node_name, longName=attr_name, attributeType="double")
+
+
+def _clamp_opacity(value, default=0.8):
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except Exception:
+        return float(default)
 
 
 def _get_string_attr(node_name, attr_name, default_value=""):
@@ -235,6 +255,17 @@ def _get_long_attr(node_name, attr_name, default_value=0):
         return int(round(float(cmds.getAttr(node_name + "." + attr_name))))
     except Exception:
         return default_value
+
+
+def _get_double_attr(node_name, attr_name, default_value=0.0):
+    if not node_name or not cmds.objExists(node_name):
+        return None if default_value is None else float(default_value)
+    try:
+        if cmds.attributeQuery(attr_name, node=node_name, exists=True):
+            return float(cmds.getAttr(node_name + "." + attr_name))
+    except Exception:
+        pass
+    return None if default_value is None else float(default_value)
 
 
 def _set_string_attr(node_name, attr_name, value):
@@ -404,10 +435,6 @@ def _sequence_start_frame(path):
         return 1
 
 
-def _looks_like_sequence(path):
-    return bool(SEQUENCE_PATTERN.match(os.path.basename(path)))
-
-
 def _camera_world_position(camera_transform):
     matrix = om.MMatrix(cmds.xform(camera_transform, query=True, worldSpace=True, matrix=True))
     transform = om.MTransformationMatrix(matrix)
@@ -448,10 +475,11 @@ def _ensure_annotation_surface_shader():
 def _apply_frame_settings(shape_name, start_frame, sequence_start_frame, opacity):
     cmds.setAttr(shape_name + ".useFrameExtension", 1)
     cmds.setAttr(shape_name + ".frameOffset", int(sequence_start_frame) - int(start_frame))
-    try:
-        cmds.setAttr(shape_name + ".displayOnlyIfCurrent", 0)
-    except Exception:
-        pass
+    # Do not reset Maya's camera-only flag here.  This helper is also used by
+    # opacity and start-frame edits, so clearing it would leak the reference
+    # image plane into every other model panel after an otherwise harmless UI
+    # change.  Creation/placement paths assert the flag explicitly, and the
+    # update paths below re-assert it for legacy overlays as well.
     try:
         cmds.setAttr(shape_name + ".alphaGain", float(opacity))
     except Exception:
@@ -537,7 +565,10 @@ def _create_proxy_from_video(media_path, extract_audio, start_frame):
         except Exception as exc:
             audio_error = str(exc)
 
-    if not os.path.exists(first_frame) or not os.path.exists(last_frame):
+    generated_frames = sorted(glob.glob(os.path.join(cache_dir, "frame_*.png")))
+    actual_frame_count = len(generated_frames)
+    actual_last_frame = generated_frames[-1] if generated_frames else ""
+    if not os.path.exists(first_frame) or not actual_last_frame or not os.path.exists(actual_last_frame):
         raise RuntimeError("The proxy frames were not created from the video.")
     media_ok, media_error = _validate_image_plane_media(first_frame)
     if not media_ok:
@@ -549,7 +580,10 @@ def _create_proxy_from_video(media_path, extract_audio, start_frame):
         "audio_path": audio_result_path,
         "audio_error": audio_error,
         "fps": fps_value,
-        "frame_count": int(required_frame_count),
+        # A source clip may be shorter than Maya's playback range. ffmpeg then
+        # correctly stops at the source's last frame, so record the frames that
+        # really exist instead of rejecting a valid short video.
+        "frame_count": int(actual_frame_count),
         "sequence_start_frame": 1,
         "aspect_ratio": _image_aspect_ratio(first_frame),
         "is_proxy": True,
@@ -596,6 +630,12 @@ class MayaVideoReferenceController(object):
         self.last_follow_group = ""
         self.last_annotation_surface = ""
         self.last_media_info = {}
+        self.camera_overlay_placement = "full_view"
+        # Fraction of the full-view camera image-plane footprint.  PIP uses
+        # 0.38 by default, but the Animator's Pencil UI can override this and
+        # the value is persisted on the overlay transform for scene reopen.
+        self.camera_overlay_scale = None
+        self.keep_strokes_on_top = False
         self.status_callback = None
 
     def shutdown(self):
@@ -655,9 +695,368 @@ class MayaVideoReferenceController(object):
         if not transform_name or not cmds.objExists(transform_name):
             return
         _set_long_attr(transform_name, "amirVideoSequenceStartFrame", int(media_info.get("sequence_start_frame", 1)))
+        _set_long_attr(transform_name, "amirVideoStartFrame", int(self.start_frame))
         _set_string_attr(transform_name, "amirVideoSourcePath", media_info.get("media_path", ""))
         _set_string_attr(transform_name, "amirVideoResolvedPath", media_info.get("resolved_media_path", ""))
         _set_string_attr(transform_name, "amirVideoSoundNode", sound_name or "")
+        _ensure_double_attr(transform_name, VIDEO_OPACITY_ATTR)
+        cmds.setAttr(transform_name + "." + VIDEO_OPACITY_ATTR, _clamp_opacity(self.opacity))
+        _ensure_long_attr(transform_name, VIDEO_AUDIO_ENABLED_ATTR)
+        cmds.setAttr(transform_name + "." + VIDEO_AUDIO_ENABLED_ATTR, int(bool(sound_name)))
+
+    def camera_overlay_transforms(self, camera_name=None):
+        """Return tagged camera overlays for one Pencil View camera.
+
+        This is deliberately scene-native and read-only.  The Pencil panel uses
+        it before a new attach so repeated Attach Video clicks cannot leave
+        several visible image planes on the same saved view.
+        """
+        if not MAYA_AVAILABLE:
+            return []
+        wanted = _long_name(camera_name) if camera_name and cmds.objExists(camera_name) else ""
+        matches = []
+        for node_name in cmds.ls(type="transform", long=True) or []:
+            try:
+                if not cmds.attributeQuery("amirVideoOverlayPlacement", node=node_name, exists=True):
+                    continue
+                shape_name = self._reference_shape(node_name)
+                if not shape_name:
+                    continue
+                tagged_camera = _get_string_attr(node_name, "amirVideoOverlayCamera", "")
+                if wanted and tagged_camera:
+                    tagged_camera = _long_name(tagged_camera) if cmds.objExists(tagged_camera) else tagged_camera
+                    if tagged_camera != wanted:
+                        continue
+                elif wanted:
+                    connected = _camera_transform_from_image_plane(shape_name)
+                    if _long_name(connected) != wanted:
+                        continue
+                matches.append(_long_name(node_name))
+            except Exception:
+                continue
+        return matches
+
+    def remove_camera_overlays(self, camera_name=None, transforms=None):
+        """Remove old overlays (and their attached audio) for one Pencil View."""
+        if not MAYA_AVAILABLE:
+            return 0
+        targets = list(transforms or self.camera_overlay_transforms(camera_name))
+        removed = 0
+        for transform_name in targets:
+            if not transform_name or not cmds.objExists(transform_name):
+                continue
+            sound_name = _get_string_attr(transform_name, "amirVideoSoundNode", "")
+            try:
+                slider = _playback_slider()
+                if slider and sound_name and cmds.control(slider, exists=True):
+                    current_sound = cmds.timeControl(slider, query=True, sound=True) or ""
+                    if current_sound == sound_name:
+                        cmds.timeControl(slider, edit=True, sound="", displaySound=False)
+            except Exception:
+                pass
+            try:
+                if sound_name and cmds.objExists(sound_name):
+                    cmds.delete(sound_name)
+            except Exception:
+                pass
+            try:
+                cmds.delete(transform_name)
+                removed += 1
+            except Exception:
+                continue
+        return removed
+
+    def set_video_opacity(self, opacity, transform_name=None):
+        """Apply percentage-style video opacity to the live image plane and scene state."""
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        value = _clamp_opacity(opacity)
+        transform_name = transform_name or self.last_transform or self._current_reference_transform()
+        shape_name = self._reference_shape(transform_name)
+        if not shape_name:
+            return False, "Attach a video first so its opacity can be changed."
+        sequence_start_frame = _get_long_attr(
+            transform_name,
+            "amirVideoSequenceStartFrame",
+            self.last_media_info.get("sequence_start_frame", 1),
+        )
+        self.opacity = value
+        _apply_frame_settings(shape_name, self.start_frame, sequence_start_frame, value)
+        isolated, isolation_message = _isolate_camera_overlay_to_assigned_view(shape_name)
+        if not isolated:
+            return False, isolation_message
+        _ensure_double_attr(transform_name, VIDEO_OPACITY_ATTR)
+        cmds.setAttr(transform_name + "." + VIDEO_OPACITY_ATTR, value)
+        self.last_transform = _long_name(transform_name)
+        self.last_image_plane = _long_name(shape_name)
+        return True, "Video opacity: {0}%".format(int(round(value * 100.0)))
+
+    def set_audio_enabled(self, enabled, transform_name=None):
+        """Toggle the attached video's scene sound without re-importing video."""
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        enabled = bool(enabled)
+        transform_name = transform_name or self.last_transform or self._current_reference_transform()
+        shape_name = self._reference_shape(transform_name)
+        if not shape_name:
+            self.import_audio = enabled
+            return False, "Attach a video first so its audio can be changed."
+        sound_name = _get_string_attr(transform_name, "amirVideoSoundNode", self.last_sound)
+        if enabled:
+            if not sound_name or not cmds.objExists(sound_name):
+                source_path = _get_string_attr(transform_name, "amirVideoSourcePath", "") or self.media_path
+                audio_path = self.audio_path if self.audio_path and os.path.exists(self.audio_path) else ""
+                media_info = self.last_media_info or {}
+                if not audio_path and source_path and os.path.exists(source_path):
+                    try:
+                        media_info = _resolve_media_path(source_path, extract_audio=True, start_frame=int(self.start_frame))
+                        self.last_media_info = media_info
+                    except Exception as exc:
+                        return False, "Could not prepare video audio: {0}".format(exc)
+                    audio_path = media_info.get("audio_path") or ""
+                if not audio_path or not os.path.exists(audio_path):
+                    return False, "This video does not contain audio that Maya can attach."
+                try:
+                    sound_name = cmds.sound(file=audio_path, offset=int(self.start_frame))
+                except Exception as exc:
+                    return False, "Could not attach video audio: {0}".format(exc)
+            slider = _playback_slider()
+            if slider:
+                try:
+                    cmds.timeControl(slider, edit=True, sound=sound_name, displaySound=True)
+                except Exception:
+                    pass
+            self.last_sound = sound_name
+            self.import_audio = True
+        else:
+            slider = _playback_slider()
+            if slider and sound_name:
+                try:
+                    current_sound = cmds.timeControl(slider, query=True, sound=True) or ""
+                    if current_sound == sound_name:
+                        cmds.timeControl(slider, edit=True, sound="", displaySound=False)
+                except Exception:
+                    pass
+            if sound_name and cmds.objExists(sound_name):
+                try:
+                    cmds.delete(sound_name)
+                except Exception:
+                    pass
+            self.last_sound = ""
+            self.import_audio = False
+        _set_string_attr(transform_name, "amirVideoSoundNode", self.last_sound)
+        _ensure_long_attr(transform_name, VIDEO_AUDIO_ENABLED_ATTR)
+        cmds.setAttr(transform_name + "." + VIDEO_AUDIO_ENABLED_ATTR, int(enabled and bool(self.last_sound)))
+        self.last_transform = _long_name(transform_name)
+        self.last_image_plane = _long_name(shape_name)
+        return True, "Video audio: {0}.".format("On" if enabled and self.last_sound else "Off")
+
+    def apply_camera_overlay_placement(self, placement=None, keep_strokes_on_top=None, transform_name=None, scale_percent=None):
+        """Place and resize a camera-attached video in full view or a PIP corner."""
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        transform_name = transform_name or self.last_transform or self._current_reference_transform()
+        shape_name = self._reference_shape(transform_name)
+        if not shape_name:
+            return False, "Attach or select a camera video overlay first."
+        isolated, isolation_message = _isolate_camera_overlay_to_assigned_view(shape_name)
+        if not isolated:
+            return False, isolation_message
+
+        placement = str(placement or self.camera_overlay_placement or "full_view").lower()
+        if placement not in ("full_view", "top_right", "top_left", "bottom_right", "bottom_left"):
+            placement = "full_view"
+        if keep_strokes_on_top is None:
+            keep_strokes_on_top = self.keep_strokes_on_top
+        keep_strokes_on_top = bool(keep_strokes_on_top)
+
+        if scale_percent is None:
+            stored_scale = _get_double_attr(transform_name, "amirVideoOverlayScale", None)
+            previous_placement = str(self.camera_overlay_placement or "full_view").lower()
+            crossed_category = (previous_placement == "full_view") != (placement == "full_view")
+            if crossed_category:
+                scale = 1.0 if placement == "full_view" else 0.38
+            elif stored_scale is not None:
+                scale = float(stored_scale)
+            elif getattr(self, "camera_overlay_scale", None):
+                scale = float(self.camera_overlay_scale)
+            else:
+                scale = 1.0 if placement == "full_view" else 0.38
+        else:
+            try:
+                scale = float(scale_percent) / 100.0
+            except Exception:
+                scale = 1.0 if placement == "full_view" else 0.38
+        scale = max(0.10, min(2.00, scale))
+
+        baseline_width = _get_double_attr(transform_name, "amirVideoOverlayBaselineWidth", None)
+        baseline_height = _get_double_attr(transform_name, "amirVideoOverlayBaselineHeight", None)
+        baseline_size_x = _get_double_attr(transform_name, "amirVideoOverlayBaselineSizeX", None)
+        baseline_size_y = _get_double_attr(transform_name, "amirVideoOverlayBaselineSizeY", None)
+        baseline_offset_x = _get_double_attr(transform_name, "amirVideoOverlayBaselineOffsetX", None)
+        baseline_offset_y = _get_double_attr(transform_name, "amirVideoOverlayBaselineOffsetY", None)
+        baseline_depth = _get_double_attr(transform_name, "amirVideoOverlayBaselineDepth", None)
+
+        def _fallback(value, attr_name, default_value):
+            if value is not None:
+                return float(value)
+            try:
+                return float(cmds.getAttr(shape_name + "." + attr_name))
+            except Exception:
+                return float(default_value)
+
+        baseline_width = _fallback(baseline_width, "width", 1.0)
+        baseline_height = _fallback(baseline_height, "height", 1.0)
+        baseline_size_x = _fallback(baseline_size_x, "sizeX", 1.0)
+        baseline_size_y = _fallback(baseline_size_y, "sizeY", 1.0)
+        baseline_offset_x = _fallback(baseline_offset_x, "offsetX", 0.0)
+        baseline_offset_y = _fallback(baseline_offset_y, "offsetY", 0.0)
+        baseline_depth = max(0.001, _fallback(baseline_depth, "depth", 1.0))
+
+        for attr_name, value in (
+            ("amirVideoOverlayBaselineWidth", baseline_width),
+            ("amirVideoOverlayBaselineHeight", baseline_height),
+            ("amirVideoOverlayBaselineSizeX", baseline_size_x),
+            ("amirVideoOverlayBaselineSizeY", baseline_size_y),
+            ("amirVideoOverlayBaselineOffsetX", baseline_offset_x),
+            ("amirVideoOverlayBaselineOffsetY", baseline_offset_y),
+            ("amirVideoOverlayBaselineDepth", baseline_depth),
+        ):
+            _ensure_double_attr(transform_name, attr_name)
+            cmds.setAttr(transform_name + "." + attr_name, float(value))
+        _ensure_string_attr(transform_name, "amirVideoOverlayPlacement")
+        _ensure_double_attr(transform_name, "amirVideoOverlayScale")
+        _ensure_long_attr(transform_name, "amirVideoOverlayKeepStrokesOnTop")
+        camera_name = self.camera_name if self.camera_name and cmds.objExists(self.camera_name) else _camera_transform_from_image_plane(shape_name)
+        if camera_name and cmds.nodeType(camera_name) == "camera":
+            parents = cmds.listRelatives(camera_name, parent=True, fullPath=True) or []
+            camera_name = parents[0] if parents else camera_name
+        if camera_name and cmds.objExists(camera_name):
+            camera_name = _long_name(camera_name)
+            _set_string_attr(transform_name, "amirVideoOverlayCamera", camera_name)
+
+        corner_x = 1.0 if placement in ("top_right", "bottom_right") else -1.0 if placement in ("top_left", "bottom_left") else 0.0
+        corner_y = 1.0 if placement in ("top_right", "top_left") else -1.0 if placement in ("bottom_right", "bottom_left") else 0.0
+        target_depth = max(baseline_depth, 20.0) if keep_strokes_on_top else baseline_depth
+        target_size_x = baseline_size_x * scale
+        target_size_y = baseline_size_y * scale
+        target_offset_x = baseline_offset_x + corner_x * baseline_size_x * (1.0 - scale) * 0.5
+        target_offset_y = baseline_offset_y + corner_y * baseline_size_y * (1.0 - scale) * 0.5
+        if placement == "full_view":
+            target_offset_x = baseline_offset_x
+            target_offset_y = baseline_offset_y
+        try:
+            # Camera-attached image planes use sizeX/sizeY for their screen
+            # footprint. width/height describe the image geometry and pushed
+            # PIP offsets off-screen when used as film-aperture coordinates.
+            cmds.setAttr(shape_name + ".width", float(baseline_width))
+            cmds.setAttr(shape_name + ".height", float(baseline_height))
+            cmds.setAttr(shape_name + ".sizeX", float(target_size_x))
+            cmds.setAttr(shape_name + ".sizeY", float(target_size_y))
+            cmds.setAttr(shape_name + ".offsetX", float(target_offset_x))
+            cmds.setAttr(shape_name + ".offsetY", float(target_offset_y))
+            cmds.setAttr(shape_name + ".depth", float(target_depth))
+        except Exception as exc:
+            return False, "Could not place the camera overlay: {0}".format(exc)
+
+        _set_string_attr(transform_name, "amirVideoOverlayPlacement", placement)
+        cmds.setAttr(transform_name + ".amirVideoOverlayScale", float(scale))
+        cmds.setAttr(transform_name + ".amirVideoOverlayKeepStrokesOnTop", int(keep_strokes_on_top))
+        _ensure_double_attr(transform_name, "amirVideoOverlayUpdatedAt")
+        cmds.setAttr(transform_name + ".amirVideoOverlayUpdatedAt", float(time.time()))
+        self.camera_overlay_placement = placement
+        self.camera_overlay_scale = scale
+        self.keep_strokes_on_top = keep_strokes_on_top
+        self.last_transform = _long_name(transform_name)
+        self.last_image_plane = _long_name(shape_name)
+        return True, "Camera overlay placed in {0}.".format(placement.replace("_", " "))
+
+    def discover_camera_overlay(self):
+        """Restore the latest tagged camera overlay from scene-native nodes."""
+        if not MAYA_AVAILABLE:
+            return False
+        candidates = []
+        for node_name in cmds.ls(type="transform", long=True) or []:
+            try:
+                if not cmds.attributeQuery("amirVideoOverlayPlacement", node=node_name, exists=True):
+                    continue
+                placement = _get_string_attr(node_name, "amirVideoOverlayPlacement", "").lower()
+                if placement not in ("full_view", "top_right", "top_left", "bottom_right", "bottom_left"):
+                    continue
+                shape_name = self._reference_shape(node_name)
+                if not shape_name:
+                    continue
+                updated_at = _get_double_attr(node_name, "amirVideoOverlayUpdatedAt", 0.0)
+                candidates.append((float(updated_at or 0.0), node_name, shape_name, placement))
+            except Exception:
+                continue
+        if not candidates:
+            return False
+        candidates.sort(key=lambda item: item[0])
+        _updated_at, transform_name, shape_name, placement = candidates[-1]
+        source_path = _get_string_attr(transform_name, "amirVideoSourcePath", "")
+        resolved_path = _get_string_attr(transform_name, "amirVideoResolvedPath", "")
+        sequence_start_frame = _get_long_attr(transform_name, "amirVideoSequenceStartFrame", 1)
+        stored_start_frame = _get_long_attr(transform_name, "amirVideoStartFrame", 0)
+        if stored_start_frame:
+            start_frame = stored_start_frame
+        else:
+            frame_offset = _get_long_attr(shape_name, "frameOffset", 0)
+            start_frame = int(sequence_start_frame) - int(frame_offset)
+        camera_name = _get_string_attr(transform_name, "amirVideoOverlayCamera", "")
+        if camera_name and not cmds.objExists(camera_name):
+            camera_name = ""
+        if not camera_name:
+            camera_name = _camera_transform_from_image_plane(shape_name)
+        if camera_name and cmds.nodeType(camera_name) == "camera":
+            parents = cmds.listRelatives(camera_name, parent=True, fullPath=True) or []
+            camera_name = parents[0] if parents else camera_name
+        if camera_name and cmds.objExists(camera_name):
+            camera_name = _long_name(camera_name)
+        keep_strokes_on_top = bool(_get_long_attr(transform_name, "amirVideoOverlayKeepStrokesOnTop", 0))
+        opacity_value = _get_double_attr(transform_name, VIDEO_OPACITY_ATTR, None)
+        if opacity_value is None:
+            try:
+                opacity_value = cmds.getAttr(shape_name + ".alphaGain") if cmds.objExists(shape_name + ".alphaGain") else self.opacity
+            except Exception:
+                opacity_value = self.opacity
+        self.last_transform = _long_name(transform_name)
+        self.last_image_plane = _long_name(shape_name)
+        self.media_path = source_path
+        self.start_frame = int(start_frame)
+        self.camera_overlay_placement = placement
+        stored_scale = _get_double_attr(transform_name, "amirVideoOverlayScale", None)
+        if stored_scale is None:
+            stored_scale = 1.0 if placement == "full_view" else 0.38
+        self.camera_overlay_scale = max(0.10, min(2.00, float(stored_scale)))
+        self.keep_strokes_on_top = keep_strokes_on_top
+        self.opacity = _clamp_opacity(opacity_value)
+        self.camera_name = camera_name
+        self.last_sound = _get_string_attr(transform_name, "amirVideoSoundNode", "")
+        audio_enabled = bool(_get_long_attr(transform_name, VIDEO_AUDIO_ENABLED_ATTR, 1 if self.last_sound else 0))
+        self.last_media_info = {
+            "media_path": source_path,
+            "resolved_media_path": resolved_path,
+            "sequence_start_frame": int(sequence_start_frame),
+            "is_proxy": bool(resolved_path and resolved_path != source_path),
+        }
+        return {
+            "transform": self.last_transform,
+            "image_plane": self.last_image_plane,
+            "source_path": source_path,
+            "resolved_path": resolved_path,
+            "start_frame": int(start_frame),
+            "sequence_start_frame": int(sequence_start_frame),
+            "placement": placement,
+            "scale": self.camera_overlay_scale,
+            "scale_percent": int(round(self.camera_overlay_scale * 100.0)),
+            "keep_strokes_on_top": keep_strokes_on_top,
+            "opacity": self.opacity,
+            "opacity_percent": int(round(self.opacity * 100.0)),
+            "camera": camera_name,
+            "sound": self.last_sound,
+            "audio_enabled": audio_enabled,
+        }
 
     def update_current_reference_timing(self, warn_if_missing=True):
         transform_name = self._current_reference_transform()
@@ -675,6 +1074,9 @@ class MayaVideoReferenceController(object):
         sequence_start_frame = _get_long_attr(transform_name, "amirVideoSequenceStartFrame", self.last_media_info.get("sequence_start_frame", 1))
         opacity_value = float(cmds.getAttr(shape_name + ".alphaGain")) if cmds.objExists(shape_name + ".alphaGain") else float(self.opacity)
         _apply_frame_settings(shape_name, self.start_frame, sequence_start_frame, opacity_value)
+        isolated, isolation_message = _isolate_camera_overlay_to_assigned_view(shape_name)
+        if not isolated:
+            return False, isolation_message
 
         sound_name = _get_string_attr(transform_name, "amirVideoSoundNode", self.last_sound)
         if sound_name and cmds.objExists(sound_name):
@@ -854,11 +1256,22 @@ class MayaVideoReferenceController(object):
             transform_name = _long_name(image_plane[0])
             shape_name = _long_name(image_plane[1])
             _apply_frame_settings(shape_name, self.start_frame, sequence_start_frame, self.opacity)
+            isolated, isolation_message = _isolate_camera_overlay_to_assigned_view(shape_name)
+            if not isolated:
+                raise RuntimeError(isolation_message)
         except Exception as exc:
             _delete_created_node(transform_name)
             return False, "Could not make the camera overlay: {0}".format(exc)
         self.last_transform = transform_name
         self.last_image_plane = shape_name
+        success, placement_message = self.apply_camera_overlay_placement(
+            self.camera_overlay_placement,
+            self.keep_strokes_on_top,
+            transform_name=transform_name,
+        )
+        if not success:
+            _delete_created_node(transform_name)
+            return False, placement_message
         return True, "Made a camera overlay on {0}.".format(_short_name(camera_shape))
 
     def _place_tracing_card(self, transform_name, shape_name, camera_name, target_name, sequence_start_frame):
@@ -1056,23 +1469,6 @@ class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
     pass
 
 
-def _close_existing_annotation_window():
-    global GLOBAL_ANNOTATION_WINDOW
-    _safe_close_qt_widget(GLOBAL_ANNOTATION_WINDOW)
-    GLOBAL_ANNOTATION_WINDOW = None
-    if not QtWidgets:
-        return
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        return
-    for widget in app.topLevelWidgets():
-        try:
-            if widget.objectName() == ANNOTATION_WINDOW_OBJECT_NAME and _qt_object_valid(widget):
-                _safe_close_qt_widget(widget)
-        except Exception:
-            pass
-
-
 if QtWidgets:
     class MayaVideoAnnotationManagerWindow(_WindowBase):
         def __init__(self, controller, parent=None):
@@ -1080,12 +1476,23 @@ if QtWidgets:
             self.controller = controller
             self.setObjectName(ANNOTATION_WINDOW_OBJECT_NAME)
             self.setWindowTitle("Video Notes")
-            self.setMinimumWidth(460)
+            self.setMinimumSize(360, 320)
+            self.resize(520, 460)
             self._build_ui()
             self._sync_reference_label()
 
         def _build_ui(self):
-            main_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("videoAnnotationContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            content = QtWidgets.QWidget()
+            content.setMinimumWidth(0)
+            main_layout = QtWidgets.QVBoxLayout(content)
             intro = QtWidgets.QLabel(
                 "Draw quick note lines on top of the tracing card, then choose how long they stay visible."
             )
@@ -1128,6 +1535,7 @@ if QtWidgets:
 
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
+            help_box.setVisible(False)
             help_box.setPlainText(
                 "1. Make or select a tracing card.\n"
                 "2. Click Start Curve Draw.\n"
@@ -1136,6 +1544,12 @@ if QtWidgets:
                 "5. Set Show From and Show Until.\n"
                 "6. Click Hold Selected Notes so the line appears only on those frames."
             )
+            help_toggle = QtWidgets.QToolButton()
+            help_toggle.setText("How to use")
+            help_toggle.setCheckable(True)
+            help_toggle.setToolTip("Show or hide Video Notes quick help.")
+            help_toggle.toggled.connect(help_box.setVisible)
+            main_layout.addWidget(help_toggle)
             main_layout.addWidget(help_box, 1)
 
             self.status_label = QtWidgets.QLabel("Ready.")
@@ -1152,6 +1566,8 @@ if QtWidgets:
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
 
             current_frame = int(round(float(cmds.currentTime(query=True)))) if MAYA_AVAILABLE else 1
             self.start_spin.setValue(current_frame)
@@ -1206,12 +1622,24 @@ if QtWidgets:
         def _open_donate_url(self):
             _open_external_url(DONATE_URL)
 
+        def closeEvent(self, event):
+            self.hide()
+            event.ignore()
+
 
 def launch_video_annotation_manager(controller):
     global GLOBAL_ANNOTATION_WINDOW
     if not QtWidgets:
         raise RuntimeError("Video Notes needs PySide inside Maya.")
-    _close_existing_annotation_window()
+    if GLOBAL_ANNOTATION_WINDOW is not None:
+        try:
+            GLOBAL_ANNOTATION_WINDOW.show()
+            GLOBAL_ANNOTATION_WINDOW.raise_()
+            GLOBAL_ANNOTATION_WINDOW.activateWindow()
+            GLOBAL_ANNOTATION_WINDOW._sync_reference_label()
+            return GLOBAL_ANNOTATION_WINDOW
+        except Exception:
+            GLOBAL_ANNOTATION_WINDOW = None
     GLOBAL_ANNOTATION_WINDOW = MayaVideoAnnotationManagerWindow(controller, parent=_maya_main_window())
     GLOBAL_ANNOTATION_WINDOW.show()
     return GLOBAL_ANNOTATION_WINDOW
@@ -1226,19 +1654,34 @@ if QtWidgets:
             self._block_start_frame_sync = False
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Video Reference")
-            self.setMinimumWidth(720)
-            self.setMinimumHeight(520)
+            self.setMinimumSize(360, 420)
+            self.resize(760, 680)
             self._build_ui()
             self._sync_from_controller()
+            self._auto_use_safe_current_state()
 
         def _build_ui(self):
-            main_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("videoReferenceContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            content = QtWidgets.QWidget()
+            content.setMinimumWidth(0)
+            main_layout = QtWidgets.QVBoxLayout(content)
             intro = QtWidgets.QLabel(
                 "Turn a video into a tracing card Maya can scrub cleanly. You can place it behind the character, make it follow a picked object, or use a full-screen camera overlay if you really want that."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
 
+            source_group = QtWidgets.QGroupBox("Source")
+            source_layout = QtWidgets.QVBoxLayout(source_group)
+            source_layout.setContentsMargins(8, 8, 8, 8)
+            source_layout.setSpacing(6)
             camera_row = QtWidgets.QHBoxLayout()
             self.camera_line = QtWidgets.QLineEdit()
             self.camera_line.setReadOnly(True)
@@ -1246,7 +1689,7 @@ if QtWidgets:
             camera_row.addWidget(QtWidgets.QLabel("View"))
             camera_row.addWidget(self.camera_line, 1)
             camera_row.addWidget(self.use_camera_button)
-            main_layout.addLayout(camera_row)
+            source_layout.addLayout(camera_row)
 
             media_row = QtWidgets.QHBoxLayout()
             self.media_line = QtWidgets.QLineEdit()
@@ -1254,7 +1697,7 @@ if QtWidgets:
             media_row.addWidget(QtWidgets.QLabel("Video File"))
             media_row.addWidget(self.media_line, 1)
             media_row.addWidget(self.pick_media_button)
-            main_layout.addLayout(media_row)
+            source_layout.addLayout(media_row)
 
             audio_row = QtWidgets.QHBoxLayout()
             self.audio_line = QtWidgets.QLineEdit()
@@ -1262,7 +1705,7 @@ if QtWidgets:
             audio_row.addWidget(QtWidgets.QLabel("Audio File"))
             audio_row.addWidget(self.audio_line, 1)
             audio_row.addWidget(self.pick_audio_button)
-            main_layout.addLayout(audio_row)
+            source_layout.addLayout(audio_row)
 
             target_row = QtWidgets.QHBoxLayout()
             self.target_line = QtWidgets.QLineEdit()
@@ -1271,8 +1714,13 @@ if QtWidgets:
             target_row.addWidget(QtWidgets.QLabel("Object To Follow"))
             target_row.addWidget(self.target_line, 1)
             target_row.addWidget(self.use_target_button)
-            main_layout.addLayout(target_row)
+            source_layout.addLayout(target_row)
+            main_layout.addWidget(source_group)
 
+            placement_group = QtWidgets.QGroupBox("Placement")
+            placement_layout = QtWidgets.QVBoxLayout(placement_group)
+            placement_layout.setContentsMargins(8, 8, 8, 8)
+            placement_layout.setSpacing(6)
             placement_row = QtWidgets.QHBoxLayout()
             self.placement_combo = QtWidgets.QComboBox()
             for mode_key, mode_label in PLACEMENT_MODE_ITEMS:
@@ -1298,7 +1746,7 @@ if QtWidgets:
             self.opacity_spin.setDecimals(2)
             self.opacity_spin.setSingleStep(0.05)
             placement_row.addWidget(self.opacity_spin)
-            main_layout.addLayout(placement_row)
+            placement_layout.addLayout(placement_row)
 
             axis_row = QtWidgets.QHBoxLayout()
             axis_row.addWidget(QtWidgets.QLabel("Follow Axes"))
@@ -1309,7 +1757,7 @@ if QtWidgets:
             axis_row.addWidget(self.follow_y_check)
             axis_row.addWidget(self.follow_z_check)
             axis_row.addStretch(1)
-            main_layout.addLayout(axis_row)
+            placement_layout.addLayout(axis_row)
 
             options_row = QtWidgets.QHBoxLayout()
             self.start_spin = QtWidgets.QSpinBox()
@@ -1321,8 +1769,11 @@ if QtWidgets:
             options_row.addWidget(self.update_timing_button)
             options_row.addWidget(self.import_audio_check)
             options_row.addStretch(1)
-            main_layout.addLayout(options_row)
+            placement_layout.addLayout(options_row)
+            main_layout.addWidget(placement_group)
 
+            draw_group = QtWidgets.QGroupBox("Draw")
+            draw_layout = QtWidgets.QHBoxLayout(draw_group)
             button_row = QtWidgets.QHBoxLayout()
             self.import_button = QtWidgets.QPushButton("Make Tracing Card")
             self.open_layers_button = QtWidgets.QPushButton("Open Drawing Manager")
@@ -1330,10 +1781,12 @@ if QtWidgets:
             button_row.addWidget(self.import_button)
             button_row.addWidget(self.open_layers_button)
             button_row.addWidget(self.draw_button)
-            main_layout.addLayout(button_row)
+            draw_layout.addLayout(button_row)
+            main_layout.addWidget(draw_group)
 
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
+            help_box.setVisible(False)
             help_box.setPlainText(
                 "1. Click the viewport you want to trace in, then click Use Active View.\n"
                 "2. Pick the video or the first frame of an image sequence.\n"
@@ -1344,6 +1797,12 @@ if QtWidgets:
                 "7. Click Make Tracing Card.\n"
                 "8. Click Start Drawing to sketch quick note lines on the card, or Open Drawing Manager to set how long those notes stay visible."
             )
+            help_toggle = QtWidgets.QToolButton()
+            help_toggle.setText("How to use")
+            help_toggle.setCheckable(True)
+            help_toggle.setToolTip("Show or hide Video Reference quick help.")
+            help_toggle.toggled.connect(help_box.setVisible)
+            main_layout.addWidget(help_toggle)
             main_layout.addWidget(help_box, 1)
 
             self.status_label = QtWidgets.QLabel("Ready.")
@@ -1360,6 +1819,8 @@ if QtWidgets:
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
 
             self.use_camera_button.clicked.connect(self._use_camera)
             self.pick_media_button.clicked.connect(self._pick_media)
@@ -1371,6 +1832,14 @@ if QtWidgets:
             self.placement_combo.currentIndexChanged.connect(self._update_mode_ui)
             self.update_timing_button.clicked.connect(self._update_current_reference_timing)
             self.start_spin.valueChanged.connect(self._start_frame_changed)
+
+        def _auto_use_safe_current_state(self):
+            if MAYA_AVAILABLE and not self.controller.camera_name:
+                try:
+                    self.controller.use_active_camera()
+                    self._sync_from_controller()
+                except Exception:
+                    pass
 
         def _sync_from_controller(self):
             self.camera_line.setText(_short_name(self.controller.camera_name) if self.controller.camera_name else "")
@@ -1431,6 +1900,12 @@ if QtWidgets:
 
         def _import_reference(self):
             self._sync_to_controller()
+            if not self.controller.camera_name:
+                self._set_status("Choose a viewport with Use Active View first.", False)
+                return
+            if not self.controller.media_path:
+                self._set_status("Pick a video or image sequence first.", False)
+                return
             success, message = self.controller.import_reference()
             self._sync_from_controller()
             self._set_status(message, success)
@@ -1469,6 +1944,17 @@ if QtWidgets:
             self.card_width_spin.setEnabled(mode_key != "camera_overlay")
             self.depth_offset_spin.setEnabled(mode_key != "camera_overlay")
             self.import_button.setText("Make Camera Overlay" if mode_key == "camera_overlay" else "Make Tracing Card")
+            ready = bool(self.controller.camera_name and self.controller.media_path)
+            self.import_button.setEnabled(ready)
+            self.import_button.setToolTip(
+                "Ready to create the reference card."
+                if ready
+                else "Choose a viewport and media file before creating the reference card."
+            )
+
+        def closeEvent(self, event):
+            self.hide()
+            event.ignore()
 
         def _set_status(self, message, success=True):
             self.status_label.setText(message)
@@ -1484,46 +1970,30 @@ if QtWidgets:
             _open_external_url(DONATE_URL)
 
 
-def _close_existing_window():
-    global GLOBAL_CONTROLLER, GLOBAL_WINDOW
-    _delete_workspace_control(WORKSPACE_CONTROL_NAME)
-    if GLOBAL_CONTROLLER is not None:
-        try:
-            GLOBAL_CONTROLLER.shutdown()
-        except Exception:
-            pass
-    GLOBAL_CONTROLLER = None
-    _safe_close_qt_widget(GLOBAL_WINDOW)
-    GLOBAL_WINDOW = None
-    if not QtWidgets:
-        return
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        return
-    for widget in app.topLevelWidgets():
-        try:
-            if widget.objectName() == WINDOW_OBJECT_NAME and _qt_object_valid(widget):
-                _safe_close_qt_widget(widget)
-        except Exception:
-            pass
-
-
-if QtWidgets:
-    def _delete_workspace_control(name):
-        if MAYA_AVAILABLE and cmds and cmds.workspaceControl(name, exists=True):
-            cmds.deleteUI(name)
-
-
 def launch_maya_video_reference(dock=False):
     global GLOBAL_CONTROLLER, GLOBAL_WINDOW
     if not (MAYA_AVAILABLE and QtWidgets):
         raise RuntimeError("Maya Video Reference must be launched inside Maya with PySide available.")
 
-    _close_existing_window()
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
 
     GLOBAL_CONTROLLER = MayaVideoReferenceController()
     GLOBAL_WINDOW = MayaVideoReferenceWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())
-    GLOBAL_WINDOW.show()
+    if dock:
+        try:
+            GLOBAL_WINDOW.show(dockable=True, floating=False, area="right")
+        except Exception:
+            GLOBAL_WINDOW.show()
+    else:
+        GLOBAL_WINDOW.show()
     return GLOBAL_WINDOW
 
 

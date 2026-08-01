@@ -32,30 +32,25 @@ import maya_contact_hold as hold_utils
 
 try:
     import maya.cmds as cmds
-    import maya.OpenMayaUI as omui
 
     MAYA_AVAILABLE = True
 except Exception:
     cmds = None
-    omui = None
     MAYA_AVAILABLE = False
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
-    import shiboken6 as shiboken
 
     QT_BINDING = "PySide6"
 except Exception:
     try:
         from PySide2 import QtCore, QtGui, QtWidgets
-        import shiboken2 as shiboken
 
         QT_BINDING = "PySide2"
     except Exception:
         QtCore = None
         QtGui = None
         QtWidgets = None
-        shiboken = None
         QT_BINDING = None
 
 
@@ -70,7 +65,7 @@ FACE_RETARGET_DATA_ATTR = "faceRetargetData"
 DEFAULT_MAINTAIN_OFFSET = False
 DEFAULT_FOLLOW_TRANSLATE = True
 DEFAULT_FOLLOW_ROTATE = True
-DEFAULT_REDUCE_KEYS = False
+DEFAULT_REDUCE_KEYS = True
 DEFAULT_VALUE_TOLERANCE = 0.01
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
@@ -478,52 +473,44 @@ def _normal_match_key(node_name):
     return "".join(_match_core_tokens(_match_tokens(node_name)))
 
 
-def _source_key_times(source_node):
-    times = cmds.keyframe(source_node, query=True, timeChange=True) or []
-    rounded = []
-    for time_value in times:
-        rounded_time = int(round(float(time_value)))
-        if rounded_time not in rounded:
-            rounded.append(rounded_time)
-    return sorted(rounded)
+def _source_key_times(source_node, attributes=None):
+    times = []
+    for attr_name in list(attributes or []):
+        if not cmds.objExists("{0}.{1}".format(source_node, attr_name)):
+            continue
+        try:
+            times.extend(
+                float(time_value)
+                for time_value in (
+                    cmds.keyframe(source_node, attribute=attr_name, query=True, timeChange=True) or []
+                )
+            )
+        except Exception:
+            pass
+    if not attributes:
+        times.extend(float(time_value) for time_value in (cmds.keyframe(source_node, query=True, timeChange=True) or []))
+    unique_times = []
+    for time_value in sorted(times):
+        if unique_times and abs(float(time_value) - float(unique_times[-1])) <= 1.0e-6:
+            continue
+        unique_times.append(float(time_value))
+    return unique_times
 
 
 def _reduce_target_keys_to_source_times(source_node, target_node, bake_attrs, start_time, end_time):
-    keep_times = set(_source_key_times(source_node))
+    keep_times = _source_key_times(source_node, attributes=bake_attrs)
     if not keep_times:
         return
     for attr_name in bake_attrs:
         target_times = cmds.keyframe(target_node, attribute=attr_name, query=True, timeChange=True) or []
         for time_value in target_times:
-            rounded_time = int(round(float(time_value)))
-            if rounded_time in keep_times:
-                if abs(float(time_value) - float(rounded_time)) <= 1.0e-3:
-                    continue
-                try:
-                    cmds.keyframe(
-                        target_node,
-                        attribute=attr_name,
-                        edit=True,
-                        time=(float(time_value), float(time_value)),
-                        relative=True,
-                        timeChange=float(rounded_time) - float(time_value),
-                    )
-                except Exception:
-                    pass
+            if any(abs(float(time_value) - float(keep_time)) <= 1.0e-6 for keep_time in keep_times):
                 continue
             if float(start_time) - 1.0e-3 <= float(time_value) <= float(end_time) + 1.0e-3:
                 try:
                     cmds.cutKey(target_node, attribute=attr_name, time=(float(time_value), float(time_value)), clear=True)
                 except Exception:
                     pass
-
-
-def _bake_sample_times(start_time, end_time):
-    if abs(float(start_time) - float(end_time)) <= 1.0e-3:
-        return [float(start_time)]
-    first_frame = int(math.floor(float(start_time) + 0.0001))
-    last_frame = int(math.ceil(float(end_time) - 0.0001))
-    return [float(frame_value) for frame_value in range(first_frame, last_frame + 1)]
 
 
 class FaceRetargetController(object):
@@ -664,10 +651,10 @@ class FaceRetargetController(object):
             return False, "Pick a saved pair first."
         self.source_nodes = [payload.get("source", "")] if payload.get("source") else []
         self.target_nodes = [payload.get("target", "")] if payload.get("target") else []
-        self.maintain_offset = bool(payload.get("maintain_offset", self.maintain_offset))
+        self.maintain_offset = False
         self.follow_translate = bool(payload.get("follow_translate", self.follow_translate))
         self.follow_rotate = bool(payload.get("follow_rotate", self.follow_rotate))
-        self.reduce_keys = bool(payload.get("reduce_keys", self.reduce_keys))
+        self.reduce_keys = True
         return True, "Loaded {0}.".format(payload.get("list_name", "the selected pair"))
 
     def pair_entries(self, from_selection=False):
@@ -832,26 +819,6 @@ class FaceRetargetController(object):
             return start_time, end_time
         return math.floor(start_time + 0.0001), math.ceil(end_time - 0.0001)
 
-    def _round_key_times_to_whole_frames(self, target_nodes, bake_attrs, start_time, end_time):
-        for target_node in target_nodes:
-            for attr_name in bake_attrs:
-                key_times = cmds.keyframe(target_node, attribute=attr_name, query=True, timeChange=True) or []
-                for time_value in key_times:
-                    rounded_time = int(round(float(time_value)))
-                    if abs(float(time_value) - float(rounded_time)) <= 1.0e-3:
-                        continue
-                    try:
-                        cmds.keyframe(
-                            target_node,
-                            attribute=attr_name,
-                            edit=True,
-                            time=(float(time_value), float(time_value)),
-                            relative=True,
-                            timeChange=float(rounded_time) - float(time_value),
-                        )
-                    except Exception:
-                        pass
-
     def retarget_selected_pairs(self):
         if not self.selected_records:
             return False, "Pick one or more control pair rows first."
@@ -909,9 +876,6 @@ class FaceRetargetController(object):
         if not self.follow_translate and not self.follow_rotate:
             return False, "Turn on Follow Translation or Follow Rotation first."
 
-        start_time, end_time = self._key_range_from_nodes([payload["source"] for payload in entries])
-        if not entries or start_time is None or end_time is None:
-            start_time, end_time = _playback_range()
         target_nodes = []
         bake_attrs = _bake_attributes({"follow_translate": self.follow_translate, "follow_rotate": self.follow_rotate})
         if not bake_attrs:
@@ -928,13 +892,15 @@ class FaceRetargetController(object):
                 original_time = float(cmds.currentTime(query=True))
             except Exception:
                 original_time = None
+
+            sampled_entries = []
             for payload in entries:
                 source_node = payload["source"]
                 target_node = payload["target"]
-                target_nodes.append(target_node)
-                source_start_time, _source_end_time = self._key_range_from_nodes([source_node])
-                if source_start_time is None:
-                    source_start_time = start_time
+                source_times = _source_key_times(source_node, attributes=bake_attrs)
+                if not source_times:
+                    continue
+                source_start_time = source_times[0]
                 cmds.currentTime(source_start_time, edit=True)
                 baselines = {}
                 for attr_name in bake_attrs:
@@ -949,39 +915,63 @@ class FaceRetargetController(object):
                         )
                     except Exception:
                         continue
-                if source_node != target_node:
+                samples = {}
+                for time_value in source_times:
+                    cmds.currentTime(time_value, edit=True)
+                    samples[time_value] = {}
                     for attr_name in baselines:
+                        try:
+                            samples[time_value][attr_name] = float(
+                                cmds.getAttr("{0}.{1}".format(source_node, attr_name))
+                            )
+                        except Exception:
+                            pass
+                sampled_entries.append(
+                    {
+                        "source": source_node,
+                        "target": target_node,
+                        "times": source_times,
+                        "baselines": baselines,
+                        "samples": samples,
+                    }
+                )
+
+            if not sampled_entries:
+                return False, "No authored translate or rotate keys were found on the paired source controls."
+
+            start_time = min(item["times"][0] for item in sampled_entries)
+            end_time = max(item["times"][-1] for item in sampled_entries)
+
+            for item in sampled_entries:
+                source_node = item["source"]
+                target_node = item["target"]
+                target_nodes.append(target_node)
+                if source_node != target_node:
+                    for attr_name in item["baselines"]:
                         try:
                             cmds.cutKey(target_node, attribute=attr_name, time=(start_time, end_time), clear=True)
                         except Exception:
                             pass
-                for time_value in _bake_sample_times(start_time, end_time):
-                    cmds.currentTime(time_value, edit=True)
-                    for attr_name, baseline in baselines.items():
-                        source_start_value, target_start_value = baseline
+                for time_value in item["times"]:
+                    for attr_name, source_value in item["samples"].get(time_value, {}).items():
                         try:
-                            source_value = float(cmds.getAttr("{0}.{1}".format(source_node, attr_name)))
-                        except Exception:
-                            continue
-                        if self.maintain_offset:
-                            target_value = target_start_value + (source_value - source_start_value)
-                        else:
-                            target_value = source_value
-                        try:
-                            cmds.setKeyframe(target_node, attribute=attr_name, time=time_value, value=target_value)
+                            cmds.setKeyframe(
+                                target_node,
+                                attribute=attr_name,
+                                time=time_value,
+                                value=source_value,
+                            )
                         except Exception:
                             pass
 
-            if self.reduce_keys:
-                for payload in entries:
-                    _reduce_target_keys_to_source_times(
-                        payload["source"],
-                        payload["target"],
-                        bake_attrs,
-                        start_time,
-                        end_time,
-                    )
-            self._round_key_times_to_whole_frames(target_nodes, bake_attrs, start_time, end_time)
+            for item in sampled_entries:
+                _reduce_target_keys_to_source_times(
+                    item["source"],
+                    item["target"],
+                    bake_attrs,
+                    start_time,
+                    end_time,
+                )
 
             for record_node in records:
                 payload = _pair_record_payload(record_node)
@@ -992,7 +982,7 @@ class FaceRetargetController(object):
                 _set_pair_record_payload(record_node, payload)
 
             self.analyze_setup()
-            return True, "Baked {0} control pair(s) onto the target controls from frames {1} to {2}.".format(
+            return True, "Retargeted {0} control pair(s) at the source's authored keys from frames {1} to {2}.".format(
                 len(target_nodes),
                 _frame_label(start_time),
                 _frame_label(end_time),
@@ -1039,8 +1029,8 @@ if QtWidgets:
             self.controller = controller
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Controls Retargeter (Face and Body)")
-            self.setMinimumSize(420, 360)
-            start_width, start_height = _screen_limited_size(900, 860, min_width=420, min_height=360)
+            self.setMinimumSize(300, 360)
+            start_width, start_height = _screen_limited_size(900, 860, min_width=300, min_height=360)
             self.resize(start_width, start_height)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -1050,7 +1040,7 @@ if QtWidgets:
 
         def _build_ui(self):
             main_layout = QtWidgets.QVBoxLayout(self)
-            main_layout.setContentsMargins(12, 12, 12, 12)
+            main_layout.setContentsMargins(3, 8, 3, 8)
             main_layout.setSpacing(10)
 
             intro_group = QtWidgets.QGroupBox("How To Use")
@@ -1058,7 +1048,7 @@ if QtWidgets:
             intro = QtWidgets.QLabel(
                 "Put a source control on the left and its target control on the right. Each completed row becomes one retarget pair. Empty rows are ignored.\n"
                 "Use Auto Map By Name for fast name matching, or fill rows manually from Maya selection.\n"
-                "Click Retarget All Controls to bake source motion onto the target controls. Reduce Keys keeps only the original source keyframes."
+                "Click Retarget All Controls to match the source's starting pose and copy motion only at the source's original keyframes."
             )
             intro.setWordWrap(True)
             intro_layout.addWidget(intro)
@@ -1074,17 +1064,24 @@ if QtWidgets:
             self.pair_rows_layout = QtWidgets.QVBoxLayout()
             self.pair_rows_layout.setSpacing(8)
             pair_map_layout.addLayout(self.pair_rows_layout)
-            load_row = QtWidgets.QHBoxLayout()
+            # Keep the common selection helpers reachable on narrow dock widths.
+            # A two-column grid avoids summing four wide buttons into the row's
+            # minimum width and lets the line edits above remain usable.
+            load_row = QtWidgets.QGridLayout()
+            load_row.setHorizontalSpacing(6)
+            load_row.setVerticalSpacing(6)
             self.use_source_button = QtWidgets.QPushButton("Load Selected Sources")
             self.use_source_button.setToolTip("Load the selected controls down the left side of the pair rows.")
             self.use_target_button = QtWidgets.QPushButton("Load Selected Targets")
             self.use_target_button.setToolTip("Load the selected controls down the right side of the pair rows.")
             self.remove_source_button = QtWidgets.QPushButton("Clear Sources")
             self.remove_target_button = QtWidgets.QPushButton("Clear Targets")
-            load_row.addWidget(self.use_source_button)
-            load_row.addWidget(self.use_target_button)
-            load_row.addWidget(self.remove_source_button)
-            load_row.addWidget(self.remove_target_button)
+            load_row.addWidget(self.use_source_button, 0, 0)
+            load_row.addWidget(self.use_target_button, 0, 1)
+            load_row.addWidget(self.remove_source_button, 1, 0)
+            load_row.addWidget(self.remove_target_button, 1, 1)
+            load_row.setColumnStretch(0, 1)
+            load_row.setColumnStretch(1, 1)
             pair_map_layout.addLayout(load_row)
             main_layout.addWidget(pair_map_group)
 
@@ -1094,24 +1091,28 @@ if QtWidgets:
             self.target_box.hide()
             self.pair_row_widgets = []
 
-            options_row = QtWidgets.QHBoxLayout()
-            self.maintain_offset_check = QtWidgets.QCheckBox("Keep Target Offset")
+            options_row = QtWidgets.QGridLayout()
+            options_row.setHorizontalSpacing(8)
+            options_row.setVerticalSpacing(4)
+            self.maintain_offset_check = QtWidgets.QCheckBox("Match Source Starting Pose")
             self.maintain_offset_check.setChecked(DEFAULT_MAINTAIN_OFFSET)
             self.maintain_offset_check.setToolTip(
-                "Off by default: target controls receive the source channel values directly. "
-                "Turn on only when you want to preserve the target control's starting offset from the source."
+                "Always on during retargeting: the first target pose receives the source pose instead of keeping the target T-pose."
             )
+            self.maintain_offset_check.setChecked(True)
+            self.maintain_offset_check.setEnabled(False)
             self.follow_translate_check = QtWidgets.QCheckBox("Follow Translation")
             self.follow_translate_check.setChecked(DEFAULT_FOLLOW_TRANSLATE)
             self.follow_rotate_check = QtWidgets.QCheckBox("Follow Rotation")
             self.follow_rotate_check.setChecked(DEFAULT_FOLLOW_ROTATE)
-            self.reduce_keys_check = QtWidgets.QCheckBox("Reduce Keys After Bake")
+            self.reduce_keys_check = QtWidgets.QCheckBox("Source Keyframes Only")
             self.reduce_keys_check.setChecked(DEFAULT_REDUCE_KEYS)
-            options_row.addWidget(self.maintain_offset_check)
-            options_row.addWidget(self.follow_translate_check)
-            options_row.addWidget(self.follow_rotate_check)
-            options_row.addWidget(self.reduce_keys_check)
-            options_row.addStretch(1)
+            self.reduce_keys_check.setToolTip("Aminate writes only the exact source-authored key times. It never bakes every frame.")
+            self.reduce_keys_check.setEnabled(False)
+            options_row.addWidget(self.maintain_offset_check, 0, 0)
+            options_row.addWidget(self.follow_translate_check, 0, 1)
+            options_row.addWidget(self.follow_rotate_check, 1, 0)
+            options_row.addWidget(self.reduce_keys_check, 1, 1)
             main_layout.addLayout(options_row)
 
             action_row = QtWidgets.QHBoxLayout()
@@ -1132,9 +1133,18 @@ if QtWidgets:
             retarget_row = QtWidgets.QHBoxLayout()
             retarget_row.addWidget(self.retarget_all_button)
             main_layout.addLayout(retarget_row)
-            self.pair_button.hide()
-            self.check_button.hide()
-            self.retarget_selected_button.hide()
+            advanced_group = QtWidgets.QGroupBox("Advanced Pair Management")
+            advanced_layout = QtWidgets.QVBoxLayout(advanced_group)
+            advanced_layout.setContentsMargins(8, 8, 8, 8)
+            advanced_action_row = QtWidgets.QGridLayout()
+            advanced_action_row.setHorizontalSpacing(6)
+            advanced_action_row.setVerticalSpacing(6)
+            advanced_action_row.addWidget(self.pair_button, 0, 0)
+            advanced_action_row.addWidget(self.check_button, 0, 1)
+            advanced_action_row.addWidget(self.retarget_selected_button, 1, 0, 1, 2)
+            advanced_action_row.setColumnStretch(0, 1)
+            advanced_action_row.setColumnStretch(1, 1)
+            advanced_layout.addLayout(advanced_action_row)
 
             quick_group = QtWidgets.QGroupBox(PAIR_EDITOR_GROUP_LABEL)
             quick_layout = QtWidgets.QVBoxLayout(quick_group)
@@ -1175,8 +1185,7 @@ if QtWidgets:
             target_edit_row.addWidget(self.apply_target_button)
             quick_layout.addLayout(target_edit_row)
 
-            main_layout.addWidget(quick_group)
-            quick_group.hide()
+            advanced_layout.addWidget(quick_group)
 
             pair_group = QtWidgets.QGroupBox("Saved Pair Of Controls In Scene")
             pair_layout = QtWidgets.QVBoxLayout(pair_group)
@@ -1204,8 +1213,14 @@ if QtWidgets:
             manage_row.addWidget(self.delete_pair_button)
             manage_row.addWidget(self.delete_all_button)
             pair_layout.addLayout(manage_row)
-            main_layout.addWidget(pair_group, 1)
-            pair_group.hide()
+            advanced_layout.addWidget(pair_group, 1)
+            advanced_group.setCheckable(True)
+            advanced_group.setChecked(False)
+            advanced_group.setToolTip("Reveal saved-pair editing, setup checks, pair-by-order, and single-pair actions.")
+            advanced_group.toggled.connect(lambda checked: self._set_advanced_pair_visibility(advanced_group, checked))
+            main_layout.addWidget(advanced_group)
+            self.advanced_pair_group = advanced_group
+            self._set_advanced_pair_visibility(advanced_group, False)
 
             self.report_box = QtWidgets.QPlainTextEdit()
             self.report_box.setReadOnly(True)
@@ -1216,18 +1231,19 @@ if QtWidgets:
             self.status_label.setWordWrap(True)
             main_layout.addWidget(self.status_label)
 
-            footer_layout = QtWidgets.QHBoxLayout()
+            footer_layout = QtWidgets.QGridLayout()
             self.brand_label = QtWidgets.QLabel('Built by Amir. Follow Amir at <a href="{0}">followamir.com</a>.'.format(FOLLOW_AMIR_URL))
             self.brand_label.setOpenExternalLinks(False)
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
-            footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.5 Beta")
-            footer_layout.addWidget(self.version_label)
+            footer_layout.addWidget(self.brand_label, 0, 0, 1, 2)
+            self.version_label = QtWidgets.QLabel("Version 0.3.6")
+            footer_layout.addWidget(self.version_label, 1, 0)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
             self.donate_button.clicked.connect(self._open_donate_url)
-            footer_layout.addWidget(self.donate_button)
+            footer_layout.addWidget(self.donate_button, 1, 1)
+            footer_layout.setColumnStretch(0, 1)
             main_layout.addLayout(footer_layout)
 
             self.use_source_button.clicked.connect(self._use_selected_source)
@@ -1261,23 +1277,44 @@ if QtWidgets:
                 elif child_layout:
                     self._clear_layout(child_layout)
 
+        def _set_advanced_pair_visibility(self, group, visible):
+            """Collapse or reveal advanced controls without deleting their state."""
+            if not group or not group.layout():
+                return
+
+            def _set_layout_items(layout):
+                for index in range(layout.count()):
+                    item = layout.itemAt(index)
+                    if not item:
+                        continue
+                    widget = item.widget()
+                    child_layout = item.layout()
+                    if widget is not None:
+                        widget.setVisible(bool(visible))
+                    elif child_layout is not None:
+                        _set_layout_items(child_layout)
+
+            _set_layout_items(group.layout())
+
         def _make_pair_row(self, source_value="", target_value="", record_node="", row_index=0):
-            row_layout = QtWidgets.QHBoxLayout()
-            source_edit = QtWidgets.QLineEdit(source_value or "")
+            row_layout = QtWidgets.QGridLayout()
+            row_layout.setHorizontalSpacing(6)
+            row_layout.setVerticalSpacing(4)
+            source_edit = QtWidgets.QLineEdit()
             source_edit.setPlaceholderText("Source control")
-            target_edit = QtWidgets.QLineEdit(target_value or "")
+            target_edit = QtWidgets.QLineEdit()
             target_edit.setPlaceholderText("Target control")
+            self._set_pair_row_node(source_edit, source_value)
+            self._set_pair_row_node(target_edit, target_value)
             source_pick = QtWidgets.QPushButton("Pick Source")
             target_pick = QtWidgets.QPushButton("Pick Target")
             delete_button = QtWidgets.QPushButton("X")
-            arrow_label = QtWidgets.QLabel("<->")
-            arrow_label.setAlignment(QtCore.Qt.AlignCenter)
-            row_layout.addWidget(source_edit, 3)
-            row_layout.addWidget(source_pick)
-            row_layout.addWidget(arrow_label)
-            row_layout.addWidget(target_edit, 3)
-            row_layout.addWidget(target_pick)
-            row_layout.addWidget(delete_button)
+            row_layout.addWidget(source_edit, 0, 0)
+            row_layout.addWidget(source_pick, 0, 1)
+            row_layout.addWidget(target_edit, 1, 0)
+            row_layout.addWidget(target_pick, 1, 1)
+            row_layout.addWidget(delete_button, 0, 2, 2, 1)
+            row_layout.setColumnStretch(0, 1)
             self.pair_rows_layout.addLayout(row_layout)
             row = {
                 "source": source_edit,
@@ -1292,11 +1329,28 @@ if QtWidgets:
             source_edit.editingFinished.connect(lambda index=row_index: self._apply_pair_row(index))
             target_edit.editingFinished.connect(lambda index=row_index: self._apply_pair_row(index))
 
+        def _set_pair_row_node(self, line_edit, node_name):
+            node_value = _node_long_name(node_name or "") if node_name else ""
+            line_edit.setProperty("aminateNodePath", node_value)
+            line_edit.setText(_short_name(node_value) if node_value else "")
+            line_edit.setToolTip(node_value or "Type a control name, or use the Pick button.")
+
+        def _pair_row_node(self, line_edit):
+            typed_value = line_edit.text().strip()
+            stored_value = str(line_edit.property("aminateNodePath") or "")
+            if (
+                stored_value
+                and typed_value == _short_name(stored_value)
+                and cmds.objExists(stored_value)
+            ):
+                return stored_value
+            return typed_value
+
         def _row_values(self):
             rows = []
             for row in getattr(self, "pair_row_widgets", []):
-                source_value = row["source"].text().strip()
-                target_value = row["target"].text().strip()
+                source_value = self._pair_row_node(row["source"])
+                target_value = self._pair_row_node(row["target"])
                 rows.append({"source": source_value, "target": target_value, "record": row.get("record", "")})
             return rows
 
@@ -1345,8 +1399,8 @@ if QtWidgets:
             if row_index < 0 or row_index >= len(self.pair_row_widgets):
                 return
             row = self.pair_row_widgets[row_index]
-            source_value = row["source"].text().strip()
-            target_value = row["target"].text().strip()
+            source_value = self._pair_row_node(row["source"])
+            target_value = self._pair_row_node(row["target"])
             if not source_value or not target_value:
                 return
             success, message = self.controller.upsert_pair(source_value, target_value)
@@ -1358,7 +1412,10 @@ if QtWidgets:
             if not selected_nodes or row_index >= len(self.pair_row_widgets):
                 self._set_status("Pick one source control in Maya first.", False)
                 return
-            self.pair_row_widgets[row_index]["source"].setText(_node_long_name(selected_nodes[0]))
+            self._set_pair_row_node(
+                self.pair_row_widgets[row_index]["source"],
+                selected_nodes[0],
+            )
             self._apply_pair_row(row_index)
 
         def _row_use_selected_target(self, row_index):
@@ -1366,7 +1423,10 @@ if QtWidgets:
             if not selected_nodes or row_index >= len(self.pair_row_widgets):
                 self._set_status("Pick one target control in Maya first.", False)
                 return
-            self.pair_row_widgets[row_index]["target"].setText(_node_long_name(selected_nodes[0]))
+            self._set_pair_row_node(
+                self.pair_row_widgets[row_index]["target"],
+                selected_nodes[0],
+            )
             self._apply_pair_row(row_index)
 
         def _delete_pair_row(self, row_index):
@@ -1464,10 +1524,10 @@ if QtWidgets:
             self.follow_translate_check.blockSignals(True)
             self.follow_rotate_check.blockSignals(True)
             self.reduce_keys_check.blockSignals(True)
-            self.maintain_offset_check.setChecked(bool(self.controller.maintain_offset))
+            self.maintain_offset_check.setChecked(True)
             self.follow_translate_check.setChecked(bool(self.controller.follow_translate))
             self.follow_rotate_check.setChecked(bool(self.controller.follow_rotate))
-            self.reduce_keys_check.setChecked(bool(self.controller.reduce_keys))
+            self.reduce_keys_check.setChecked(True)
             self.maintain_offset_check.blockSignals(False)
             self.follow_translate_check.blockSignals(False)
             self.follow_rotate_check.blockSignals(False)
@@ -1489,10 +1549,10 @@ if QtWidgets:
             else:
                 self.controller.source_nodes = _control_list_from_text(self.source_box.toPlainText())
                 self.controller.target_nodes = _control_list_from_text(self.target_box.toPlainText())
-            self.controller.maintain_offset = bool(self.maintain_offset_check.isChecked())
+            self.controller.maintain_offset = False
             self.controller.follow_translate = bool(self.follow_translate_check.isChecked())
             self.controller.follow_rotate = bool(self.follow_rotate_check.isChecked())
-            self.controller.reduce_keys = bool(self.reduce_keys_check.isChecked())
+            self.controller.reduce_keys = True
 
         def _set_status(self, message, success=True):
             self.status_label.setText(message)
@@ -1637,22 +1697,10 @@ if QtWidgets:
                 self._set_status("Could not open the Donate link from this Maya session.", False)
 
         def closeEvent(self, event):
-            try:
-                self.controller.shutdown()
-            except Exception:
-                pass
-            try:
-                super(MayaFaceRetargetWindow, self).closeEvent(event)
-            except TypeError:
-                QtWidgets.QDialog.closeEvent(self, event)
-
-
-def _delete_workspace_control(workspace_control_name):
-    if MAYA_AVAILABLE and cmds and cmds.workspaceControl(workspace_control_name, exists=True):
-        try:
-            cmds.deleteUI(workspace_control_name, control=True)
-        except Exception:
-            pass
+            # Keep Maya's dockable wrapper alive.  Closing the native wrapper
+            # can invalidate workspace-control ownership inside Maya.
+            self.hide()
+            event.ignore()
 
 
 def _workspace_control_exists(workspace_control_name=WORKSPACE_CONTROL_NAME):
@@ -1690,12 +1738,9 @@ def _close_existing_window():
     global GLOBAL_WINDOW
     if GLOBAL_WINDOW is not None:
         try:
-            GLOBAL_WINDOW.close()
-            GLOBAL_WINDOW.deleteLater()
+            GLOBAL_WINDOW.hide()
         except Exception:
             pass
-    GLOBAL_WINDOW = None
-    _delete_workspace_control(WORKSPACE_CONTROL_NAME)
     if QtWidgets:
         application = QtWidgets.QApplication.instance()
         if application and hasattr(application, "topLevelWidgets"):
@@ -1704,8 +1749,7 @@ def _close_existing_window():
                     continue
                 try:
                     if getattr(widget, "objectName", lambda: "")() == WINDOW_OBJECT_NAME:
-                        widget.close()
-                        widget.deleteLater()
+                        widget.hide()
                 except Exception:
                     pass
 
@@ -1715,9 +1759,15 @@ def launch_maya_face_retarget(dock=False):
     global GLOBAL_WINDOW
     if not (MAYA_AVAILABLE and QtWidgets):
         raise RuntimeError("Maya Controls Retargeter (Face and Body) must be launched inside Maya with PySide available.")
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
     _close_existing_window()
-    if dock:
-        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
     GLOBAL_CONTROLLER = FaceRetargetController()
     GLOBAL_WINDOW = MayaFaceRetargetWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())
     if dock:

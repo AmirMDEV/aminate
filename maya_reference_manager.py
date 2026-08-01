@@ -1,10 +1,11 @@
 from __future__ import absolute_import, division, print_function
 
 import json
+import glob
 import os
+import re
 import shutil
 import time
-import zipfile
 
 try:
     import maya.cmds as cmds
@@ -36,10 +37,35 @@ UNKNOWN_NODE_TYPES = ("unknown", "unknownDag", "unknownTransform")
 REFERENCE_MANAGER_ATTR_SPECS = (
     ("file", "fileTextureName", "sourceimages", "Material Texture"),
     ("imagePlane", "imageName", "sourceimages", "Image Plane"),
+    ("transform", "amirVideoSourcePath", "video", "Video Reference Source"),
     ("audio", "filename", "audio", "Audio"),
     ("AlembicNode", "abc_File", "cache", "Alembic Cache"),
     ("gpuCache", "cacheFileName", "cache", "GPU Cache"),
 )
+
+_NUMBERED_FRAME_NAME = re.compile(r"^(.*?)(\d+)(\.[^.]+)$")
+
+
+def _numbered_sequence_paths(source_path):
+    """Return matching numbered siblings for a camera image-plane sequence."""
+    if not source_path or not os.path.isfile(source_path):
+        return []
+    folder_path = os.path.dirname(source_path)
+    file_name = os.path.basename(source_path)
+    match = _NUMBERED_FRAME_NAME.match(file_name)
+    if not match:
+        return []
+    prefix, _digits, suffix = match.groups()
+    pattern = os.path.join(folder_path, prefix + "*" + suffix)
+    candidates = []
+    for candidate in glob.glob(pattern):
+        candidate_name = os.path.basename(candidate)
+        candidate_match = _NUMBERED_FRAME_NAME.match(candidate_name)
+        if not candidate_match or candidate_match.group(1) != prefix or candidate_match.group(3) != suffix:
+            continue
+        if os.path.isfile(candidate):
+            candidates.append(candidate)
+    return sorted(set(candidates), key=lambda path: (int(_NUMBERED_FRAME_NAME.match(os.path.basename(path)).group(2)), os.path.basename(path)))
 
 
 def _maya_main_window():
@@ -152,13 +178,6 @@ def _copy_file(source_path, destination_path):
 def _relative_to_scene(package_scene_path, copied_path):
     try:
         return os.path.relpath(copied_path, os.path.dirname(package_scene_path)).replace(os.sep, "/")
-    except Exception:
-        return copied_path.replace(os.sep, "/")
-
-
-def _relative_to_package(package_dir, copied_path):
-    try:
-        return os.path.relpath(copied_path, package_dir).replace(os.sep, "/")
     except Exception:
         return copied_path.replace(os.sep, "/")
 
@@ -308,6 +327,17 @@ def _collect_external_records():
             source_path = _resolve_existing_path(source_path)
             if not source_path:
                 continue
+            sequence_paths = []
+            sequence_folder = folder_name
+            if node_type == "imagePlane" and attr_name == "imageName":
+                try:
+                    uses_frame_extension = bool(cmds.getAttr(node_name + ".useFrameExtension"))
+                except Exception:
+                    uses_frame_extension = False
+                if uses_frame_extension:
+                    sequence_paths = _numbered_sequence_paths(source_path)
+                    if len(sequence_paths) > 1:
+                        sequence_folder = "video"
             records.append(
                 {
                     "kind": "external",
@@ -317,10 +347,29 @@ def _collect_external_records():
                     "attr": attr_name,
                     "raw_source": raw_source,
                     "source": source_path,
-                    "folder": folder_name,
+                    "folder": sequence_folder,
                     "loaded": True,
                 }
             )
+            if sequence_paths:
+                first_frame = sequence_paths[0]
+                for frame_path in sequence_paths:
+                    if _normalize_path(frame_path) == _normalize_path(source_path):
+                        continue
+                    records.append(
+                        {
+                            "kind": "external",
+                            "display_kind": "Video Proxy Frame",
+                            "node_type": node_type,
+                            "node": node_name,
+                            "attr": attr_name,
+                            "raw_source": frame_path,
+                            "source": frame_path,
+                            "folder": "video",
+                            "sequence_first_source": first_frame,
+                            "loaded": True,
+                        }
+                    )
     return _dedupe_records(records)
 
 
@@ -583,11 +632,23 @@ if QtWidgets:
             self.controller = controller or ReferencePackageController()
             self.status_callback = status_callback
             self.controller.set_status_callback(self._set_status)
+            self.setMinimumWidth(0)
             self._build_ui()
             self.refresh_files()
 
         def _build_ui(self):
-            layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("referenceManagerContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            content = QtWidgets.QWidget()
+            content.setObjectName("referenceManagerContent")
+            content.setMinimumWidth(0)
+            layout = QtWidgets.QVBoxLayout(content)
             layout.setContentsMargins(12, 12, 12, 12)
             layout.setSpacing(8)
 
@@ -597,6 +658,11 @@ if QtWidgets:
             intro.setWordWrap(True)
             layout.addWidget(intro)
 
+            package_group = QtWidgets.QGroupBox("Package Scene")
+            package_layout = QtWidgets.QVBoxLayout(package_group)
+            package_layout.setContentsMargins(8, 8, 8, 8)
+            package_layout.setSpacing(6)
+
             output_row = QtWidgets.QHBoxLayout()
             output_row.addWidget(QtWidgets.QLabel("Output folder"))
             self.output_path = QtWidgets.QLineEdit(self.controller.default_output_dir() if MAYA_AVAILABLE else "")
@@ -605,7 +671,7 @@ if QtWidgets:
             self.browse_button = QtWidgets.QPushButton("Browse")
             self.browse_button.setToolTip("Choose folder for created package zip.")
             output_row.addWidget(self.browse_button)
-            layout.addLayout(output_row)
+            package_layout.addLayout(output_row)
 
             name_row = QtWidgets.QHBoxLayout()
             name_row.addWidget(QtWidgets.QLabel("Package name"))
@@ -613,7 +679,7 @@ if QtWidgets:
             self.package_name = QtWidgets.QLineEdit(default_name)
             self.package_name.setToolTip("Base name used for package folder, packaged scene, zip file.")
             name_row.addWidget(self.package_name, 1)
-            layout.addLayout(name_row)
+            package_layout.addLayout(name_row)
 
             options_row = QtWidgets.QHBoxLayout()
             self.save_scene_box = QtWidgets.QCheckBox("Save current scene first")
@@ -633,7 +699,7 @@ if QtWidgets:
             for widget in (self.save_scene_box, self.references_box, self.external_box, self.relative_box):
                 options_row.addWidget(widget)
             options_row.addStretch(1)
-            layout.addLayout(options_row)
+            package_layout.addLayout(options_row)
 
             action_row = QtWidgets.QHBoxLayout()
             self.refresh_button = QtWidgets.QPushButton("Refresh Needed Files")
@@ -646,8 +712,13 @@ if QtWidgets:
             action_row.addWidget(self.package_button)
             action_row.addWidget(self.open_folder_button)
             action_row.addStretch(1)
-            layout.addLayout(action_row)
+            package_layout.addLayout(action_row)
+            layout.addWidget(package_group)
 
+            cleanup_group = QtWidgets.QGroupBox("Scene Cleanup")
+            cleanup_layout = QtWidgets.QVBoxLayout(cleanup_group)
+            cleanup_layout.setContentsMargins(8, 8, 8, 8)
+            cleanup_layout.setSpacing(6)
             cleanup_row = QtWidgets.QHBoxLayout()
             self.scan_unknown_button = QtWidgets.QPushButton("Scan Unknown Data")
             self.scan_unknown_button.setToolTip(
@@ -660,7 +731,11 @@ if QtWidgets:
             cleanup_row.addWidget(self.scan_unknown_button)
             cleanup_row.addWidget(self.clean_unknown_button)
             cleanup_row.addStretch(1)
-            layout.addLayout(cleanup_row)
+            cleanup_layout.addLayout(cleanup_row)
+            cleanup_hint = QtWidgets.QLabel("Scan first. Cleanup removes unknown nodes or plugin records after confirmation.")
+            cleanup_hint.setWordWrap(True)
+            cleanup_layout.addWidget(cleanup_hint)
+            layout.addWidget(cleanup_group)
 
             self.files_table = QtWidgets.QTableWidget(0, 4)
             self.files_table.setHorizontalHeaderLabels(["Type", "Node", "Source", "Status"])
@@ -675,12 +750,28 @@ if QtWidgets:
             self.status_label.setWordWrap(True)
             layout.addWidget(self.status_label)
 
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
+
             self.refresh_button.clicked.connect(self.refresh_files)
             self.package_button.clicked.connect(self.package_scene)
             self.open_folder_button.clicked.connect(self.open_package_folder)
             self.browse_button.clicked.connect(self.pick_output_folder)
             self.scan_unknown_button.clicked.connect(self.scan_unknown_data)
             self.clean_unknown_button.clicked.connect(self.clean_unknown_data)
+            for option in (self.references_box, self.external_box):
+                option.stateChanged.connect(lambda _state: self.refresh_files())
+            self.output_path.textChanged.connect(self._validate_package_inputs)
+            self.package_name.textChanged.connect(self._validate_package_inputs)
+            self._validate_package_inputs()
+
+        def _validate_package_inputs(self, *_args):
+            output_dir = self.output_path.text().strip()
+            package_name = self.package_name.text().strip()
+            valid = bool(output_dir and package_name)
+            self.package_button.setEnabled(valid)
+            if not valid:
+                self._set_status("Enter an output folder and package name before packaging.", False)
 
         def _set_status(self, message, ok=True):
             self.status_label.setText(message)
@@ -721,6 +812,9 @@ if QtWidgets:
             self._set_status(message, not bool(missing_summary))
 
         def package_scene(self):
+            if not self.output_path.text().strip() or not self.package_name.text().strip():
+                self._set_status("Enter an output folder and package name before packaging.", False)
+                return
             try:
                 result = self.controller.package_current_scene(
                     output_dir=self.output_path.text(),
@@ -797,10 +891,17 @@ if QtWidgets:
             self.controller = controller or ReferencePackageController()
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Reference Manager")
-            self.setMinimumSize(640, 360)
+            self.setMinimumSize(360, 360)
+            self.resize(720, 560)
             layout = QtWidgets.QVBoxLayout(self)
             self.panel = ReferenceManagerPanel(self.controller, parent=self)
             layout.addWidget(self.panel)
+
+        def closeEvent(self, event):
+            # Maya-owned Qt wrappers stay alive and are hidden for reuse. Native
+            # workspace destruction is a known Maya 2026 crash path.
+            self.hide()
+            event.ignore()
 
 
 GLOBAL_WINDOW = None
@@ -814,11 +915,20 @@ def launch_maya_reference_manager(dock=False):
         raise RuntimeError("launch_maya_reference_manager() must run inside Maya.")
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
     GLOBAL_CONTROLLER = ReferencePackageController()
-    GLOBAL_WINDOW = MayaReferenceManagerWindow(GLOBAL_CONTROLLER)
+    GLOBAL_WINDOW = MayaReferenceManagerWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())
     if dock:
         try:
-            GLOBAL_WINDOW.show(dockable=True, floating=True, area="right")
+            GLOBAL_WINDOW.show(dockable=True, floating=False, area="right")
         except Exception:
             GLOBAL_WINDOW.show()
     else:

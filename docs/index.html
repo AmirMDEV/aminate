@@ -3,124 +3,422 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Aminate Tutorials</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Offline, picture-first tutorials and FAQ for every Aminate Maya tool.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%230b1114'/%3E%3Cpath d='M18 46 29 16h7l11 30h-8l-2-7H27l-2 7Zm11-14h6l-3-10Z' fill='%23ffc44d'/%3E%3C/svg%3E">
+  <title>Aminate — learn one tool at a time</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="hero">
-    <div>
-      <p class="eyebrow">Aminate local help</p>
-      <h1>Button tutorials</h1>
-      <p class="summary">Quick visual notes for every Aminate tool area, with a button index for the fast controls students use most.</p>
-    </div>
-    <div class="hero-actions">
-      <input id="search" type="search" placeholder="Search tools or buttons">
-      <a class="home-link" href="https://followamir.com">followamir.com</a>
-    </div>
+  <a class="skip-link" href="#lesson">Skip to the current lesson</a>
+
+  <header class="app-bar">
+    <a class="wordmark" href="#quick-start" aria-label="Aminate tutorial home">
+      <span class="wordmark-mark" aria-hidden="true">A</span>
+      <span>
+        <strong style="color: var(--text)">Aminate</strong>
+        <small>Tutorials</small>
+      </span>
+    </a>
+    <nav class="top-actions" aria-label="Site links">
+      <a href="#faq">FAQ</a>
+      <a class="creator-link" href="https://followamir.com">followamir.com</a>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Change colour theme">
+        <span aria-hidden="true">◐</span>
+        <span id="themeLabel">System</span>
+      </button>
+    </nav>
   </header>
 
-  <nav class="tool-strip" id="toolStrip" aria-label="Aminate tools"></nav>
+  <div class="page-shell">
+    <aside class="lesson-finder" aria-label="Find an Aminate lesson">
+      <div class="finder-intro">
+        <p class="section-label">23 plain-English guides</p>
+        <h1>What are you trying to fix?</h1>
+        <p>Pick the problem in front of you. Aminate will show one safe path, not a wall of manuals.</p>
+      </div>
 
-  <main>
-    <section class="section intro">
-      <h2>How to use this page</h2>
-      <p>Pick a tool icon, skim what it is for, then follow the short steps. Tutorial media can be still screenshots or GIFs; drop newer GIFs into <code>docs/assets</code> and update <code>docs-data.js</code>.</p>
-    </section>
-    <section id="sections" class="sections"></section>
-    <section class="section">
-      <h2>Button Index</h2>
-      <p class="muted">This index mirrors the compact Toolkit Bar and core workflow buttons so tooltips are searchable outside Maya.</p>
-      <div id="buttonIndex" class="button-index"></div>
-    </section>
-  </main>
+      <label class="search-field" for="search">
+        <span>Search lessons</span>
+        <input id="search" type="search" autocomplete="off" placeholder="Sliding foot, draw, IK…">
+      </label>
+      <p id="resultCount" class="result-count" aria-live="polite"></p>
+
+      <div id="categoryFilters" class="category-filters" aria-label="Lesson categories"></div>
+
+      <nav id="toolStrip" class="tool-strip" aria-label="All Aminate lessons"></nav>
+
+      <div id="emptyState" class="empty-state" hidden>
+        <strong>No lesson matched.</strong>
+        <p>Try a shorter word such as <em>foot</em>, <em>draw</em>, <em>skin</em>, or <em>notes</em>.</p>
+      </div>
+
+      <div class="offline-note">
+        <span aria-hidden="true">↓</span>
+        <p><strong>Works offline.</strong> Keep this page beside Maya while you work.</p>
+      </div>
+    </aside>
+
+    <main>
+      <section class="current-lesson-shell" aria-label="Selected Aminate lesson">
+        <details class="mobile-lesson-picker">
+          <summary>
+            <span>Choose a lesson</span>
+            <strong id="mobileCurrentTitle">Quick Start</strong>
+          </summary>
+          <nav id="mobileToolStrip" class="mobile-tool-strip" aria-label="All Aminate lessons on mobile"></nav>
+        </details>
+
+        <article id="lesson" class="lesson" aria-live="polite"></article>
+      </section>
+
+      <section id="faq" class="reference-section" aria-labelledby="faq-title">
+        <details id="faqDisclosure" class="reference-disclosure">
+          <summary>
+            <span>
+              <small>When something feels wrong</small>
+              <strong id="faq-title">Frequently asked questions</strong>
+            </span>
+            <span aria-hidden="true">Open FAQ</span>
+          </summary>
+          <div class="reference-content">
+            <p>Open the question that matches what you can see in Maya.</p>
+            <div id="faqList" class="faq-list"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="reference-section button-reference" aria-labelledby="button-title">
+        <details class="reference-disclosure">
+          <summary>
+            <span>
+              <small>Quick reference</small>
+              <strong id="button-title">What does this button mean?</strong>
+            </span>
+            <span aria-hidden="true">Open button index</span>
+          </summary>
+          <div class="reference-content">
+            <p>Search the compact Toolkit Bar and common workflow buttons.</p>
+            <label class="button-search" for="buttonSearch">
+              <span>Find a button</span>
+              <input id="buttonSearch" type="search" autocomplete="off" placeholder="Tween, bake, package…">
+            </label>
+            <div id="buttonIndex" class="button-index"></div>
+          </div>
+        </details>
+      </section>
+    </main>
+  </div>
 
   <footer>
-    <span>Built by Amir.</span>
-    <a href="https://followamir.com">Follow Amir at followamir.com</a>
-    <a class="donate" href="https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA">Donate</a>
+    <div>
+      <strong>Aminate Tutorials</strong>
+      <p>One small test. One clear result.</p>
+    </div>
+    <div class="footer-links">
+      <a href="#quick-start">Quick Start</a>
+      <a href="https://followamir.com">Created by Amir</a>
+      <a class="donate" href="https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA">Donate</a>
+    </div>
   </footer>
 
   <script src="docs-data.js"></script>
   <script>
-    const sectionsRoot = document.getElementById("sections");
-    const stripRoot = document.getElementById("toolStrip");
-    const indexRoot = document.getElementById("buttonIndex");
-    const search = document.getElementById("search");
+    (() => {
+      "use strict";
 
-    function list(items) {
-      return "<ul>" + items.map((item) => `<li>${item}</li>`).join("") + "</ul>";
-    }
+      const data = window.AMINATE_DOCS;
+      const categoryMap = {
+        "Start": ["quick-start", "toolkit-bar"],
+        "Set up": ["scene-helpers", "reference-manager", "customization"],
+        "Animate": ["dynamic-parenting", "hand-foot-hold", "surface-contact", "dynamic-pivot", "universal-ikfk", "animation-assistant", "animation-styling"],
+        "Draw & review": ["animators-pencil", "history-timeline", "onion-skin", "video-reference", "timeline-notes", "smear-frames"],
+        "Rig": ["retargeter", "control-picker", "rotation-doctor", "character-skinning", "rig-scale"]
+      };
+      const categoryFor = (id) => Object.entries(categoryMap).find(([, ids]) => ids.includes(id))?.[0] || "Other";
+      const sectionsById = new Map(data.sections.map((section) => [section.id, section]));
+      const lessonRoot = document.getElementById("lesson");
+      const stripRoot = document.getElementById("toolStrip");
+      const mobileStripRoot = document.getElementById("mobileToolStrip");
+      const categoryRoot = document.getElementById("categoryFilters");
+      const faqRoot = document.getElementById("faqList");
+      const indexRoot = document.getElementById("buttonIndex");
+      const search = document.getElementById("search");
+      const buttonSearch = document.getElementById("buttonSearch");
+      const resultCount = document.getElementById("resultCount");
+      const emptyState = document.getElementById("emptyState");
+      const mobileCurrentTitle = document.getElementById("mobileCurrentTitle");
+      const themeToggle = document.getElementById("themeToggle");
+      const themeLabel = document.getElementById("themeLabel");
+      const indexedButtons = [...(data.buttons || [])];
+      let activeCategory = "All";
+      let activeId = "quick-start";
 
-    function mediaItems(section) {
-      return section.mediaItems || [{ type: "image", src: section.media, title: section.title }];
-    }
+      (data.sections || []).forEach((section) => {
+        const label = section.icon || section.short || section.title;
+        const tooltip = `Open ${section.tabTitle || section.title}.`;
+        if (!indexedButtons.some((button) => button.label === label && button.tooltip === tooltip)) {
+          indexedButtons.push({ label, group: "Workflow tab", tooltip });
+        }
+      });
 
-    function renderMedia(section) {
-      return `<div class="media-grid">${mediaItems(section).map((item) => {
-        const title = item.title || section.title;
-        if (item.type === "video") {
+      const escapeHtml = (value) => String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+
+      const mediaItems = (section) => section.mediaItems || [
+        { type: "image", src: section.media, title: `${section.title} screenshot` }
+      ];
+
+      const renderMedia = (section) => (
+        `<div class="media-gallery">${mediaItems(section).map((item, mediaIndex) => {
+          const title = escapeHtml(item.title || section.title);
+          const src = escapeHtml(item.src);
+          const poster = escapeHtml(item.poster || section.media || "");
+          const kind = String(item.type || "image").toLowerCase();
+          if (kind === "video") {
+            return `<figure class="media-item">
+              <div class="media-frame">
+                <video src="${src}" controls playsinline preload="metadata" poster="${poster}">
+                  <a href="${src}">Open the tutorial video</a>
+                </video>
+                <span class="media-type">Video</span>
+              </div>
+              <figcaption>${title}</figcaption>
+            </figure>`;
+          }
+          const type = src.toLowerCase().endsWith(".gif") ? "GIF" : (mediaIndex === 0 ? "Screenshot" : "Example");
           return `<figure class="media-item">
-            <video src="${item.src}" controls preload="metadata" poster="${item.poster || section.media || ""}"></video>
+            <div class="media-frame">
+              <img src="${src}" alt="${title}" loading="${mediaIndex === 0 ? "eager" : "lazy"}">
+              <span class="media-type">${type}</span>
+            </div>
             <figcaption>${title}</figcaption>
           </figure>`;
+        }).join("")}</div>`
+      );
+
+      const renderSteps = (steps) => (
+        `<ol class="lesson-steps">${(steps || []).map((step, index) => (
+          `<li><span>${index + 1}</span><p>${escapeHtml(step)}</p></li>`
+        )).join("")}</ol>`
+      );
+
+      const renderSubsections = (subsections) => {
+        if (!subsections?.length) return "";
+        return `<section class="deep-dive">
+          <h3>Every control, in simple words</h3>
+          <div class="deep-dive-list">${subsections.map((subsection) => (
+            `<details>
+              <summary>
+                <span>${escapeHtml(subsection.title)}</span>
+                <small>${escapeHtml((subsection.items || []).length)} items</small>
+              </summary>
+              <div class="deep-dive-body">
+                <p>${escapeHtml(subsection.intro || "")}</p>
+                <dl>${(subsection.items || []).map((item) => (
+                  `<div><dt>${escapeHtml(item[0])}</dt><dd>${escapeHtml(item[1])}</dd></div>`
+                )).join("")}</dl>
+              </div>
+            </details>`
+          )).join("")}</div>
+        </section>`;
+      };
+
+      const renderLesson = (section) => {
+        const currentIndex = data.sections.findIndex((item) => item.id === section.id);
+        const previous = data.sections[currentIndex - 1];
+        const next = data.sections[currentIndex + 1];
+        return `
+          <header class="lesson-header">
+            <div class="lesson-meta">
+              <span>${escapeHtml(section.number || "")}</span>
+              <span>${escapeHtml(categoryFor(section.id))}</span>
+              <span>${currentIndex + 1} of ${data.sections.length}</span>
+            </div>
+            <h1>${escapeHtml(section.tabTitle || section.title)}</h1>
+            <p>${escapeHtml(section.purpose)}</p>
+          </header>
+
+          <div class="lesson-workspace">
+            <div class="lesson-media">
+              ${renderMedia(section)}
+            </div>
+
+            <div class="lesson-guide">
+              <section class="use-when">
+                <h2>Use it when</h2>
+                <p>${escapeHtml(section.when)}</p>
+              </section>
+
+              <section class="before-you-start">
+                <h2>Before you start</h2>
+                <p>${escapeHtml(section.before || "Save your scene and check the selected object.")}</p>
+              </section>
+
+              <section>
+                <h2>Do this</h2>
+                ${renderSteps(section.steps)}
+              </section>
+
+              <section class="check-result">
+                <h2>Check the result</h2>
+                <div class="result-row">
+                  <strong>What you should see</strong>
+                  <p>${escapeHtml(section.see || "A clear visible result in Maya that matches the lesson.")}</p>
+                </div>
+                <div class="result-row">
+                  <strong>If it looks wrong</strong>
+                  <p>${escapeHtml(section.help || "Undo, check the selection, and try one smaller test.")}</p>
+                </div>
+              </section>
+
+              <section>
+                <h2>Main buttons</h2>
+                <ul class="button-list">${(section.buttons || []).map((button) => (
+                  `<li>${escapeHtml(button)}</li>`
+                )).join("")}</ul>
+              </section>
+
+              ${renderSubsections(section.subsections)}
+
+              <aside class="tip-line">
+                <strong>Small tip</strong>
+                <p>${escapeHtml((section.tips || [])[0] || "Check the result before moving on.")}</p>
+              </aside>
+            </div>
+          </div>
+
+          <nav class="lesson-pagination" aria-label="Lesson pagination">
+            ${previous ? `<a href="#${escapeHtml(previous.id)}"><small>Previous</small><strong>${escapeHtml(previous.tabTitle || previous.title)}</strong></a>` : "<span></span>"}
+            ${next ? `<a class="next" href="#${escapeHtml(next.id)}"><small>Next</small><strong>${escapeHtml(next.tabTitle || next.title)}</strong></a>` : "<span></span>"}
+          </nav>
+        `;
+      };
+
+      const lessonHaystack = (section) => [
+        section.title, section.tabTitle, section.short, section.purpose, section.when,
+        section.before, section.see, section.help, categoryFor(section.id),
+        ...(section.buttons || []), ...(section.steps || []), ...(section.tips || []),
+        ...(section.subsections || []).flatMap((subsection) => [
+          subsection.title, subsection.intro, ...(subsection.items || []).flat()
+        ])
+      ].join(" ").toLowerCase();
+
+      const navMarkup = (section) => `
+        <a href="#${escapeHtml(section.id)}" data-target="${escapeHtml(section.id)}">
+          <span>${escapeHtml(section.number || "")}</span>
+          <span><strong>${escapeHtml(section.tabTitle || section.title)}</strong><small>${escapeHtml(categoryFor(section.id))}</small></span>
+        </a>`;
+
+      const updateFinder = () => {
+        const filter = search.value.trim().toLowerCase();
+        const matches = data.sections.filter((section) => {
+          const categoryMatch = activeCategory === "All" || categoryFor(section.id) === activeCategory;
+          return categoryMatch && (!filter || lessonHaystack(section).includes(filter));
+        });
+        const matchingIds = new Set(matches.map((section) => section.id));
+        [stripRoot, mobileStripRoot].forEach((root) => {
+          root.querySelectorAll("a").forEach((link) => {
+            link.hidden = !matchingIds.has(link.dataset.target);
+          });
+        });
+        resultCount.textContent = `${matches.length} lesson${matches.length === 1 ? "" : "s"} found`;
+        emptyState.hidden = matches.length !== 0;
+        if (filter && matches.length === 1 && matches[0].id !== activeId) {
+          selectLesson(matches[0].id, false);
         }
-        return `<figure class="media-item">
-          <img src="${item.src}" alt="${title} tutorial media" loading="lazy">
-          <figcaption>${title}</figcaption>
-        </figure>`;
-      }).join("")}</div>`;
-    }
+      };
 
-    function render(filterText = "") {
-      const filter = filterText.trim().toLowerCase();
-      const sections = window.AMINATE_DOCS.sections.filter((section) => {
-        const mediaTitles = mediaItems(section).map((item) => item.title || item.src).join(" ");
-        const haystack = [section.title, section.short, section.purpose, section.when, section.buttons.join(" "), section.steps.join(" "), section.tips.join(" "), mediaTitles].join(" ").toLowerCase();
-        return !filter || haystack.includes(filter);
+      const selectLesson = (id, updateHash = true) => {
+        const section = sectionsById.get(id) || data.sections[0];
+        activeId = section.id;
+        lessonRoot.innerHTML = renderLesson(section);
+        mobileCurrentTitle.textContent = section.tabTitle || section.title;
+        document.title = `${section.tabTitle || section.title} — Aminate Tutorials`;
+        [stripRoot, mobileStripRoot].forEach((root) => {
+          root.querySelectorAll("a").forEach((link) => {
+            const selected = link.dataset.target === section.id;
+            link.classList.toggle("is-current", selected);
+            if (selected) link.setAttribute("aria-current", "page");
+            else link.removeAttribute("aria-current");
+          });
+        });
+        if (updateHash) history.replaceState(null, "", `#${section.id}`);
+      };
+
+      const renderButtonIndex = () => {
+        const filter = buttonSearch.value.trim().toLowerCase();
+        const matches = indexedButtons.filter((button) => (
+          !filter || [button.label, button.group, button.tooltip].join(" ").toLowerCase().includes(filter)
+        ));
+        indexRoot.innerHTML = matches.map((button) => (
+          `<article class="index-row">
+            <div><strong>${escapeHtml(button.label)}</strong><span>${escapeHtml(button.group)}</span></div>
+            <p>${escapeHtml(button.tooltip)}</p>
+          </article>`
+        )).join("");
+      };
+
+      const categories = ["All", ...Object.keys(categoryMap)];
+      categoryRoot.innerHTML = categories.map((category) => (
+        `<button type="button" data-category="${escapeHtml(category)}" aria-pressed="${category === "All"}">${escapeHtml(category)}</button>`
+      )).join("");
+      stripRoot.innerHTML = data.sections.map(navMarkup).join("");
+      mobileStripRoot.innerHTML = data.sections.map(navMarkup).join("");
+
+      categoryRoot.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-category]");
+        if (!button) return;
+        activeCategory = button.dataset.category;
+        categoryRoot.querySelectorAll("button").forEach((item) => {
+          item.setAttribute("aria-pressed", String(item === button));
+        });
+        updateFinder();
       });
 
-      stripRoot.innerHTML = window.AMINATE_DOCS.sections.map((section) => (
-        `<a class="tool-chip" href="#${section.id}" title="${section.title}">
-          <span>${section.icon}</span><strong>${section.short}</strong>
-        </a>`
-      )).join("");
-
-      sectionsRoot.innerHTML = sections.map((section) => (
-        `<article class="section tool-card" id="${section.id}">
-          <div class="media-wrap">
-            ${renderMedia(section)}
-          </div>
-          <div class="copy">
-            <p class="eyebrow">${section.short}</p>
-            <h2>${section.title}</h2>
-            <p>${section.purpose}</p>
-            <h3>Use it when</h3>
-            <p>${section.when}</p>
-            <h3>Steps</h3>
-            ${list(section.steps)}
-            <h3>Main buttons</h3>
-            <div class="button-list">${section.buttons.map((button) => `<span>${button}</span>`).join("")}</div>
-            <h3>Tip</h3>
-            ${list(section.tips)}
-          </div>
-        </article>`
-      )).join("");
-
-      const buttons = window.AMINATE_DOCS.buttons.filter((button) => {
-        const haystack = [button.label, button.group, button.tooltip].join(" ").toLowerCase();
-        return !filter || haystack.includes(filter);
+      search.addEventListener("input", updateFinder);
+      buttonSearch.addEventListener("input", renderButtonIndex);
+      window.addEventListener("hashchange", () => {
+        const id = location.hash.slice(1);
+        if (sectionsById.has(id)) selectLesson(id, false);
       });
-      indexRoot.innerHTML = buttons.map((button) => (
-        `<div class="index-row">
-          <strong>${button.label}</strong>
-          <span>${button.group}</span>
-          <p>${button.tooltip}</p>
-        </div>`
-      )).join("");
-    }
 
-    search.addEventListener("input", () => render(search.value));
-    render();
+      faqRoot.innerHTML = (data.faq || []).map((item, index) => (
+        `<details ${index === 0 ? "open" : ""}>
+          <summary><span>${String(index + 1).padStart(2, "0")}</span>${escapeHtml(item.q)}</summary>
+          <p>${escapeHtml(item.a)}</p>
+        </details>`
+      )).join("");
+
+      const themeOrder = ["system", "light", "dark"];
+      const savedTheme = localStorage.getItem("aminate-tutorial-theme");
+      let theme = themeOrder.includes(savedTheme) ? savedTheme : "system";
+      const applyTheme = () => {
+        document.documentElement.dataset.theme = theme;
+        themeLabel.textContent = theme[0].toUpperCase() + theme.slice(1);
+        themeToggle.setAttribute("aria-label", `Colour theme: ${theme}. Change theme`);
+      };
+      themeToggle.addEventListener("click", () => {
+        theme = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length];
+        localStorage.setItem("aminate-tutorial-theme", theme);
+        applyTheme();
+      });
+      document.querySelectorAll('a[href="#faq"]').forEach((link) => {
+        link.addEventListener("click", () => {
+          document.getElementById("faqDisclosure").open = true;
+        });
+      });
+
+      applyTheme();
+      renderButtonIndex();
+      updateFinder();
+      const initialId = sectionsById.has(location.hash.slice(1)) ? location.hash.slice(1) : "quick-start";
+      selectLesson(initialId, false);
+    })();
   </script>
 </body>
 </html>

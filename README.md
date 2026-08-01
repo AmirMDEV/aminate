@@ -1,4 +1,10 @@
+![Aminate mascot](branding/icons/aminate/aminate-pet-icon-256.png)
+
 # Aminate
+
+## Docking layout
+
+Main Aminate panel supports Maya docking plus normal floating use. Aminate Timeline Toolkit Bar stays fixed at Maya bottom, cannot float or move, scrolls on narrow layouts. This split prevents shared dock lifecycle crashes. Docked Aminate uses Maya UI-element mode, so Maya's unsafe native close control stays unavailable in Maya 2026.
 
 By Amir Mansaray
 
@@ -6,7 +12,8 @@ A tabbed Maya toolset for animation workflow helpers.
 
 ## Docs And Wiki
 
-- [Searchable local docs](docs/index.html) cover tutorials, screenshots, GIFs, and button help.
+- [Release-root tutorial and FAQ](tutorial.html) is the simplest offline starting point in the separate tutorial asset.
+- [Searchable local docs](docs/index.html) cover all 23 tabs with child-friendly steps, screenshots, GIFs, videos, expected results, troubleshooting, and button help.
 - [Tracked feature wiki](docs/wiki/README.md) is the canonical full feature map for the private repo, public repo, and release package.
 - [Release process](AMINATE_RELEASE_PROCESS.md) is the required checklist for drag-and-drop update packages.
 - Public project: [AmirMDEV/aminate](https://github.com/AmirMDEV/aminate).
@@ -15,11 +22,11 @@ A tabbed Maya toolset for animation workflow helpers.
 
 The sections in regular use in this release are:
 
-- `Toolkit Bar` for the full dockable Toolkit Bar inside a tab, including History Timeline blocks, Animation Layer controls, timing buttons, Tween Machine, workflow icons, package zip, and Game Animation Mode
+- `Toolkit Bar` for the fixed non-movable bar at Maya's bottom edge, including History Timeline blocks, Animation Layer controls, timing buttons, Tween Machine, workflow icons, package zip, and Game Animation Mode. Narrow Maya windows use horizontal scrolling instead of shrinking controls.
 - `Scene Helpers` for Animation Layer Tint, camera presets, render setup, texture loading, game animation mode, hotkey Floating Channel Box, hotkey Floating Graph Editor, text notes, and teacher demo tools
 - `Reference Manager` for saving the current scene and packaging Maya references, textures, image planes, audio, caches, and a manifest into one zip
 - `Controls Retargeter (Face and Body)` for control-based retarget between rigs
-- `Control Picker` for scene control mapping, grouping, reordering, attr lookup, synced Maya selection, and list / visual control maps
+- `Control Picker` for automatic hierarchy-aware rig scanning, nested body-part selection sets, separate FK/IK limb groups, multi-group selection, editable custom sets, attr lookup, synced Maya selection, and live Front/Side maps built from real control positions
 - `Animators Pencil` for Blue Pencil-style drawing, Photoshop-style shape tools, Camera Notes view keying, layers, frame markers, ghosting, retiming, and scene-native annotation marks
 - `Animation Styling` for Spider-Verse-style held keys, configurable hold length, and timeline warnings when a future hold key would overlap an existing key
 - `History Timeline` for ZBrush-style scene snapshots, restore points, milestone notes, branch tracking, and custom auto-save rules
@@ -29,17 +36,25 @@ The sections in regular use in this release are:
 - `Hand / Foot Hold`, mainly the foot-hold workflow
 - `Timeline Notes`
 
-Other tabs are present in the interface, but they are still closer to preview or in-progress sections at the moment.
+All 23 main tabs now have a plain-language, three-step coach inside Maya and a matching deep-linked lesson in the offline tutorial. The remaining tabs are `Surface Contact`, `Dynamic Pivot`, `Universal IK/FK`, `Animation Styling`, `Character Skinning`, `Rig Scale`, `Video Reference`, `Smear Frames`, and `Customization`.
 
-`Version 0.3.5`
+`Version 0.3.7`
 
-## What Is New In 0.3.5
+## What Is New In 0.3.7
+
+- Animator's Pencil single clicks now create a small dot at the cursor instead of an arbitrary line. Held drags keep the realtime drawing path.
+- Attaching a reference video switches the active main Maya viewport to the video's Pencil View camera while keeping the Reference Viewer independent. Return to the previous camera at any time without hiding the viewer.
+- The Maya drag-and-drop package is self-contained. The offline tutorial is shipped as a separate `Aminate_v0.3.7_offline_tutorial.zip` release asset.
+- These new Pencil and reference-video workflows are in beta testing. The `0.3.7` release itself is not beta-labelled.
+
+## What Is New In 0.3.6
 
 - Release packaging now has stronger static audit coverage, including runtime package parity, installed Maya runtime checks, release ZIP payload hash checks, stale-evidence detection, and report indexing for Maya-family verification evidence.
 - Smear Frames were re-tested against the installed Aminate runtime on Amanda, not only repo modules. The edit handoff now proves selected target vertices can be moved in Maya, active morph/VAT targets isolate correctly, and installed package hashes match the release payload.
-- Aminate dock and Toolkit Bar stability were tightened for normal Maya use: Aminate docks at a usable width, the old global `S` key filter is opt-in, the Toolkit Bar docks to Maya's bottom layout, hover behavior uses safer native tooltips, and existing panels are reused instead of rebuilt where possible.
-- The package release process now tracks `Aminate_v0.3.5.zip` from the manifest tag so future releases do not keep stale ZIP names.
-- The drag-and-drop installer now includes a versioned file name, `Aminate_v0_3_5_drag_this_file_into_Maya.py`, so Maya does not reuse an older cached installer in the same Maya session.
+- Aminate opens in a stable floating Maya window and reuses that same window after close or shelf relaunch. Maya 2026.2 workspace docking requests fall back to the floating window after native dock creation reproduced a `Qt6Core.dll` crash. The old global `S` key filter remains opt-in.
+- Scene Helpers can key selected controls on every frame already keyed by any selected control. Translation and Rotation stay selected by default; scale, visibility, and custom keyable channels stay opt-in.
+- The package release process now tracks `Aminate_v0.3.6.zip` from the manifest tag so future releases do not keep stale ZIP names.
+- The drag-and-drop installer now includes a versioned file name, `Aminate_v0_3_6_drag_this_file_into_Maya.py`, so Maya does not reuse an older cached installer in the same Maya session.
 - The release process now blocks shipping unless the package keeps both manifest files, both installer files, and the versioned drag-and-drop update path.
 
 ## What Was New In 0.3.4
@@ -79,7 +94,7 @@ Other tabs are present in the interface, but they are still closer to preview or
 - `Controls Retargeter (Face and Body)` now works for retargeting animation between controls, between skeletons, from skeletons to controls, and between different rig layouts.
 - `Toolkit Bar` now has the titleless compact bar, custom icons, Game Animation Mode, one-click package zip, animation-layer controls, and a small History Timeline strip.
 - `History Timeline` adds scene snapshot saves, restore points, branch tracking, milestones, per-scene history folders, custom auto-save triggers, and an Auto History toggle for performance.
-- `Control Picker` can scan selected control, geometry, and skeleton roots, group controls by body or face area, sync selection with Maya, and show list plus visual picker views.
+- `Control Picker` can scan almost any character or animal rig, group controls by hierarchy, body area and side, separate FK and IK below limbs and tails, combine several groups, save custom selection sets, sync selection with Maya, and place visual buttons from the rig's real Front or Side positions.
 - `Animators Pencil` adds scene-backed drawing marks, shape tools, marquee selection, camera notes, layers, frame markers, ghosting, and retiming helpers.
 - `Animation Styling` adds Spider-Verse-style key holds so a key can automatically copy its value forward by a configurable number of frames.
 - `Reference Manager` can package the current scene and external files into a zip with clearer missing-file labels and safer copy-only packaging.
@@ -88,13 +103,14 @@ Other tabs are present in the interface, but they are still closer to preview or
 
 ## Install
 
-1. Download `Aminate_v0.3.5.zip` from the latest release.
+1. Download `Aminate_v0.3.7.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `Aminate_v0_3_5_drag_this_file_into_Maya.py` into the Maya viewport.
-6. The tool installs, opens, and docks automatically.
-7. After install, Maya opens Aminate and the Toolkit Bar when Maya starts.
+5. Drag `Aminate_v0_3_7_drag_this_file_into_Maya.py` into the Maya viewport.
+6. In a fresh Maya session, Aminate opens after installation.
+7. If Aminate is already open, the installer preserves that session. Restart Maya before reopening Aminate so it loads the update.
+8. Optionally download `Aminate_v0.3.7_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
 
 ## How To Use
 
@@ -110,7 +126,7 @@ Simple example:
 4. Use `Cut` to remove a key on the current frame.
 5. Use `Zero` to reset selected controls to translate 0, rotate 0, and scale 1.
 6. Use `2s` to bake selected controls every two frames across the playback range.
-7. Use `Open Toolkit Bar` if the small color-coded strip above Maya's timeline is closed.
+7. Use `Open Toolkit Bar` if the fixed color-coded strip at Maya's bottom edge is hidden. The bar cannot float or move; narrow layouts scroll horizontally.
 
 ### Scene Helpers
 
@@ -122,6 +138,8 @@ Floating Channel Box lets you tap `#` by default to open a small semi-transparen
 
 Floating Graph Editor opens a semi-transparent native Maya Graph Editor clone. It uses Maya's real Graph Editor panel, can toggle on and off with a customizable hotkey, and has customizable opacity.
 
+Animation Layers adds four non-destructive review actions. `Duplicate Current Layer` copies every attribute and curve from the selected layer. `Consolidate Other Layers` evaluates every non-current user layer only at the union of its original keyframe times, writes one new muted layer, and preserves the originals. `Solo Current Layer` isolates the selected layer, and `Clear All Layer Solos` restores the full stack.
+
 Game Animation Mode has its own Scene Helpers area. You can choose which setup actions run: 30 fps, realtime playback, Time Slider update view All, autosave backups, active viewports, texture reload, and weighted tangent conversion for existing animated curves.
 
 Simple example:
@@ -130,8 +148,11 @@ Simple example:
 2. Select or change an animation layer in Maya.
 3. The docked Toolkit Bar shows that layer name and tint color above the timeline.
 4. Click the colored layer bar to change the current animation layer, rename it, or pick its color.
-5. Use the blue game button at the far right of the Toolkit Bar for your checked game setup defaults.
-5. Use `Set Up Render Environment` for the helper cameras, light, and cyclorama.
+5. Use the Scene Helpers Animation Layers buttons when you need a safe copy, consolidated comparison layer, or solo review.
+6. Use the blue game button at the far right of the Toolkit Bar for your checked game setup defaults.
+7. Use `Set Up Render Environment` for the helper cameras, light, and cyclorama.
+
+Across Aminate's default baking workflows, source keyframe times are preserved exactly, including fractional frames. Dense whole-frame sampling is reserved for explicit tools such as `2s` Bake On Twos and the optional FBX resampling checkbox.
 
 ### Animation Styling
 
@@ -199,16 +220,21 @@ This section is for drawing animation notes, arcs, contact marks, timing plans, 
 Simple example:
 
 1. Open `Animators Pencil`.
-2. Use `Open Blue Pencil` if you want Maya's native Blue Pencil drawing tools.
-3. Use `Add Layer` for a script-managed layer.
-4. Use `Drawing Tools` for pencil, brush, eraser, text, line, arrow, rectangle, or ellipse.
-5. Use `Shape Tools` for quick line, arrow, rectangle, and ellipse notes with icon buttons.
-6. Pick a color, size, and opacity.
-7. Leave `Key camera when drawing` on if you want Camera Notes to remember the exact view.
-8. Use `Camera Notes` to create the notes camera, key it to the current view, or look through it.
-9. Click `Create Mark` to create a real Maya curve or text mark in front of the current camera.
-10. Use `Add Key`, `Duplicate Previous Key`, `Retime`, `Add Frame Marker`, or `Build Ghosts` for drawing animation timing.
-11. The script-managed marks are real Maya scene nodes, so the scene still shows them even without this script installed.
+2. Use the pinned two-row `Active Drawing` strip above the layer list. Pick a tool and colour, then click `Start Drawing` once. From a normal viewport, Aminate copies that angle into a fixed `Pencil View` camera and creates its camera-specific layer.
+3. Draw in the viewport. Pencil, Brush, Line, Arrow, Rectangle, and Ellipse show a live preview while you drag. Tool, colour, size, percentage opacity, text, and layer changes update the next stroke without rebuilding the drawing context.
+4. Press `E` or select `Eraser`. Choose `Partial Stroke` to cut touched sections or `Whole Stroke` to remove every touched stroke. Locked layers stay protected.
+5. Choose every Pencil and shape tool from the one labelled tool list inside `Active Drawing`. The viewport marking-menu shortcut shown beside the size keys offers the same fast tool access plus `RGB Colour + Swatches...`.
+6. Use the brush-size keys shown beside `Size`. Aminate chooses only unassigned Maya and Qt shortcuts.
+7. Use the visible radius cursor to judge Brush and Eraser size before drawing.
+8. Double-click a layer name or click `Rename` to rename it.
+9. Choose Line, Arrow, Rectangle, or Ellipse in the main tool list. Use `Shape Library` for Circle, Square, Triangle, Cross, Star, and saved presets. Rectangles follow the viewport box you drag instead of inheriting camera skew.
+10. Click `RGB + Swatches` in the pinned strip or marking menu. RGB changes update the next stroke immediately; `Save Current Swatch` stores scene-persistent colours.
+11. New marks use `Current frame only` by default. Turn it off when a drawing should hold on later frames.
+12. Move back to `persp` or another normal camera, choose a new angle, and start drawing again. Aminate saves a second fixed Pencil View and a separate layer. Use `Saved Drawing Views` to switch back at any time.
+13. Enable `Live Onion Skin` for previous and next drawings while scrubbing.
+14. `Stamp Current Tool`, `Shape Library`, text, marquee selection, and `Camera Notes` stay visible inside `Active Drawing`; there is no hidden Advanced Tools section.
+15. Use `Add Key`, `Duplicate Previous Key`, `Retime`, `Add Frame Marker`, or `Build Ghosts` for drawing animation timing.
+16. The script-managed marks are real Maya scene nodes, so the scene still shows them even without this script installed.
 
 Camera Notes example:
 
@@ -235,9 +261,9 @@ Simple example:
 9. The Toolkit Bar history squares keep showing all snapshots, so future work stays visible when you jump back.
 10. Use the Branch menu and `Switch Branch` to jump between different save branches, or `Rename Branch` to give a branch a clearer name.
 11. Check `History size` to see how much disk space the saved scene snapshots use together.
-12. Use `Set Snapshot Cap` to limit automatic history growth. `0` means no cap.
+12. Use `History Timeline Settings` to change the backup cap. New scene histories default to `90` full Maya files; `0` means no cap.
 13. Use `Delete All Snapshots` if you want to clear the scene history folder and remove all small snapshot squares.
-14. By default, Aminate also watches for Maya action changes and saves sidecar snapshots after actions when the scene has already been saved.
+14. Turning on Game Animation Mode asks whether to enable Auto History. Choosing Yes watches for Maya action changes and saves settled sidecar snapshots when the scene has already been saved; choosing No leaves Auto History off.
 15. Use `Auto History Save Rules` to keep full save mode on, or turn it off and tick only the custom triggers you want, such as keyframes, constraints, nodes, animation layers, parenting, references, transforms, or materials.
 16. Notes, colors, branch ids, auto-save rules, and changed-node metadata are stored in the sidecar history folder beside the scene.
 
@@ -292,6 +318,8 @@ Simple example:
 - [Rig Scale](release_screenshots/rig_scale.png)
 - [Video Reference](release_screenshots/video_reference.png)
 - [Timeline Notes](release_screenshots/timeline_notes.png)
+- [Smear Frames](docs/assets/smear_frames.png)
+- [Customization](docs/assets/customization.png)
 
 ## License
 

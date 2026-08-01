@@ -9,7 +9,7 @@ Aminate should feel like a friendly animation companion inside Maya: fast, helpf
 Primary icon:
 
 - `branding/icons/aminate/aminate-pet-icon-source.png`
-- App/shelf runtime icon: `maya_anim_workflow_tools_icon.png`
+- App/shelf runtime icon: `aminate_icon.png`
 - Export sizes: `branding/icons/aminate/aminate-pet-icon-1024.png`, `512`, `256`, `128`, `64`, and `32`
 
 The mascot is a keyframe-diamond animation pet. It should stay centered on a dark rounded tile, with cyan and amber glow accents and a visible timeline/keyframe motif.
@@ -41,7 +41,7 @@ The previous toolbar runtime icon set is preserved under:
 
 The previous Aminate shelf icon is preserved under:
 
-- `branding/icons/aminate/maya_anim_workflow_tools_icon-previous.png`
+- `branding/icons/aminate/aminate_icon-previous.png`
 
 ## Visual Rules
 

@@ -21,10 +21,13 @@ except Exception:
 
 import maya_skinning_cleanup as skin_cleanup
 import maya_timing_tools
+import maya_aminate_theme
 
 
 WINDOW_OBJECT_NAME = "aminateCustomizationWindow"
 WORKSPACE_CONTROL_NAME = WINDOW_OBJECT_NAME + "WorkspaceControl"
+GLOBAL_WINDOW = None
+GLOBAL_CONTROLLER = None
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
@@ -273,19 +276,36 @@ if QtWidgets is not None:
             self.hex_edits = {}
             self.status_label = None
             self.tooltip_preview_card = None
+            self.theme_combo = None
+            self.theme_preview_label = None
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Aminate Customization")
+            self.setMinimumSize(360, 420)
+            self.resize(620, 720)
             self._build_ui()
             self._load_settings()
 
         def _build_ui(self):
-            layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("aminateCustomizationContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            content = QtWidgets.QWidget()
+            content.setMinimumWidth(0)
+            layout = QtWidgets.QVBoxLayout(content)
             layout.setContentsMargins(10, 10, 10, 10)
             layout.setSpacing(8)
             intro = QtWidgets.QLabel("Pick the animation colors once, then apply them to Aminate overlays and any native Maya timeline or Graph Editor color slots Maya exposes.")
             intro.setWordWrap(True)
             layout.addWidget(intro)
-            form = QtWidgets.QGridLayout()
+            self._build_theme_selector(layout)
+            color_group = QtWidgets.QGroupBox("Animation Colors")
+            color_group.setObjectName("aminateCustomizationColorGroup")
+            form = QtWidgets.QGridLayout(color_group)
             form.setHorizontalSpacing(8)
             form.setVerticalSpacing(6)
             form.addWidget(QtWidgets.QLabel("Area"), 0, 0)
@@ -310,7 +330,7 @@ if QtWidgets is not None:
                 self.hex_edits[field["key"]] = edit
                 button.colorChanged.connect(lambda color, key=field["key"]: self._sync_edit_from_button(key, color))
                 edit.editingFinished.connect(lambda key=field["key"]: self._sync_button_from_edit(key))
-            layout.addLayout(form)
+            layout.addWidget(color_group)
             button_row = QtWidgets.QHBoxLayout()
             self.apply_button = QtWidgets.QPushButton("Apply Colors")
             self.apply_button.setObjectName("aminateCustomizationApplyButton")
@@ -340,6 +360,77 @@ if QtWidgets is not None:
                 layout.addLayout(footer)
             self.apply_button.clicked.connect(self._apply)
             self.reset_button.clicked.connect(self._reset)
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
+
+        def _build_theme_selector(self, parent_layout):
+            group = QtWidgets.QGroupBox("Aminate Theme")
+            group.setObjectName("aminateCustomizationThemeGroup")
+            group_layout = QtWidgets.QVBoxLayout(group)
+            group_layout.setContentsMargins(10, 10, 10, 10)
+            row = QtWidgets.QHBoxLayout()
+            label = QtWidgets.QLabel("Theme")
+            label.setObjectName("aminateCustomizationThemeLabel")
+            self.theme_combo = QtWidgets.QComboBox()
+            self.theme_combo.setObjectName("aminateCustomizationThemeCombo")
+            self.theme_combo.setToolTip("Choose the Aminate workbench contrast treatment. The change applies immediately and is remembered in Maya.")
+            self.theme_combo.setMinimumWidth(0)
+            self.theme_combo.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            for descriptor in maya_aminate_theme.available_themes():
+                self.theme_combo.addItem(descriptor["name"], descriptor["name"])
+            row.addWidget(label)
+            row.addWidget(self.theme_combo, 1)
+            group_layout.addLayout(row)
+            helper = QtWidgets.QLabel(
+                "Maya Graphite stays close to the host UI. Studio Contrast deepens the surfaces without per-tool colours or accent borders."
+            )
+            helper.setObjectName("aminateCustomizationThemeHelper")
+            helper.setWordWrap(True)
+            group_layout.addWidget(helper)
+            self.theme_preview_label = QtWidgets.QLabel()
+            self.theme_preview_label.setObjectName("aminateCustomizationThemePreview")
+            self.theme_preview_label.setWordWrap(True)
+            group_layout.addWidget(self.theme_preview_label)
+            parent_layout.addWidget(group)
+            self.theme_combo.currentIndexChanged.connect(self._theme_changed)
+
+        def _load_theme_settings(self):
+            if self.theme_combo is None:
+                return
+            name = maya_aminate_theme.load_theme_name()
+            index = self.theme_combo.findData(name)
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setCurrentIndex(max(0, index))
+            self.theme_combo.blockSignals(False)
+            self._refresh_theme_preview(name)
+
+        def _refresh_theme_preview(self, theme_name=None):
+            if self.theme_preview_label is None:
+                return
+            name = theme_name or str(self.theme_combo.currentData() or maya_aminate_theme.DEFAULT_THEME_NAME)
+            descriptor = next((item for item in maya_aminate_theme.available_themes() if item["name"] == name), None)
+            self.theme_preview_label.setText((descriptor or {}).get("preview", ""))
+
+        def _theme_changed(self, _index):
+            if self.theme_combo is None:
+                return
+            name = maya_aminate_theme.set_theme_name(self.theme_combo.currentData())
+            self._refresh_theme_preview(name)
+            root = self
+            while root is not None:
+                try:
+                    if root.objectName() == "aminateWindow":
+                        apply_theme = getattr(root, "apply_aminate_theme", None)
+                        if callable(apply_theme):
+                            apply_theme(name)
+                        else:
+                            maya_aminate_theme.apply_theme_to_window(root, name)
+                        break
+                    root = root.parentWidget()
+                except Exception:
+                    break
+            if self.status_label is not None:
+                self.status_label.setText("Aminate theme set to {0}.".format(name))
 
         def _build_toolkit_tooltip_preview(self, parent_layout):
             group = QtWidgets.QGroupBox("Toolkit Bar Tooltip Preview")
@@ -415,8 +506,12 @@ if QtWidgets is not None:
             self.tooltip_icon_size_spin.valueChanged.connect(self._refresh_toolkit_tooltip_preview)
             self.tooltip_opacity_spin.valueChanged.connect(self._refresh_toolkit_tooltip_preview)
             self.tooltip_wording_combo.currentIndexChanged.connect(self._refresh_toolkit_tooltip_preview)
+            self.tooltip_icon_size_spin.valueChanged.connect(self._apply_toolkit_tooltip_settings)
+            self.tooltip_opacity_spin.valueChanged.connect(self._apply_toolkit_tooltip_settings)
+            self.tooltip_wording_combo.currentIndexChanged.connect(self._apply_toolkit_tooltip_settings)
 
         def _load_settings(self):
+            self._load_theme_settings()
             settings = self.controller.settings()
             for key, value in settings.items():
                 if key in self.color_buttons:
@@ -465,7 +560,7 @@ if QtWidgets is not None:
                 """
                 QFrame#aminateCustomizationTooltipPreviewCard {{
                     background-color: rgba(23, 25, 28, {alpha});
-                    border: 1px solid #4CC9F0;
+                    border: 1px solid #5C5C5C;
                     border-radius: 8px;
                 }}
                 QLabel#aminateCustomizationTooltipPreviewIcon {{
@@ -510,11 +605,23 @@ if QtWidgets is not None:
 
         def _sync_edit_from_button(self, key, color_hex):
             self.hex_edits[key].setText(_normalize_hex(color_hex, _field_by_key(key)["default"]))
+            self._apply_single_color(key)
 
         def _sync_button_from_edit(self, key):
             color_hex = _normalize_hex(self.hex_edits[key].text(), _field_by_key(key)["default"])
             self.hex_edits[key].setText(color_hex)
             self.color_buttons[key].set_color(color_hex)
+            self._apply_single_color(key)
+
+        def _apply_single_color(self, key):
+            if key not in self.hex_edits:
+                return
+            color_hex = _normalize_hex(self.hex_edits[key].text(), _field_by_key(key)["default"])
+            success, message, report = self.controller.set_color(key, color_hex, apply_now=True)
+            if self.status_label is not None:
+                warning_text = "; ".join(report.get("warnings") or [])
+                self.status_label.setText("{0}{1}".format(message, (" " + warning_text) if warning_text else ""))
+            return success
 
         def _apply(self):
             for key in list(self.hex_edits.keys()):
@@ -532,15 +639,30 @@ if QtWidgets is not None:
             self.status_label.setText("{0}{1}".format(message, (" " + warning_text) if warning_text else ""))
             return success
 
+        def closeEvent(self, event):
+            self.hide()
+            event.ignore()
+
 
 else:
     AminateCustomizationWindow = None
 
 
 def show_aminate_customization():
+    global GLOBAL_WINDOW, GLOBAL_CONTROLLER
     if QtWidgets is None:
         raise RuntimeError("Aminate Customization needs PySide.")
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
     parent = _maya_main_window()
-    window = AminateCustomizationWindow(parent=parent)
-    window.show()
-    return window
+    GLOBAL_CONTROLLER = AminateCustomizationController()
+    GLOBAL_WINDOW = AminateCustomizationWindow(controller=GLOBAL_CONTROLLER, parent=parent)
+    GLOBAL_WINDOW.show()
+    return GLOBAL_WINDOW

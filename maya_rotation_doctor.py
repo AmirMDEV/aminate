@@ -15,13 +15,11 @@ import maya_shelf_utils
 try:
     import maya.cmds as cmds
     import maya.api.OpenMaya as om
-    import maya.mel as mel
     import maya.OpenMayaUI as omui
     MAYA_AVAILABLE = True
 except Exception:
     cmds = None
     om = None
-    mel = None
     omui = None
     MAYA_AVAILABLE = False
 
@@ -79,11 +77,6 @@ def _debug(message):
 def _warning(message):
     if MAYA_AVAILABLE:
         om.MGlobal.displayWarning("[Maya Rotation Doctor] {0}".format(message))
-
-
-def _error(message):
-    if MAYA_AVAILABLE:
-        om.MGlobal.displayError("[Maya Rotation Doctor] {0}".format(message))
 
 
 def _dedupe_preserve_order(items):
@@ -167,13 +160,11 @@ def _open_external_url(url):
 
 def _shelf_button_command(repo_path):
     return (
-        "import importlib\n"
         "import sys\n"
         "repo_path = r\"{0}\"\n"
         "if repo_path not in sys.path:\n"
         "    sys.path.insert(0, repo_path)\n"
         "import maya_rotation_doctor\n"
-        "importlib.reload(maya_rotation_doctor)\n"
         "maya_rotation_doctor.launch_maya_rotation_doctor()\n"
     ).format(repo_path.replace("\\", "\\\\"))
 
@@ -210,29 +201,20 @@ def _maya_main_window():
 def _close_existing_window():
     global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
-
-    if GLOBAL_CONTROLLER:
+    if GLOBAL_WINDOW is not None:
         try:
-            GLOBAL_CONTROLLER.shutdown()
+            GLOBAL_WINDOW.hide()
         except Exception:
             pass
-        GLOBAL_CONTROLLER = None
-
-    if MAYA_AVAILABLE and cmds.workspaceControl(WORKSPACE_CONTROL_NAME, exists=True):
-        try:
-            cmds.deleteUI(WORKSPACE_CONTROL_NAME, control=True)
-        except Exception:
-            pass
-
     if QtWidgets:
         application = QtWidgets.QApplication.instance()
         if application and hasattr(application, "topLevelWidgets"):
             for widget in application.topLevelWidgets():
-                if widget.objectName() == WINDOW_OBJECT_NAME:
-                    widget.close()
-                    widget.deleteLater()
-
-    GLOBAL_WINDOW = None
+                try:
+                    if widget.objectName() == WINDOW_OBJECT_NAME:
+                        widget.hide()
+                except Exception:
+                    pass
 
 
 def _selected_transform_targets():
@@ -954,19 +936,35 @@ if QtWidgets:
             self.clear_button = QtWidgets.QPushButton("Clear List")
             self.clear_button.setToolTip("Clear the current analysis list.")
 
+            for action_button in (
+                self.analyze_button,
+                self.apply_recommended_button,
+                self.euler_cleanup_button,
+                self.flip_current_key_button,
+                self.preserve_spins_button,
+                self.sync_euler_button,
+                self.quaternion_button,
+                self.custom_pass_button,
+                self.clear_button,
+            ):
+                action_button.setMinimumWidth(0)
+                action_button.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+
             button_grid.addWidget(self.analyze_button, 0, 0)
             button_grid.addWidget(self.apply_recommended_button, 0, 1)
-            button_grid.addWidget(self.euler_cleanup_button, 0, 2)
-            button_grid.addWidget(self.flip_current_key_button, 0, 3)
-            button_grid.addWidget(self.preserve_spins_button, 0, 4)
-            button_grid.addWidget(self.sync_euler_button, 1, 0)
-            button_grid.addWidget(self.quaternion_button, 1, 1)
-            button_grid.addWidget(self.custom_pass_button, 1, 2)
-            button_grid.addWidget(self.clear_button, 1, 3)
+            button_grid.addWidget(self.euler_cleanup_button, 1, 0)
+            button_grid.addWidget(self.flip_current_key_button, 1, 1)
+            button_grid.addWidget(self.preserve_spins_button, 2, 0)
+            button_grid.addWidget(self.sync_euler_button, 2, 1)
+            button_grid.addWidget(self.quaternion_button, 3, 0)
+            button_grid.addWidget(self.custom_pass_button, 3, 1)
+            button_grid.addWidget(self.clear_button, 4, 0, 1, 2)
+            button_grid.setColumnStretch(0, 1)
+            button_grid.setColumnStretch(1, 1)
             main_layout.addLayout(button_grid)
 
-            split_layout = QtWidgets.QHBoxLayout()
-            split_layout.setSpacing(10)
+            self.split_layout = QtWidgets.QBoxLayout(QtWidgets.QBoxLayout.LeftToRight)
+            self.split_layout.setSpacing(10)
 
             self.report_tree = QtWidgets.QTreeWidget()
             self.report_tree.setRootIsDecorated(False)
@@ -982,12 +980,15 @@ if QtWidgets:
             self.report_tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
             self.report_tree.header().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
             self.report_tree.header().setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
-            split_layout.addWidget(self.report_tree, 3)
+            self.report_tree.setMinimumWidth(0)
+            self.split_layout.addWidget(self.report_tree, 3)
 
             self.detail_text = QtWidgets.QPlainTextEdit()
             self.detail_text.setReadOnly(True)
-            split_layout.addWidget(self.detail_text, 2)
-            main_layout.addLayout(split_layout, 1)
+            self.detail_text.setMinimumWidth(0)
+            self.split_layout.addWidget(self.detail_text, 2)
+            main_layout.addLayout(self.split_layout, 1)
+            self._update_split_direction()
 
             self.status_label = QtWidgets.QLabel("Pick one or more animated controls, then click Analyze Selected.")
             self.status_label.setWordWrap(True)
@@ -1025,6 +1026,20 @@ if QtWidgets:
             self.clear_button.clicked.connect(self._clear_preview)
             self.report_tree.itemSelectionChanged.connect(self._update_detail_from_selection)
             self.donate_button.clicked.connect(self._open_donate_url)
+
+        def _update_split_direction(self):
+            if not getattr(self, "split_layout", None):
+                return
+            direction = QtWidgets.QBoxLayout.TopToBottom if self.width() < 720 else QtWidgets.QBoxLayout.LeftToRight
+            if self.split_layout.direction() != direction:
+                self.split_layout.setDirection(direction)
+
+        def resizeEvent(self, event):
+            self._update_split_direction()
+            try:
+                super(MayaRotationDoctorWindow, self).resizeEvent(event)
+            except TypeError:
+                QtWidgets.QDialog.resizeEvent(self, event)
 
         def _selected_report_indices(self):
             items = self.report_tree.selectedItems()
@@ -1134,18 +1149,10 @@ if QtWidgets:
                 self._set_status("Could not open the donate link from this Maya session.", False)
 
         def closeEvent(self, event):
-            global GLOBAL_CONTROLLER
-            global GLOBAL_WINDOW
-
-            try:
-                self.controller.shutdown()
-            finally:
-                GLOBAL_CONTROLLER = None
-                GLOBAL_WINDOW = None
-            try:
-                super(MayaRotationDoctorWindow, self).closeEvent(event)
-            except TypeError:
-                QtWidgets.QDialog.closeEvent(self, event)
+            # Keep the Maya-owned wrapper alive.  A native close can invalidate
+            # the workspace control and take Maya down with it.
+            self.hide()
+            event.ignore()
 
 
 def launch_maya_rotation_doctor(dock=False):
@@ -1156,6 +1163,16 @@ def launch_maya_rotation_doctor(dock=False):
         raise RuntimeError("maya_rotation_doctor.launch_maya_rotation_doctor() must run inside Autodesk Maya.")
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
+
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
 
     _close_existing_window()
 

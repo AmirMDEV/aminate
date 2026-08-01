@@ -33,10 +33,10 @@ except Exception:
         shiboken = None
 
 
-HOTKEY_OPTION = "AmirMayaAnimWorkflowFloatingChannelBoxHotkey"
-CHANNEL_OPACITY_OPTION = "AmirMayaAnimWorkflowFloatingChannelBoxOpacity"
-GRAPH_EDITOR_HOTKEY_OPTION = "AmirMayaAnimWorkflowFloatingGraphEditorHotkey"
-GRAPH_EDITOR_OPACITY_OPTION = "AmirMayaAnimWorkflowFloatingGraphEditorOpacity"
+HOTKEY_OPTION = "AmirAminateFloatingChannelBoxHotkey"
+CHANNEL_OPACITY_OPTION = "AmirAminateFloatingChannelBoxOpacity"
+GRAPH_EDITOR_HOTKEY_OPTION = "AmirAminateFloatingGraphEditorHotkey"
+GRAPH_EDITOR_OPACITY_OPTION = "AmirAminateFloatingGraphEditorOpacity"
 DEFAULT_HOTKEY = "#"
 DEFAULT_CHANNEL_OPACITY = 0.84
 LEGACY_DEFAULT_GRAPH_EDITOR_HOTKEYS = ("Ctrl+Alt+G", "Apostrophe", "Semicolon", "Ctrl+Backslash")
@@ -722,22 +722,17 @@ def _set_graph_editor_root_visible(visible):
         return False
     try:
         if cmds.workspaceControl(GRAPH_EDITOR_WORKSPACE_CONTROL_NAME, exists=True):
+            root_widget = _graph_editor_root_widget()
             if visible:
-                cmds.workspaceControl(
-                    GRAPH_EDITOR_WORKSPACE_CONTROL_NAME,
-                    edit=True,
-                    restore=True,
-                    visible=True,
-                )
+                if _qt_object_valid(root_widget):
+                    root_widget.show()
+                    root_widget.raise_()
             else:
-                try:
-                    cmds.workspaceControl(GRAPH_EDITOR_WORKSPACE_CONTROL_NAME, edit=True, close=True)
-                except Exception:
-                    pass
-                try:
-                    cmds.deleteUI(GRAPH_EDITOR_WORKSPACE_CONTROL_NAME, control=True)
-                except Exception:
-                    pass
+                # Keep Maya's native workspace alive.  Hiding its wrapped Qt
+                # widget avoids the crash-prone workspaceControl visibility
+                # edit while preserving fast reuse.
+                if _qt_object_valid(root_widget):
+                    root_widget.hide()
             return True
     except Exception:
         pass
@@ -746,7 +741,7 @@ def _set_graph_editor_root_visible(visible):
             if visible:
                 cmds.window(GRAPH_EDITOR_WINDOW_NAME, edit=True, visible=True)
             else:
-                cmds.deleteUI(GRAPH_EDITOR_WINDOW_NAME, window=True)
+                cmds.window(GRAPH_EDITOR_WINDOW_NAME, edit=True, visible=False)
             return True
     except Exception:
         pass
@@ -1268,6 +1263,11 @@ def _place_graph_editor_near_cursor():
 def _delete_graph_editor_ui():
     if not cmds:
         return
+    # Destructive native cleanup remains an explicit recovery-only escape
+    # hatch.  Normal toggles and launch paths only hide and reuse the editor.
+    if os.environ.get("AMINATE_LEGACY_NATIVE_CLEANUP") != "1":
+        _set_graph_editor_root_visible(False)
+        return
     root_widget = _graph_editor_root_widget()
     if _qt_object_valid(root_widget):
         try:
@@ -1362,6 +1362,17 @@ def _ensure_graph_editor_window():
             _delete_graph_editor_ui()
     if _graph_editor_root_exists():
         return True, "Floating Graph Editor is ready."
+    stale_panel_exists = False
+    try:
+        stale_panel_exists = bool(cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, exists=True))
+    except Exception:
+        pass
+    try:
+        stale_panel_exists = stale_panel_exists or bool(cmds.outlinerPanel(GRAPH_EDITOR_OUTLINER_PANEL_NAME, exists=True))
+    except Exception:
+        pass
+    if stale_panel_exists and os.environ.get("AMINATE_LEGACY_NATIVE_CLEANUP") != "1":
+        return False, "A stale Maya Graph Editor panel exists. Aminate left Maya UI intact; restart Maya before reopening this tool."
     try:
         if cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, exists=True):
             cmds.deleteUI(GRAPH_EDITOR_PANEL_NAME, panel=True)
@@ -1829,6 +1840,12 @@ if QtWidgets:
             success, message = _set_attr_on_nodes(self._target_nodes, attr_name, editor.text())
             self._set_status(message, success)
 
+        def closeEvent(self, event):
+            # The dialog is parented to Maya's main window.  Hide it for the
+            # next hotkey invocation rather than destroying the Qt wrapper.
+            self.hide()
+            event.ignore()
+
 
     class FloatingChannelBoxHotkeyManager(QtCore.QObject):
         def __init__(self, hotkey_text=None, graph_hotkey_text=None, parent=None):
@@ -1918,16 +1935,15 @@ if QtWidgets:
                 except Exception:
                     pass
                 try:
-                    self.graph_shortcut.deleteLater()
+                    self.graph_shortcut.setEnabled(False)
                 except Exception:
                     pass
             self.graph_shortcut = None
             if self.dialog:
                 try:
-                    self.dialog.close()
+                    self.dialog.hide()
                 except Exception:
                     pass
-            self.dialog = None
 
         def toggle(self):
             self.toggle_channel()
@@ -2033,10 +2049,9 @@ def hide_floating_channel_box_and_graph_editor():
         except Exception:
             pass
         try:
-            manager.dialog.close()
+            manager.dialog.hide()
         except Exception:
             pass
-        manager.dialog = None
     try:
         if _graph_editor_root_exists():
             if _graph_editor_root_visible():

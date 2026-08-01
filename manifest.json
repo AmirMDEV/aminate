@@ -1,25 +1,31 @@
 {
   "package_name": "Aminate",
-  "version": "Version 0.3.5",
-  "release_tag": "v0.3.5",
+  "version": "Version 0.3.7",
+  "release_tag": "v0.3.7",
   "license": "Aminate Proprietary Source-Available License",
   "license_file": "LICENSE",
-  "public_repository": "https://github.com/AmirMDEV/aminate-public",
+  "public_repository": "https://github.com/AmirMDEV/aminate",
   "follow_amir": "https://followamir.com",
   "donation_url": "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA",
   "redistribution_notice": "Redistribution is allowed only for unmodified copies that keep the license, copyright, GitHub, followamir.com, and donation links.",
   "modification_notice": "Modification, derivative works, forks, rebranding, and claims of ownership are not permitted without written permission.",
   "installer_files": [
-    "Aminate_v0_3_5_drag_this_file_into_Maya.py",
+    "Aminate_v0_3_7_drag_this_file_into_Maya.py",
     "Aminate drag and drop this onto Maya viewport.py"
   ],
+  "tutorial_file": null,
+  "tutorial_asset": "Aminate_v0.3.7_offline_tutorial.zip",
   "runtime_files": [
-    "maya_anim_workflow_tools.py",
-    "maya_anim_workflow_tools_package_manifest.py",
+    "aminate.py",
+    "aminate_package_manifest.py",
     "maya_animation_assistant.py",
     "maya_animation_styling.py",
+    "maya_aminate_icon_manifest.py",
     "maya_animators_pencil.py",
+    "maya_aminate_pencil_action_groups_bridge.py",
+    "maya_aminate_pencil_view_video_bridge.py",
     "maya_aminate_customization.py",
+    "maya_aminate_theme.py",
     "maya_contact_hold.py",
     "maya_control_picker.py",
     "maya_crash_recovery.py",
@@ -31,6 +37,7 @@
     "maya_onion_skin.py",
     "maya_reference_manager.py",
     "maya_rig_scale_export.py",
+    "maya_selected_animation_fbx_export.py",
     "maya_rotation_doctor.py",
     "maya_shelf_utils.py",
     "maya_skin_transfer.py",
@@ -43,7 +50,7 @@
     "maya_video_reference_tool.py",
     "combine_freeze_pivot_icon.png",
     "game_animation_mode_icon.png",
-    "maya_anim_workflow_tools_icon.png",
+    "aminate_icon.png",
     "toolkit_bake_twos_icon.png",
     "toolkit_clean_static_icon.png",
     "toolkit_cut_key_icon.png",
@@ -56,7 +63,6 @@
     "toolkit_tween_machine_icon.png"
   ],
   "static_dirs": [
-    "branding",
-    "docs"
+    "branding"
   ]
 }

@@ -20,13 +20,11 @@ import maya_shelf_utils
 try:
     import maya.cmds as cmds
     import maya.api.OpenMaya as om
-    import maya.mel as mel
     import maya.OpenMayaUI as omui
     MAYA_AVAILABLE = True
 except Exception:
     cmds = None
     om = None
-    mel = None
     omui = None
     MAYA_AVAILABLE = False
 
@@ -125,11 +123,6 @@ def _debug(message):
 def _warning(message):
     if MAYA_AVAILABLE:
         om.MGlobal.displayWarning("[Maya Onion Skin] {0}".format(message))
-
-
-def _error(message):
-    if MAYA_AVAILABLE:
-        om.MGlobal.displayError("[Maya Onion Skin] {0}".format(message))
 
 
 def _clamp(value, low, high):
@@ -299,13 +292,11 @@ def _open_external_url(url):
 
 def _shelf_button_command(repo_path):
     return (
-        "import importlib\n"
         "import sys\n"
         "repo_path = r\"{0}\"\n"
         "if repo_path not in sys.path:\n"
         "    sys.path.insert(0, repo_path)\n"
         "import maya_onion_skin\n"
-        "importlib.reload(maya_onion_skin)\n"
         "maya_onion_skin.launch_maya_onion_skin()\n"
     ).format(repo_path.replace("\\", "\\\\"))
 
@@ -337,34 +328,6 @@ def _maya_main_window():
     if not main_window:
         return None
     return shiboken.wrapInstance(int(main_window), QtWidgets.QWidget)
-
-
-def _close_existing_window():
-    global GLOBAL_CONTROLLER
-    global GLOBAL_WINDOW
-
-    if GLOBAL_CONTROLLER:
-        try:
-            GLOBAL_CONTROLLER.shutdown()
-        except Exception:
-            pass
-        GLOBAL_CONTROLLER = None
-
-    if MAYA_AVAILABLE and cmds.workspaceControl(WORKSPACE_CONTROL_NAME, exists=True):
-        try:
-            cmds.deleteUI(WORKSPACE_CONTROL_NAME, control=True)
-        except Exception:
-            pass
-
-    if QtWidgets:
-        application = QtWidgets.QApplication.instance()
-        if application and hasattr(application, "topLevelWidgets"):
-            for widget in application.topLevelWidgets():
-                if widget.objectName() == WINDOW_OBJECT_NAME:
-                    widget.close()
-                    widget.deleteLater()
-
-    GLOBAL_WINDOW = None
 
 
 def _dag_path(node_name):
@@ -1870,12 +1833,23 @@ if QtWidgets:
 
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Onion Skin")
-            self.setMinimumWidth(460)
+            self.setMinimumSize(360, 360)
+            self.resize(520, 560)
             self._build_ui()
             self._populate_from_controller()
 
         def _build_ui(self):
-            main_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("mayaOnionSkinContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            content = QtWidgets.QWidget()
+            content.setMinimumWidth(0)
+            main_layout = QtWidgets.QVBoxLayout(content)
             main_layout.setContentsMargins(12, 12, 12, 12)
             main_layout.setSpacing(10)
 
@@ -1945,7 +1919,7 @@ if QtWidgets:
             main_layout.addLayout(form_layout)
 
             button_layout = QtWidgets.QHBoxLayout()
-            self.attach_button = QtWidgets.QPushButton("Attach Selected")
+            self.attach_button = QtWidgets.QPushButton("Use Current Selection")
             self.attach_button.setToolTip("Use the selected character or rig root.")
             self.add_button = QtWidgets.QPushButton("Add Selected")
             self.add_button.setToolTip("Add another selected character or rig root to the onion skin list.")
@@ -1983,6 +1957,8 @@ if QtWidgets:
             )
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
 
             self.attach_button.clicked.connect(self._attach_selected)
             self.add_button.clicked.connect(self._add_selected)
@@ -2124,18 +2100,10 @@ if QtWidgets:
                 _warning(message)
 
         def closeEvent(self, event):
-            global GLOBAL_CONTROLLER
-            global GLOBAL_WINDOW
-
-            try:
-                self.controller.shutdown()
-            finally:
-                GLOBAL_CONTROLLER = None
-                GLOBAL_WINDOW = None
-            try:
-                super(MayaOnionSkinWindow, self).closeEvent(event)
-            except TypeError:
-                QtWidgets.QDialog.closeEvent(self, event)
+            # Keep the Qt wrapper alive. Native Maya workspace destruction can
+            # invalidate callbacks and crash Maya 2026 during close.
+            self.hide()
+            event.ignore()
 
 
 def launch_maya_onion_skin(dock=False):
@@ -2154,14 +2122,22 @@ def launch_maya_onion_skin(dock=False):
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
 
-    _close_existing_window()
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
 
     GLOBAL_CONTROLLER = MayaOnionSkinController()
     GLOBAL_WINDOW = MayaOnionSkinWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())
 
     if dock:
         try:
-            GLOBAL_WINDOW.show(dockable=True, floating=True, area="right")
+            GLOBAL_WINDOW.show(dockable=True, floating=False, area="right")
         except Exception:
             GLOBAL_WINDOW.show()
     else:

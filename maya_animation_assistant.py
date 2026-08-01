@@ -16,15 +16,14 @@ except Exception:
     MAYA_AVAILABLE = False
 
 try:
-    from PySide2 import QtCore, QtGui, QtWidgets
+    from PySide2 import QtCore, QtWidgets
     import shiboken2 as shiboken
 except Exception:
     try:
-        from PySide6 import QtCore, QtGui, QtWidgets
+        from PySide6 import QtCore, QtWidgets
         import shiboken6 as shiboken
     except Exception:
         QtCore = None
-        QtGui = None
         QtWidgets = None
         shiboken = None
 
@@ -174,21 +173,6 @@ def _node_exists(node_name):
 
 def _existing_nodes(node_names):
     return [node_name for node_name in _dedupe(node_names or []) if _node_exists(node_name)]
-
-
-def _maya_main_window():
-    if not (QtWidgets and omui and shiboken):
-        return None
-    try:
-        pointer = omui.MQtUtil.mainWindow()
-    except Exception:
-        pointer = None
-    if not pointer:
-        return None
-    try:
-        return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
-    except Exception:
-        return None
 
 
 def _model_panel_names():
@@ -1159,38 +1143,49 @@ class AnimationAssistantPanel(_QtWidgetBase):
 
         setup_group = QtWidgets.QGroupBox("Pose Balance Assistant")
         setup_layout = QtWidgets.QGridLayout(setup_group)
+        setup_layout.setHorizontalSpacing(8)
+        setup_layout.setVerticalSpacing(6)
 
-        self.enabled_check = QtWidgets.QCheckBox("Show pose balance overlay in the viewport")
+        self.enabled_check = QtWidgets.QCheckBox("Show viewport overlay")
         self.enabled_check.setToolTip("Shows a tiny bottom-right red or green balance indicator in every Maya model viewport and draws the support area in the scene.")
         setup_layout.addWidget(self.enabled_check, 0, 0, 1, 3)
 
-        setup_layout.addWidget(QtWidgets.QLabel("Floor Plane"), 1, 0)
+        setup_layout.addWidget(QtWidgets.QLabel("Floor Plane"), 1, 0, 1, 2)
         self.floor_line = QtWidgets.QLineEdit()
         self.floor_line.setReadOnly(True)
+        self.floor_line.setMinimumWidth(0)
+        self.floor_line.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
         self.floor_line.setPlaceholderText("Pick a floor plane mesh or transform.")
-        setup_layout.addWidget(self.floor_line, 1, 1)
+        setup_layout.addWidget(self.floor_line, 2, 0)
         self.floor_button = QtWidgets.QPushButton("Use Selected")
-        setup_layout.addWidget(self.floor_button, 1, 2)
+        setup_layout.addWidget(self.floor_button, 2, 1)
 
-        setup_layout.addWidget(QtWidgets.QLabel("Center Of Gravity"), 2, 0)
+        setup_layout.addWidget(QtWidgets.QLabel("Center Of Gravity"), 3, 0, 1, 2)
         self.cog_line = QtWidgets.QLineEdit()
         self.cog_line.setReadOnly(True)
+        self.cog_line.setMinimumWidth(0)
+        self.cog_line.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
         self.cog_line.setPlaceholderText("Pick the center of gravity control.")
-        setup_layout.addWidget(self.cog_line, 2, 1)
+        setup_layout.addWidget(self.cog_line, 4, 0)
         self.cog_button = QtWidgets.QPushButton("Use Selected")
-        setup_layout.addWidget(self.cog_button, 2, 2)
+        setup_layout.addWidget(self.cog_button, 4, 1)
 
-        setup_layout.addWidget(QtWidgets.QLabel("Contact Threshold"), 3, 0)
+        setup_layout.addWidget(QtWidgets.QLabel("Contact Threshold"), 5, 0, 1, 2)
         self.threshold_spin = QtWidgets.QDoubleSpinBox()
         self.threshold_spin.setRange(MIN_CONTACT_THRESHOLD, MAX_CONTACT_THRESHOLD)
         self.threshold_spin.setDecimals(3)
         self.threshold_spin.setSingleStep(0.05)
         self.threshold_spin.setSuffix(" units")
         self.threshold_spin.setToolTip("How close a contact point must be to the floor plane before Aminate counts it as touching.")
-        setup_layout.addWidget(self.threshold_spin, 3, 1)
+        setup_layout.addWidget(self.threshold_spin, 6, 0)
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.setToolTip("Force a pose balance refresh now.")
-        setup_layout.addWidget(self.refresh_button, 3, 2)
+        setup_layout.addWidget(self.refresh_button, 6, 1)
+        self.readiness_label = QtWidgets.QLabel()
+        self.readiness_label.setWordWrap(True)
+        self.readiness_label.setObjectName("aminateAnimationAssistantReadiness")
+        setup_layout.addWidget(self.readiness_label, 7, 0, 1, 2)
+        setup_layout.setColumnStretch(0, 1)
 
         layout.addWidget(setup_group)
 
@@ -1212,7 +1207,8 @@ class AnimationAssistantPanel(_QtWidgetBase):
 
         self.help_box = QtWidgets.QPlainTextEdit()
         self.help_box.setReadOnly(True)
-        self.help_box.setMaximumHeight(150)
+        self.help_box.setMinimumHeight(90)
+        self.help_box.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         self.help_box.setPlainText(
             "How it works:\n"
             "1. Pick the floor plane.\n"
@@ -1256,6 +1252,21 @@ class AnimationAssistantPanel(_QtWidgetBase):
             item.setData(QtCore.Qt.UserRole, node_name)
             item.setToolTip(node_name)
             self.contacts_list.addItem(item)
+        missing = []
+        if not config.get("floor_node"):
+            missing.append("floor plane")
+        if not config.get("cog_node"):
+            missing.append("center of gravity")
+        if not config.get("contact_nodes"):
+            missing.append("contact control(s)")
+        if missing:
+            self.readiness_label.setText("Setup needed: {0}. Use the selected-object buttons above, then add contact controls.".format(", ".join(missing)))
+            self.readiness_label.setStyleSheet("color: #FFD166;")
+            self.refresh_button.setEnabled(False)
+        else:
+            self.readiness_label.setText("Ready: floor, center of gravity, and contact controls are configured.")
+            self.readiness_label.setStyleSheet("color: #59D987;")
+            self.refresh_button.setEnabled(True)
 
     def _set_status(self, message, success=True):
         self.status_label.setText(message)

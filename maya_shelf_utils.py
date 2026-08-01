@@ -128,22 +128,31 @@ def install_shelf_button(
     shelf_name=DEFAULT_SHELF_NAME,
     image=DEFAULT_SHELF_ICON,
     style=DEFAULT_SHELF_STYLE,
+    width=None,
+    height=None,
     source_type=DEFAULT_SHELF_SOURCE_TYPE,
 ):
     ensure_maya_available()
     shelf_top = shelf_top_level()
     shelf_layout = resolve_shelf_layout(shelf_top, shelf_name)
     remove_buttons_by_doc_tag(shelf_layout, doc_tag)
+    button_kwargs = {
+        "parent": shelf_layout,
+        "label": button_label,
+        "annotation": annotation,
+        "image": image,
+        "imageOverlayLabel": image_overlay_label,
+        "style": style,
+        "sourceType": source_type,
+        "command": command_text,
+        "docTag": doc_tag,
+    }
+    if width is not None:
+        button_kwargs["width"] = int(width)
+    if height is not None:
+        button_kwargs["height"] = int(height)
     button = cmds.shelfButton(
-        parent=shelf_layout,
-        label=button_label,
-        annotation=annotation,
-        image=image,
-        imageOverlayLabel=image_overlay_label,
-        style=style,
-        sourceType=source_type,
-        command=command_text,
-        docTag=doc_tag,
+        **button_kwargs
     )
     cmds.shelfTabLayout(shelf_top, edit=True, selectTab=shelf_layout)
     shelf_file_path = save_shelf(shelf_top, shelf_layout)

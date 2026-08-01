@@ -8,14 +8,18 @@ import traceback
 
 
 PACKAGE_FOLDER_NAME = "Aminate"
-PAYLOAD_DIR_NAME = "maya_anim_workflow_tools_package"
+PAYLOAD_DIR_NAME = "aminate_package"
 DEFAULT_MANIFEST_FILE_NAME = "manifest.json"
 DEFAULT_RUNTIME_FILES = [
-    "maya_anim_workflow_tools.py",
-    "maya_anim_workflow_tools_package_manifest.py",
+    "aminate.py",
+    "aminate_package_manifest.py",
     "maya_aminate_customization.py",
+    "maya_aminate_theme.py",
     "maya_animation_assistant.py",
     "maya_animation_styling.py",
+    "maya_aminate_icon_manifest.py",
+    "maya_aminate_pencil_action_groups_bridge.py",
+    "maya_aminate_pencil_view_video_bridge.py",
     "maya_animators_pencil.py",
     "maya_contact_hold.py",
     "maya_control_picker.py",
@@ -28,6 +32,7 @@ DEFAULT_RUNTIME_FILES = [
     "maya_onion_skin.py",
     "maya_reference_manager.py",
     "maya_rig_scale_export.py",
+    "maya_selected_animation_fbx_export.py",
     "maya_rotation_doctor.py",
     "maya_shelf_utils.py",
     "maya_skin_transfer.py",
@@ -40,7 +45,7 @@ DEFAULT_RUNTIME_FILES = [
     "maya_video_reference_tool.py",
     "combine_freeze_pivot_icon.png",
     "game_animation_mode_icon.png",
-    "maya_anim_workflow_tools_icon.png",
+    "aminate_icon.png",
     "toolkit_bake_twos_icon.png",
     "toolkit_clean_static_icon.png",
     "toolkit_cut_key_icon.png",
@@ -54,7 +59,6 @@ DEFAULT_RUNTIME_FILES = [
 ]
 DEFAULT_STATIC_DIRS = [
     "branding",
-    "docs",
 ]
 
 
@@ -111,8 +115,8 @@ def _managed_user_setup_block(destination_root):
             "            pass",
             "        if os.environ.get('AMINATE_AUTO_OPEN_ON_MAYA_STARTUP') == '1':",
             "            try:",
-            "                import maya_anim_workflow_tools as _amir_maya_anim_workflow_tools",
-            "                _amir_maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=False, initial_tab='quick_start')",
+            "                import aminate as _amir_aminate",
+            "                _amir_aminate.launch_aminate(dock=True, initial_tab='quick_start')",
             "            except Exception:",
             "                pass",
             "    def _amir_workflow_wait_for_startup(attempt=0):",
@@ -184,7 +188,7 @@ def _load_manifest(source_root):
             manifest_path = sibling_manifest
     if not os.path.exists(manifest_path):
         try:
-            from maya_anim_workflow_tools_package_manifest import (
+            from aminate_package_manifest import (
                 MANIFEST_FILE_NAME as package_manifest_file_name,
                 RELEASE_VERSION_LABEL,
                 RUNTIME_FILES,
@@ -214,6 +218,16 @@ def _install_root(cmds):
     return os.path.join(scripts_dir, PACKAGE_FOLDER_NAME)
 
 
+def _same_path(left, right):
+    """Return True when two paths resolve to the same file-system entry."""
+    try:
+        return os.path.normcase(os.path.realpath(left)) == os.path.normcase(
+            os.path.realpath(right)
+        )
+    except (OSError, TypeError):
+        return False
+
+
 def _copy_runtime_files(source_root, destination_root, runtime_files):
     if not os.path.isdir(destination_root):
         os.makedirs(destination_root)
@@ -221,14 +235,18 @@ def _copy_runtime_files(source_root, destination_root, runtime_files):
         source_path = os.path.join(source_root, file_name)
         if not os.path.exists(source_path):
             raise RuntimeError("Missing runtime file in installer payload: {0}".format(file_name))
-        shutil.copy2(source_path, os.path.join(destination_root, file_name))
+        destination_path = os.path.join(destination_root, file_name)
+        if not _same_path(source_path, destination_path):
+            shutil.copy2(source_path, destination_path)
     manifest_path = os.path.join(source_root, DEFAULT_MANIFEST_FILE_NAME)
     if not os.path.exists(manifest_path):
         sibling_manifest = os.path.join(os.path.dirname(source_root), DEFAULT_MANIFEST_FILE_NAME)
         if os.path.exists(sibling_manifest):
             manifest_path = sibling_manifest
     if os.path.exists(manifest_path):
-        shutil.copy2(manifest_path, os.path.join(destination_root, DEFAULT_MANIFEST_FILE_NAME))
+        destination_path = os.path.join(destination_root, DEFAULT_MANIFEST_FILE_NAME)
+        if not _same_path(manifest_path, destination_path):
+            shutil.copy2(manifest_path, destination_path)
 
 
 def _copy_static_dirs(source_root, destination_root, static_dirs):
@@ -239,6 +257,8 @@ def _copy_static_dirs(source_root, destination_root, static_dirs):
         if not os.path.isdir(source_path):
             raise RuntimeError("Missing static directory in installer payload: {0}".format(dir_name))
         destination_path = os.path.join(destination_root, dir_name)
+        if _same_path(source_path, destination_path):
+            continue
         if os.path.isdir(destination_path):
             shutil.rmtree(destination_path)
         shutil.copytree(source_path, destination_path)
@@ -257,10 +277,12 @@ def _copy_installer_files(source_root, destination_root, manifest):
             source_path = current_path
         if not os.path.exists(source_path):
             continue
-        shutil.copy2(source_path, os.path.join(destination_root, file_name))
+        destination_path = os.path.join(destination_root, file_name)
+        if not _same_path(source_path, destination_path):
+            shutil.copy2(source_path, destination_path)
 
 
-def install_maya_anim_workflow_tools_from_dragdrop():
+def install_aminate_from_dragdrop():
     cmds = _maya_api()
     source_root = _source_root()
     manifest = _load_manifest(source_root)
@@ -275,27 +297,25 @@ def install_maya_anim_workflow_tools_from_dragdrop():
         sys.path.remove(destination_root)
     sys.path.insert(0, destination_root)
 
-    for stale_module_name in ("maya_dynamic_parent_pivot", "maya_anim_workflow_tools"):
-        stale_module = sys.modules.get(stale_module_name)
-        if stale_module:
-            stale_impl = getattr(stale_module, "_impl", stale_module)
-            stale_close = getattr(stale_impl, "_close_existing_window", None)
-            if stale_close:
-                try:
-                    stale_close()
-                except Exception:
-                    pass
-    import maya_anim_workflow_tools
+    aminate = sys.modules.get("aminate")
+    restart_required = aminate is not None
+    if aminate is None:
+        import aminate
 
-    import maya_crash_recovery
     if os.environ.get("AMINATE_ENABLE_STARTUP_RECOVERY") == "1":
+        import maya_crash_recovery
         _ensure_user_setup_hook(cmds, destination_root)
         maya_crash_recovery.bootstrap_crash_recovery(startup_prompt=False)
-    button_name = maya_anim_workflow_tools.install_maya_anim_workflow_tools_shelf_button(repo_path=destination_root)
-    window = maya_anim_workflow_tools.launch_maya_anim_workflow_tools(dock=False)
+    button_name = aminate.install_aminate_shelf_button(repo_path=destination_root)
+    window = None
+    if not restart_required:
+        window = aminate.launch_aminate(dock=True, initial_tab="quick_start")
     version = manifest.get("version") or "unknown"
+    install_message = 'Installed <hl>Aminate</hl> {0}'.format(version)
+    if restart_required:
+        install_message += '. Restart Maya before reopening Aminate.'
     cmds.inViewMessage(
-        amg='Installed <hl>Aminate</hl> {0}'.format(version),
+        amg=install_message,
         pos="midCenterTop",
         fade=True,
     )
@@ -304,6 +324,7 @@ def install_maya_anim_workflow_tools_from_dragdrop():
         "destination_root": destination_root,
         "version": version,
         "window_title": window.windowTitle() if window else "",
+        "restart_required": restart_required,
     }
 
 
@@ -315,8 +336,8 @@ def _evict_this_drop_module():
 
 def onMayaDroppedPythonFile(*_args):
     try:
-        result = install_maya_anim_workflow_tools_from_dragdrop()
-        print("MAYA_ANIM_WORKFLOW_TOOLS_DRAGDROP_INSTALL: {0}".format(json.dumps(result, sort_keys=True)))
+        result = install_aminate_from_dragdrop()
+        print("AMINATE_DRAGDROP_INSTALL: {0}".format(json.dumps(result, sort_keys=True)))
     except Exception:
         traceback.print_exc()
         raise
@@ -326,8 +347,8 @@ def onMayaDroppedPythonFile(*_args):
 
 if __name__ == "__main__":
     try:
-        result = install_maya_anim_workflow_tools_from_dragdrop()
-        print("MAYA_ANIM_WORKFLOW_TOOLS_DRAGDROP_INSTALL: {0}".format(json.dumps(result, sort_keys=True)))
+        result = install_aminate_from_dragdrop()
+        print("AMINATE_DRAGDROP_INSTALL: {0}".format(json.dumps(result, sort_keys=True)))
     except Exception:
         traceback.print_exc()
         raise

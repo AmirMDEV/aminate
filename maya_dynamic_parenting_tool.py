@@ -38,6 +38,11 @@ except Exception:
 
 
 WINDOW_OBJECT_NAME = "mayaDynamicParentingWindow"
+DYNAMIC_PARENTING_MIN_WIDTH = 420
+DYNAMIC_PARENTING_MIN_HEIGHT = 420
+DYNAMIC_PARENTING_OBJECT_LIST_HEIGHT = 58
+DYNAMIC_PARENTING_TARGET_LIST_MIN_HEIGHT = 104
+DYNAMIC_PARENTING_TARGET_LIST_MAX_HEIGHT = 190
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
@@ -1455,233 +1460,236 @@ if QtWidgets:
             self._weight_widgets = {}
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Dynamic Parenting")
-            self.setMinimumWidth(720)
-            self.setMinimumHeight(560)
+            self.setMinimumWidth(DYNAMIC_PARENTING_MIN_WIDTH)
+            self.setMinimumHeight(DYNAMIC_PARENTING_MIN_HEIGHT)
             self._build_ui()
             self._sync_from_controller()
 
         def _build_ui(self):
-            main_layout = QtWidgets.QVBoxLayout(self)
+            root_layout = QtWidgets.QVBoxLayout(self)
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            scroll_area = QtWidgets.QScrollArea(self)
+            scroll_area.setObjectName("aminateDynamicParentingScroll")
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAlwaysOff", QtCore.Qt.ScrollBarAlwaysOff))
+            scroll_area.setVerticalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
+            scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+            content_widget = QtWidgets.QWidget()
+            content_widget.setObjectName("aminateDynamicParentingContent")
+            content_widget.setMinimumWidth(0)
+            content_widget.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+            main_layout = QtWidgets.QVBoxLayout(content_widget)
+            main_layout.setContentsMargins(6, 6, 6, 6)
+            main_layout.setSpacing(6)
+
+            # Keep the first viewport about the real task: choose a prop,
+            # choose a target row, then switch on the next frame without a
+            # pop.  Setup help and destructive/history actions live below More.
             intro = QtWidgets.QLabel(
-                "Make one object switch between hand, gun, world, or any other parent."
+                "Select a prop, choose a parent target, then switch on the next frame without a pop."
             )
+            intro.setObjectName("aminateDynamicParentingIntro")
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
 
-            step_box = QtWidgets.QGroupBox("How To Use")
-            step_layout = QtWidgets.QVBoxLayout(step_box)
-            for text in (
-                "1. Pick the object that should move. Example: the magazine.",
-                "2. Leave Stay In Current Position At Start? on if you want it to stay where it is when you add it.",
-                "3. Click Add Object.",
-                "4. Pick the new parent. Example: the gun or the hand.",
-                "5. Click Pick Parent.",
-                "6. Choose one of these:",
-                "   - Click Snap To Parent if you want the object to jump onto that parent now and remember that pose.",
-                "   - Or leave the object where you want it, keep Maintain Current Offset on, and then click Switch to this Parent.",
-                "7. Click World if you want it to stop following everything.",
-                "8. If you want to delete one saved switch, open More, pick it in History, and click Delete Picked Switch.",
-                "9. If you want to remove the whole setup, click Remove Object. This deletes this tool's constraints for that object.",
-            ):
-                label = QtWidgets.QLabel(text)
-                label.setWordWrap(True)
-                step_layout.addWidget(label)
-            example_label = QtWidgets.QLabel(
-                "Example: Gun + Magazine\n"
-                "Keep it exactly where it is:\n"
-                "1. Pick the magazine.\n"
-                "2. Leave Stay In Current Position At Start? on.\n"
-                "3. Click Add Object.\n"
-                "4. Pick the gun.\n"
-                "5. Click Pick Parent.\n"
-                "6. Put the magazine exactly where you want it.\n"
-                "7. Leave Maintain Current Offset on.\n"
-                "8. Click Switch to this Parent.\n"
-                "9. On the next frame, it follows the gun but stays in that exact place.\n\n"
-                "Snap it onto the gun first:\n"
-                "1. Pick the magazine.\n"
-                "2. Click Add Object.\n"
-                "3. Pick the gun.\n"
-                "4. Click Pick Parent.\n"
-                "5. Click Snap To Parent.\n"
-                "6. If needed, move it a little more.\n"
-                "7. Click Switch to this Parent.\n\n"
-                "Take it out with the hand:\n"
-                "1. Pick the hand.\n"
-                "2. Click Pick Parent.\n"
-                "3. Move the magazine if needed.\n"
-                "4. Click Switch to this Parent.\n\n"
-                "Let go:\n"
-                "1. Click World.\n\n"
-                "Delete one switch:\n"
-                "1. Open More.\n"
-                "2. Pick the switch in History.\n"
-                "3. Click Delete Picked Switch."
-            )
-            example_label.setWordWrap(True)
-            step_layout.addWidget(example_label)
-            main_layout.addWidget(step_box)
-
-            object_row = QtWidgets.QHBoxLayout()
+            object_group = QtWidgets.QGroupBox("Current Object")
+            object_layout = QtWidgets.QGridLayout(object_group)
+            object_layout.setContentsMargins(6, 6, 6, 6)
+            object_layout.setHorizontalSpacing(6)
+            object_layout.setVerticalSpacing(4)
             self.objects_line = QtWidgets.QLineEdit()
             self.objects_line.setReadOnly(True)
             self.objects_line.setPlaceholderText("Pick the object that should switch parents, then add it here.")
             self.add_object_button = QtWidgets.QPushButton("Add Object")
             self.remove_object_button = QtWidgets.QPushButton("Remove Object")
             self.remove_object_button.setToolTip("Remove this object from Dynamic Parenting. This deletes this tool's constraints and saved switches for it.")
-            object_row.addWidget(QtWidgets.QLabel("Move Object"))
-            object_row.addWidget(self.objects_line, 1)
-            object_row.addWidget(self.add_object_button)
-            object_row.addWidget(self.remove_object_button)
-            main_layout.addLayout(object_row)
-
             self.start_in_place_check = QtWidgets.QCheckBox("Stay In Current Position At Start?")
             self.start_in_place_check.setChecked(True)
             self.start_in_place_check.setToolTip("Leave this on if Add Object should keep the object exactly where it is right now. Turn it off if you want it to start from World.")
-            main_layout.addWidget(self.start_in_place_check)
-
-            list_row = QtWidgets.QHBoxLayout()
             self.object_list = QtWidgets.QListWidget()
             self.object_list.setToolTip("Every saved object in this scene that uses parent switching.")
-            list_row.addWidget(self.object_list, 1)
-            name_column = QtWidgets.QVBoxLayout()
-            self.list_name_line = QtWidgets.QLineEdit()
-            self.list_name_line.setPlaceholderText("Magazine")
-            self.rename_button = QtWidgets.QPushButton("Rename")
-            name_column.addWidget(QtWidgets.QLabel("Label"))
-            name_column.addWidget(self.list_name_line)
-            name_column.addWidget(self.rename_button)
-            name_column.addStretch(1)
-            list_row.addLayout(name_column)
-            main_layout.addLayout(list_row)
+            self.object_list.setMinimumHeight(0)
+            self.object_list.setMaximumHeight(DYNAMIC_PARENTING_OBJECT_LIST_HEIGHT)
+            self.object_list.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAlwaysOff", QtCore.Qt.ScrollBarAlwaysOff))
+            self.object_list.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+            object_layout.addWidget(QtWidgets.QLabel("Object"), 0, 0)
+            object_layout.addWidget(self.objects_line, 0, 1, 1, 3)
+            object_layout.addWidget(self.add_object_button, 1, 0, 1, 2)
+            object_layout.addWidget(self.start_in_place_check, 1, 2, 1, 2)
+            object_layout.addWidget(QtWidgets.QLabel("Saved props"), 2, 0)
+            object_layout.addWidget(self.object_list, 2, 1, 1, 3)
+            main_layout.addWidget(object_group)
 
-            self.maintain_offset_check = QtWidgets.QCheckBox("Maintain Current Offset")
-            self.maintain_offset_check.setChecked(True)
-            self.maintain_offset_check.setToolTip("Leave this on if the object should stay where it is when the new parent turns on. Turn it off if it should snap.")
-            main_layout.addWidget(self.maintain_offset_check)
-            keep_position_hint = QtWidgets.QLabel(
-                "Stay In Current Position At Start?: when you first add the object, keep it where it is right now.\n"
-                "Maintain Current Offset: keep the object exactly where it is, then switch.\n"
-                "Snap To Parent: move it onto the parent first and save that pose for the next switch.\n"
-                "Scale Safe: this tool should not change the object's scale."
-            )
-            keep_position_hint.setWordWrap(True)
-            main_layout.addWidget(keep_position_hint)
-
-            target_row = QtWidgets.QHBoxLayout()
+            target_group = QtWidgets.QGroupBox("Parent Targets")
+            target_layout = QtWidgets.QVBoxLayout(target_group)
+            target_layout.setContentsMargins(6, 6, 6, 6)
+            target_layout.setSpacing(5)
+            target_row = QtWidgets.QGridLayout()
+            target_row.setHorizontalSpacing(6)
             self.target_line = QtWidgets.QLineEdit()
             self.target_line.setReadOnly(True)
             self.target_line.setPlaceholderText("Pick a hand, gun, or other thing to follow.")
             self.use_target_button = QtWidgets.QPushButton("Pick Parent")
             self.use_target_button.setToolTip("Take the thing you picked and put it into the Parent To box.")
+            self.parent_to_picked_button = QtWidgets.QPushButton("Switch to this Parent")
+            self.parent_to_picked_button.setToolTip("Keep the old parent on this frame, then turn this picked parent on next frame.")
             self.snap_to_picked_button = QtWidgets.QPushButton("Snap To Parent")
             self.snap_to_picked_button.setToolTip("Move the object onto this parent now and remember that pose for the next switch.")
             self.save_offset_button = QtWidgets.QPushButton("Save This Offset")
             self.save_offset_button.setToolTip("After you move the object where you want it, save that pose as the offset for this parent.")
-            self.parent_to_picked_button = QtWidgets.QPushButton("Switch to this Parent")
-            self.parent_to_picked_button.setToolTip("Keep the old parent on this frame, then turn this picked parent on next frame.")
             self.add_target_button = QtWidgets.QPushButton("Add Parent")
             self.add_target_button.setToolTip("Remember this parent so you can switch to it later.")
-            target_row.addWidget(QtWidgets.QLabel("Parent To"))
-            target_row.addWidget(self.target_line, 1)
-            target_row.addWidget(self.use_target_button)
-            target_row.addWidget(self.parent_to_picked_button)
-            target_row.addWidget(self.snap_to_picked_button)
-            target_row.addWidget(self.save_offset_button)
-            main_layout.addLayout(target_row)
+            target_row.addWidget(QtWidgets.QLabel("Pending parent"), 0, 0)
+            target_row.addWidget(self.target_line, 0, 1, 1, 3)
+            target_row.addWidget(self.use_target_button, 1, 0, 1, 2)
+            target_row.addWidget(QtWidgets.QLabel("Select a row below to change the active parent."), 1, 2, 1, 2)
+            target_layout.addLayout(target_row)
 
+            self.maintain_offset_check = QtWidgets.QCheckBox("Maintain Current Offset")
+            self.maintain_offset_check.setChecked(True)
+            self.maintain_offset_check.setToolTip("Leave this on if the object should stay where it is when the new parent turns on. Turn it off if it should snap.")
+            target_layout.addWidget(self.maintain_offset_check)
+
+            self.parent_to_row_button = QtWidgets.QPushButton("Reparent to Selected Parent")
+            self.parent_to_row_button.setProperty("aminateRole", "primary")
+            self.parent_to_row_button.setMinimumHeight(28)
+            self.parent_to_row_button.setToolTip("Switch to the selected parent on the next frame without a pop. Keep Maintain Current Offset on to preserve the current pose.")
+            target_layout.addWidget(self.parent_to_row_button)
             switch_hint = QtWidgets.QLabel(
-                "Easy offset workflow:\n"
-                "1. Pick Parent.\n"
-                "2. Move the object where you want it to sit on that parent.\n"
-                "3. Click Save This Offset.\n"
-                "4. Later, Snap To Parent or Switch to this Parent."
+                "Choose a target row, then switch on the next frame without a pop."
             )
             switch_hint.setWordWrap(True)
-            main_layout.addWidget(switch_hint)
+            switch_hint.setProperty("aminateRole", "muted")
+            target_layout.addWidget(switch_hint)
 
             self.targets_table = QtWidgets.QTableWidget(0, 4)
+            self.targets_table.setObjectName("aminateDynamicParentingTargets")
             self.targets_table.setHorizontalHeaderLabels(["Parent", "Weight", "On", "Switch"])
             self.targets_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             self.targets_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
             self.targets_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            self.targets_table.setWordWrap(False)
+            self.targets_table.setTextElideMode(_qt_flag("TextElideMode", "ElideRight", QtCore.Qt.ElideRight))
+            self.targets_table.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAlwaysOff", QtCore.Qt.ScrollBarAlwaysOff))
+            self.targets_table.setMinimumHeight(DYNAMIC_PARENTING_TARGET_LIST_MIN_HEIGHT)
+            self.targets_table.setMaximumHeight(DYNAMIC_PARENTING_TARGET_LIST_MAX_HEIGHT)
+            self.targets_table.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             header = self.targets_table.horizontalHeader()
             header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
             header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
             header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
             header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
-            main_layout.addWidget(self.targets_table, 1)
-
-            action_row = QtWidgets.QHBoxLayout()
-            self.parent_to_row_button = QtWidgets.QPushButton("Reparent to Selected Parent")
-            self.parent_to_row_button.setToolTip("Use the parent row you picked and switch to it on the next frame.")
-            self.save_offset_row_button = QtWidgets.QPushButton("Save Offset For Selected Parent")
-            self.save_offset_row_button.setToolTip("Save the object's current pose as the offset for the parent row you picked.")
-            self.parent_to_world_button = QtWidgets.QPushButton("World")
-            self.parent_to_world_button.setToolTip("Stop following everything and switch to World on the next frame.")
-            action_row.addWidget(self.parent_to_row_button)
-            action_row.addWidget(self.save_offset_row_button)
-            action_row.addWidget(self.parent_to_world_button)
-            main_layout.addLayout(action_row)
+            target_layout.addWidget(self.targets_table, 1)
+            main_layout.addWidget(target_group, 1)
 
             self.advanced_toggle = QtWidgets.QToolButton()
             self.advanced_toggle.setText("More")
             self.advanced_toggle.setCheckable(True)
             self.advanced_toggle.setChecked(False)
             self.advanced_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+            self.advanced_toggle.setToolTip("Show setup, offset, blending, history, and removal actions.")
             main_layout.addWidget(self.advanced_toggle)
 
             self.advanced_widget = QtWidgets.QWidget()
+            self.advanced_widget.setObjectName("aminateDynamicParentingMore")
             self.advanced_widget.setVisible(False)
             advanced_layout = QtWidgets.QVBoxLayout(self.advanced_widget)
             advanced_layout.setContentsMargins(0, 0, 0, 0)
+            advanced_layout.setSpacing(6)
 
-            advanced_actions = QtWidgets.QHBoxLayout()
-            self.add_target_button.setParent(self.advanced_widget)
+            setup_group = QtWidgets.QGroupBox("Setup & Fine Control")
+            setup_layout = QtWidgets.QVBoxLayout(setup_group)
+            setup_layout.setContentsMargins(6, 6, 6, 6)
+            setup_layout.setSpacing(5)
+            setup_name_row = QtWidgets.QHBoxLayout()
+            self.list_name_line = QtWidgets.QLineEdit()
+            self.list_name_line.setPlaceholderText("Magazine")
+            self.rename_button = QtWidgets.QPushButton("Rename")
+            setup_name_row.addWidget(QtWidgets.QLabel("Label"))
+            setup_name_row.addWidget(self.list_name_line, 1)
+            setup_name_row.addWidget(self.rename_button)
+            setup_layout.addLayout(setup_name_row)
+
+            advanced_actions = QtWidgets.QGridLayout()
+            advanced_actions.setHorizontalSpacing(6)
+            advanced_actions.setVerticalSpacing(4)
+            advanced_actions.addWidget(self.remove_object_button, 0, 0, 1, 2)
+            advanced_actions.addWidget(self.parent_to_picked_button, 0, 2, 1, 2)
+            advanced_actions.addWidget(self.add_target_button, 1, 0, 1, 2)
+            advanced_actions.addWidget(self.snap_to_picked_button, 1, 2, 1, 2)
+            advanced_actions.addWidget(self.save_offset_button, 2, 0, 1, 2)
+            self.save_offset_row_button = QtWidgets.QPushButton("Save Offset For Selected Parent")
+            self.save_offset_row_button.setToolTip("Save the object's current pose as the offset for the parent row you picked.")
+            advanced_actions.addWidget(self.save_offset_row_button, 2, 2, 1, 2)
+            self.parent_to_world_button = QtWidgets.QPushButton("World")
+            self.parent_to_world_button.setToolTip("Stop following everything and switch to World on the next frame.")
+            advanced_actions.addWidget(self.parent_to_world_button, 3, 0, 1, 2)
             self.apply_weights_button = QtWidgets.QPushButton("Blend Parents")
             self.apply_weights_button.setToolTip("Save the weights you see now on this frame, like half gun and half World.")
+            advanced_actions.addWidget(self.apply_weights_button, 3, 2, 1, 2)
             self.fix_pop_button = QtWidgets.QPushButton("Fix Jump Here")
             self.fix_pop_button.setToolTip("If the object pops on this frame, click this to rebuild the current follow setup here.")
+            advanced_actions.addWidget(self.fix_pop_button, 4, 0, 1, 2)
             self.remove_target_button = QtWidgets.QPushButton("Forget Parent")
             self.remove_target_button.setToolTip("Remove the picked parent row from this object's saved parent list.")
-            advanced_actions.addWidget(self.add_target_button)
-            advanced_actions.addWidget(self.apply_weights_button)
-            advanced_actions.addWidget(self.fix_pop_button)
-            advanced_actions.addWidget(self.remove_target_button)
-            advanced_layout.addLayout(advanced_actions)
+            advanced_actions.addWidget(self.remove_target_button, 4, 2, 1, 2)
+            setup_layout.addLayout(advanced_actions)
+            advanced_layout.addWidget(setup_group)
+
+            step_box = QtWidgets.QGroupBox("How To Use")
+            step_layout = QtWidgets.QVBoxLayout(step_box)
+            for text in (
+                "1. Pick the object that should move, then click Add Object.",
+                "2. Pick a hand, gun, world, or other parent and click Pick Parent.",
+                "3. Keep Maintain Current Offset on, select the target row, and click Reparent to Selected Parent.",
+                "4. Use Snap To Parent, Save This Offset, Blend Parents, and World only when needed.",
+                "5. Remove Object deletes this tool's constraints for the selected object.",
+            ):
+                label = QtWidgets.QLabel(text)
+                label.setWordWrap(True)
+                step_layout.addWidget(label)
+            help_toggle = QtWidgets.QToolButton()
+            help_toggle.setText("How To Use")
+            help_toggle.setCheckable(True)
+            help_toggle.setChecked(False)
+            help_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextOnly)
+            help_toggle.setToolTip("Show the short Dynamic Parenting setup guide.")
+            step_box.setVisible(False)
+            help_toggle.toggled.connect(step_box.setVisible)
+            advanced_layout.addWidget(help_toggle)
+            advanced_layout.addWidget(step_box)
 
             advanced_help = QtWidgets.QLabel(
-                "What these extra buttons mean:\n"
-                "- Add Parent: remember a parent for later.\n"
-                "- Save This Offset: save how the object should sit on that parent.\n"
-                "- Blend Parents: let two parents share the object on this frame.\n"
-                "- Fix Jump Here: fix a pop on this frame.\n"
-                "- Forget Parent: remove that parent from the list.\n"
-                "- Delete Picked Switch: remove one saved switch from History."
+                "Setup and fine-control actions stay here so the target list and no-pop switch remain visible first."
             )
             advanced_help.setWordWrap(True)
+            advanced_help.setProperty("aminateRole", "muted")
             advanced_layout.addWidget(advanced_help)
 
             history_group = QtWidgets.QGroupBox("History")
             history_layout = QtWidgets.QVBoxLayout(history_group)
             self.event_list = QtWidgets.QListWidget()
             self.event_list.setToolTip("Every saved switch for this object in this scene.")
+            self.event_list.setMinimumHeight(54)
+            self.event_list.setMaximumHeight(140)
             history_layout.addWidget(self.event_list)
-            history_button_row = QtWidgets.QHBoxLayout()
+            history_button_row = QtWidgets.QGridLayout()
             self.jump_button = QtWidgets.QPushButton("Jump To Frame")
             self.delete_switch_button = QtWidgets.QPushButton("Delete Picked Switch")
             self.clear_switches_button = QtWidgets.QPushButton("Delete All Switches")
-            history_button_row.addWidget(self.jump_button)
-            history_button_row.addWidget(self.delete_switch_button)
-            history_button_row.addWidget(self.clear_switches_button)
+            self.delete_switch_button.setProperty("aminateRole", "danger")
+            self.clear_switches_button.setProperty("aminateRole", "danger")
+            history_button_row.addWidget(self.jump_button, 0, 0)
+            history_button_row.addWidget(self.delete_switch_button, 0, 1)
+            history_button_row.addWidget(self.clear_switches_button, 0, 2)
             history_layout.addLayout(history_button_row)
-            advanced_layout.addWidget(history_group, 1)
+            advanced_layout.addWidget(history_group)
 
             self.summary_box = QtWidgets.QPlainTextEdit()
             self.summary_box.setReadOnly(True)
             self.summary_box.setMaximumHeight(120)
             advanced_layout.addWidget(self.summary_box)
-            main_layout.addWidget(self.advanced_widget, 1)
+            main_layout.addWidget(self.advanced_widget)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
@@ -1719,6 +1727,8 @@ if QtWidgets:
             self.clear_switches_button.clicked.connect(self._clear_events)
             self.event_list.itemDoubleClicked.connect(self._jump_to_event)
             self.advanced_toggle.toggled.connect(self._toggle_advanced)
+            scroll_area.setWidget(content_widget)
+            root_layout.addWidget(scroll_area)
 
         def _selected_target_ids(self):
             rows = sorted(set(index.row() for index in self.targets_table.selectionModel().selectedRows()))

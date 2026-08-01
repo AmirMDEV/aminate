@@ -16,12 +16,12 @@ except Exception:
     MAYA_AVAILABLE = False
 
 try:
-    from PySide2 import QtCore, QtWidgets
+    from PySide2 import QtWidgets
 except Exception:
     try:
-        from PySide6 import QtCore, QtWidgets
+        from PySide6 import QtWidgets
     except Exception:
-        QtCore = QtWidgets = None
+        QtWidgets = None
 
 try:
     from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
@@ -627,16 +627,26 @@ if QtWidgets:
             self.clear_button = QtWidgets.QPushButton("Clear Timeline Warnings")
             self.clear_button.setObjectName("aminateAnimationStylingClearWarningsButton")
             self.clear_button.setToolTip("Remove Animation Styling blocked-range timeline markers.")
-            action_layout.addWidget(self.apply_current_button, 0, 0)
-            action_layout.addWidget(self.apply_selected_button, 0, 1)
-            action_layout.addWidget(self.scan_button, 1, 0)
-            action_layout.addWidget(self.clear_button, 1, 1)
+            for action_button in (
+                self.spider_verse_button,
+                self.apply_current_button,
+                self.apply_selected_button,
+                self.scan_button,
+                self.clear_button,
+            ):
+                action_button.setMinimumWidth(0)
+                action_button.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+            action_layout.addWidget(self.apply_current_button, 0, 0, 1, 2)
+            action_layout.addWidget(self.apply_selected_button, 1, 0, 1, 2)
+            action_layout.addWidget(self.scan_button, 2, 0, 1, 2)
+            action_layout.addWidget(self.clear_button, 3, 0, 1, 2)
             layout.addWidget(action_group)
 
             self.help_box = QtWidgets.QPlainTextEdit()
             self.help_box.setObjectName("aminateAnimationStylingGuideBox")
             self.help_box.setReadOnly(True)
-            self.help_box.setMaximumHeight(120)
+            self.help_box.setMinimumHeight(90)
+            self.help_box.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             self.help_box.setPlainText(
                 "How it works:\n"
                 "1. Press Spider-Verse.\n"
@@ -735,14 +745,11 @@ if QtWidgets:
             layout.addLayout(footer)
 
         def closeEvent(self, event):
-            try:
-                self.controller.shutdown()
-            except Exception:
-                pass
-            try:
-                super(AnimationStylingWindow, self).closeEvent(event)
-            except TypeError:
-                QtWidgets.QDialog.closeEvent(self, event)
+            # Maya owns the dockable Qt wrapper.  Native destruction during a
+            # close can invalidate Maya's workspace-control pointer and crash
+            # the host.  Keep the controller and window alive for reuse.
+            self.hide()
+            event.ignore()
 
 
 def launch_maya_animation_styling(dock=False):
@@ -754,9 +761,15 @@ def launch_maya_animation_styling(dock=False):
         raise RuntimeError("PySide is not available in this Maya session.")
     if GLOBAL_WINDOW is not None:
         try:
-            GLOBAL_WINDOW.close()
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
         except Exception:
-            pass
+            # A genuinely stale wrapper can be discarded without invoking Qt
+            # close or deleteLater on Maya-owned UI.
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
     GLOBAL_CONTROLLER = AnimationStylingController()
     GLOBAL_WINDOW = AnimationStylingWindow(GLOBAL_CONTROLLER)
     try:

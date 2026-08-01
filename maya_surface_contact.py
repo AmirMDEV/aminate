@@ -18,33 +18,28 @@ import maya_contact_hold as hold_utils
 try:
     import maya.cmds as cmds
     import maya.api.OpenMaya as om
-    import maya.OpenMayaUI as omui
     import maya.utils as maya_utils
 
     MAYA_AVAILABLE = True
 except Exception:
     cmds = None
     om = None
-    omui = None
     maya_utils = None
     MAYA_AVAILABLE = False
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
-    import shiboken6 as shiboken
 
     QT_BINDING = "PySide6"
 except Exception:
     try:
         from PySide2 import QtCore, QtGui, QtWidgets
-        import shiboken2 as shiboken
 
         QT_BINDING = "PySide2"
     except Exception:
         QtCore = None
         QtGui = None
         QtWidgets = None
-        shiboken = None
         QT_BINDING = None
 
 
@@ -60,6 +55,17 @@ SURFACE_CONTACT_CONTROL_ATTR = "surfaceContactControl"
 SURFACE_CONTACT_SURFACE_ATTR = "surfaceContactSurface"
 SURFACE_CONTACT_DATA_ATTR = "surfaceContactData"
 DEFAULT_FOLLOW_NORMAL = True
+# Surface Contact keeps its historical normal-follow behaviour.  The mesh
+# collision contract uses separate, explicit defaults so a zero-sized proxy
+# does not invent a foot/hand volume or rotate a control behind the animator's
+# back.
+LIVE_MESH_COLLISION_MODE = "live_mesh_collision"
+SURFACE_CONTACT_MODE = "surface_contact"
+DEFAULT_COLLISION_OFFSET = 0.0
+DEFAULT_COLLISION_RADIUS = 0.0
+DEFAULT_COLLISION_FOLLOW_NORMAL = False
+COLLISION_EPSILON = 1.0e-6
+COLLISION_MAX_ITERATIONS = 8
 LIVE_SOLVE_DELAY_MS = 100
 
 GLOBAL_CONTROLLER = None
@@ -73,6 +79,325 @@ _dedupe_preserve_order = hold_utils._dedupe_preserve_order
 _short_name = hold_utils._short_name
 _node_long_name = hold_utils._node_long_name
 _selected_controls = hold_utils._selected_controls
+
+
+# ---------------------------------------------------------------------------
+# Maya-free collision core
+# ---------------------------------------------------------------------------
+# These helpers intentionally operate on ordinary tuples/dicts.  They are
+# useful to tests and to callers that already have a mesh query result, and
+# they keep the actual collision policy independent from Maya API objects.
+
+
+def _collision_point(value):
+    """Return a finite 3-tuple without requiring maya.api.OpenMaya."""
+    try:
+        values = list(value)
+        if len(values) < 3:
+            raise ValueError
+        result = (float(values[0]), float(values[1]), float(values[2]))
+    except Exception:
+        return (0.0, 0.0, 0.0)
+    if not all(math.isfinite(item) for item in result):
+        return (0.0, 0.0, 0.0)
+    return result
+
+
+def _collision_sub(a, b):
+    a = _collision_point(a)
+    b = _collision_point(b)
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _collision_add(a, b):
+    a = _collision_point(a)
+    b = _collision_point(b)
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+
+
+def _collision_scale(value, scale):
+    value = _collision_point(value)
+    scale = float(scale)
+    return (value[0] * scale, value[1] * scale, value[2] * scale)
+
+
+def _collision_dot(a, b):
+    a = _collision_point(a)
+    b = _collision_point(b)
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _collision_length(value):
+    return math.sqrt(max(0.0, _collision_dot(value, value)))
+
+
+def _collision_normal(value, fallback=(0.0, 1.0, 0.0)):
+    value = _collision_point(value)
+    length = _collision_length(value)
+    if length <= COLLISION_EPSILON:
+        value = _collision_point(fallback)
+        length = _collision_length(value)
+    if length <= COLLISION_EPSILON:
+        return (0.0, 1.0, 0.0)
+    return _collision_scale(value, 1.0 / length)
+
+
+def _collision_outward_normal(normal, closest_point, query_point, inside=False):
+    """Return the shortest geometric direction away from a closed mesh."""
+    normal = _collision_normal(normal)
+    if inside:
+        hint = _collision_sub(closest_point, query_point)
+    else:
+        hint = _collision_sub(query_point, closest_point)
+    if _collision_length(hint) > COLLISION_EPSILON:
+        normal = _collision_normal(hint, fallback=normal)
+    return normal
+
+
+def _collision_unique_parameters(values, tolerance=1.0e-5):
+    unique = []
+    for value in sorted(float(item) for item in values):
+        if not unique or abs(value - unique[-1]) > float(tolerance):
+            unique.append(value)
+    return unique
+
+
+def _collision_close(a, b, epsilon=COLLISION_EPSILON):
+    return _collision_length(_collision_sub(a, b)) <= float(epsilon)
+
+
+def segment_plane_intersection(start, end, plane_point, plane_normal, epsilon=COLLISION_EPSILON):
+    """Return the first segment/plane hit as ``{point, normal, t}``.
+
+    ``None`` means the finite segment does not cross the plane.  This helper
+    deliberately does not treat a coplanar segment as a hit; the caller can
+    then use the normal-side test for the ordinary non-penetration case.
+    """
+    start = _collision_point(start)
+    end = _collision_point(end)
+    plane_point = _collision_point(plane_point)
+    normal = _collision_normal(plane_normal)
+    delta = _collision_sub(end, start)
+    denominator = _collision_dot(delta, normal)
+    if abs(denominator) <= float(epsilon):
+        return None
+    t = _collision_dot(_collision_sub(plane_point, start), normal) / denominator
+    if t < -float(epsilon) or t > 1.0 + float(epsilon):
+        return None
+    t = max(0.0, min(1.0, float(t)))
+    return {"point": _collision_add(start, _collision_scale(delta, t)), "normal": normal, "t": t}
+
+
+def segment_sphere_intersection(start, end, center, radius, epsilon=COLLISION_EPSILON):
+    """Return the first segment/sphere hit as ``{point, normal, t}``."""
+    start = _collision_point(start)
+    end = _collision_point(end)
+    center = _collision_point(center)
+    radius = max(0.0, float(radius))
+    delta = _collision_sub(end, start)
+    offset = _collision_sub(start, center)
+    a_value = _collision_dot(delta, delta)
+    if a_value <= float(epsilon):
+        return None
+    b_value = 2.0 * _collision_dot(offset, delta)
+    c_value = _collision_dot(offset, offset) - radius * radius
+    discriminant = b_value * b_value - 4.0 * a_value * c_value
+    if discriminant < -float(epsilon):
+        return None
+    root = math.sqrt(max(0.0, discriminant))
+    roots = sorted(((-b_value - root) / (2.0 * a_value), (-b_value + root) / (2.0 * a_value)))
+    hit_t = next((item for item in roots if -float(epsilon) <= item <= 1.0 + float(epsilon)), None)
+    if hit_t is None:
+        return None
+    hit_t = max(0.0, min(1.0, float(hit_t)))
+    hit_point = _collision_add(start, _collision_scale(delta, hit_t))
+    return {"point": hit_point, "normal": _collision_normal(_collision_sub(hit_point, center)), "t": hit_t}
+
+
+def _collision_surface_key(index, surface):
+    if callable(surface):
+        return ("", int(index))
+    surface = surface or {}
+    return (str(surface.get("surface_id") or surface.get("surface") or surface.get("record") or ""), int(index))
+
+
+def _collision_surface_sample(surface, point, previous_point):
+    if callable(surface):
+        try:
+            result = surface(point, previous_point)
+        except TypeError:
+            result = surface(point)
+        return dict(result or {})
+    return dict(surface or {})
+
+
+def _collision_sweep_hit(surface, point, previous_point, normal):
+    explicit_hit = surface.get("sweep_hit") if isinstance(surface, dict) else None
+    if isinstance(explicit_hit, dict) and explicit_hit.get("point") is not None:
+        return {
+            "point": _collision_point(explicit_hit.get("point")),
+            "normal": _collision_normal(explicit_hit.get("normal") or normal),
+            "t": float(explicit_hit.get("t", 0.0)),
+        }
+    if isinstance(surface, dict) and surface.get("plane_point") is not None:
+        return segment_plane_intersection(previous_point, point, surface.get("plane_point"), normal)
+    if isinstance(surface, dict) and surface.get("sphere_center") is not None and surface.get("sphere_radius") is not None:
+        return segment_sphere_intersection(previous_point, point, surface.get("sphere_center"), surface.get("sphere_radius"))
+    return None
+
+
+def _collision_candidate(surface, point, previous_point, clearance):
+    sample = _collision_surface_sample(surface, point, previous_point)
+    closest = sample.get("closest_point") or sample.get("projection") or sample.get("point")
+    normal = sample.get("normal") or sample.get("contact_normal")
+    if closest is None or normal is None:
+        return None, sample, "missing surface point or normal"
+    closest = _collision_point(closest)
+    normal = _collision_normal(normal)
+    sample_clearance = max(0.0, float(sample.get("clearance", clearance) or 0.0))
+    point_delta = _collision_sub(point, closest)
+    signed_distance = _collision_dot(point_delta, normal)
+    tangent_distance = _collision_length(
+        _collision_sub(point_delta, _collision_scale(normal, signed_distance))
+    )
+    inside = bool(sample.get("inside", False))
+    closed = bool(sample.get("closed", False))
+    # A sweep is checked before endpoint penetration so a large interactive
+    # jump cannot cross a surface and emerge on the far side in one event.
+    sweep_hit = _collision_sweep_hit(sample, point, previous_point, normal)
+    sweep_t = float(sweep_hit.get("t", 0.0)) if sweep_hit else 1.0
+    sweep_starts_on_surface = sweep_t <= COLLISION_EPSILON
+    should_sweep = bool(
+        sweep_hit
+        and sweep_t < 1.0 - COLLISION_EPSILON
+        and (signed_distance < sample_clearance - COLLISION_EPSILON or (closed and not sweep_starts_on_surface))
+    )
+    if should_sweep:
+        hit_normal = _collision_normal(sweep_hit.get("normal") or normal, fallback=normal)
+        return _collision_add(_collision_point(sweep_hit["point"]), _collision_scale(hit_normal, sample_clearance)), sample, "sweep"
+
+    endpoint_overlaps_finite_surface = bool(
+        signed_distance < sample_clearance - COLLISION_EPSILON
+        and tangent_distance <= sample_clearance + COLLISION_EPSILON
+    )
+    if inside or endpoint_overlaps_finite_surface:
+        return _collision_add(closest, _collision_scale(normal, sample_clearance)), sample, "penetration"
+    return None, sample, "clear"
+
+
+def solve_live_mesh_collision(
+    point,
+    previous_point=None,
+    surfaces=None,
+    offset=DEFAULT_COLLISION_OFFSET,
+    radius=DEFAULT_COLLISION_RADIUS,
+    max_iterations=COLLISION_MAX_ITERATIONS,
+):
+    """Project one control origin outside all supplied collision surfaces.
+
+    ``surfaces`` is a sequence of query-result dictionaries or callables.  A
+    query dictionary may contain ``closest_point``, ``normal``, ``closed``,
+    ``inside``, ``sweep_hit`` (or ``plane_point``/``sphere_center`` helpers),
+    and an optional ``locked`` flag.  The stable surface key and input order
+    decide arbitration, so multiple records for one control are never
+    collapsed.  The result is truthful when a locked control cannot move.
+    """
+    current = _collision_point(point)
+    previous = _collision_point(previous_point if previous_point is not None else point)
+    clearance = max(0.0, float(offset)) + max(0.0, float(radius))
+    indexed = list(enumerate(surfaces or []))
+    indexed.sort(key=lambda pair: _collision_surface_key(pair[0], pair[1]))
+    collisions = []
+    changed = False
+    failure = ""
+
+    for _iteration in range(max(1, int(max_iterations))):
+        pass_changed = False
+        sweep_previous = previous if _iteration == 0 else current
+        for index, surface in indexed:
+            candidate, sample, reason = _collision_candidate(surface, current, sweep_previous, clearance)
+            if candidate is None:
+                continue
+            candidate = _collision_point(candidate)
+            if _collision_close(candidate, current):
+                continue
+            if isinstance(sample, dict) and sample.get("locked"):
+                failure = "The control is locked or constrained and cannot be corrected on {0}.".format(
+                    sample.get("surface_id") or sample.get("surface") or "the selected surface"
+                )
+                return {
+                    "success": False,
+                    "position": current,
+                    "changed": changed,
+                    "collisions": collisions,
+                    "nonpenetrating": False,
+                    "failure": failure,
+                    "iterations": _iteration + 1,
+                }
+            current = candidate
+            collisions.append(
+                {
+                    "surface_id": (sample or {}).get("surface_id") or (sample or {}).get("surface") or str(index),
+                    "reason": reason,
+                    "position": current,
+                }
+            )
+            changed = True
+            pass_changed = True
+        if not pass_changed:
+            break
+
+    nonpenetrating = True
+    for index, surface in indexed:
+        sample = _collision_surface_sample(surface, current, previous)
+        validator = sample.get("validate") if isinstance(sample, dict) else None
+        if callable(validator):
+            try:
+                valid = validator(current)
+            except TypeError:
+                valid = validator(current, clearance)
+            if isinstance(valid, dict):
+                valid = valid.get("nonpenetrating", valid.get("valid", True))
+            if not bool(valid):
+                nonpenetrating = False
+                failure = "The solved control remains inside {0}.".format(sample.get("surface_id") or sample.get("surface") or str(index))
+                break
+        else:
+            closest = sample.get("closest_point") or sample.get("projection") or sample.get("point")
+            normal = sample.get("normal") or sample.get("contact_normal")
+            if closest is None or normal is None:
+                continue
+            normal = _collision_normal(normal)
+            point_delta = _collision_sub(current, closest)
+            signed = _collision_dot(point_delta, normal)
+            tangent_distance = _collision_length(
+                _collision_sub(point_delta, _collision_scale(normal, signed))
+            )
+            sample_clearance = max(0.0, float(sample.get("clearance", clearance) or 0.0))
+            endpoint_overlap = bool(
+                signed < sample_clearance - COLLISION_EPSILON
+                and tangent_distance <= sample_clearance + COLLISION_EPSILON
+            )
+            if bool(sample.get("inside", False)) or endpoint_overlap:
+                nonpenetrating = False
+                failure = "The solved control remains inside {0}.".format(sample.get("surface_id") or sample.get("surface") or str(index))
+                break
+
+    return {
+        "success": bool(nonpenetrating),
+        "position": current,
+        "changed": changed,
+        "collisions": collisions,
+        "nonpenetrating": bool(nonpenetrating),
+        "failure": failure,
+        "iterations": max(1, int(max_iterations)),
+    }
+
+
+# Friendly aliases for callers/tests that describe the operation as a
+# projection rather than a solve.
+project_live_mesh_collision = solve_live_mesh_collision
+solve_collision_point = solve_live_mesh_collision
 
 
 def _debug(message):
@@ -318,12 +643,18 @@ def _surface_transform(surface_node):
 
 
 def _selected_surface_node():
+    nodes = _selected_surface_nodes()
+    return nodes[0] if nodes else ""
+
+
+def _selected_surface_nodes():
     selection = cmds.ls(selection=True, long=True, objectsOnly=True) or []
+    resolved_nodes = []
     for node_name in selection:
         resolved = _surface_transform(node_name)
         if resolved:
-            return resolved
-    return ""
+            resolved_nodes.append(resolved)
+    return _dedupe_preserve_order(resolved_nodes)
 
 
 def _surface_dag_path(surface_node):
@@ -353,6 +684,179 @@ def _closest_point_and_normal(surface_node, point_values):
         except Exception:
             return None, None, None
     return [closest_point.x, closest_point.y, closest_point.z], [normal.x, normal.y, normal.z], int(face_index)
+
+
+def _mesh_is_closed(surface_node):
+    """Best-effort closed-mesh query used only by the collision mode."""
+    dag_path = _surface_dag_path(surface_node)
+    if dag_path is None:
+        return False
+    try:
+        fn_mesh = om.MFnMesh(dag_path)
+        value = getattr(fn_mesh, "isClosed", None)
+        if value is not None and bool(value() if callable(value) else value):
+            return True
+    except Exception:
+        return False
+    # Maya 2026 Python API 2.0 does not expose MFnMesh.isClosed.  Determine
+    # closure from topology instead: a polygon mesh is closed only when it has
+    # edges and none of them are boundary edges.
+    try:
+        edge_iterator = om.MItMeshEdge(dag_path)
+        saw_edge = False
+        while not edge_iterator.isDone():
+            saw_edge = True
+            if edge_iterator.onBoundary():
+                return False
+            edge_iterator.next()
+        return saw_edge
+    except Exception:
+        return False
+
+
+def _point_inside_mesh(surface_node, point_values):
+    """Return whether a point is inside a closed mesh when Maya exposes it."""
+    dag_path = _surface_dag_path(surface_node)
+    if dag_path is None:
+        return False
+    try:
+        fn_mesh = om.MFnMesh(dag_path)
+        point = om.MPoint(float(point_values[0]), float(point_values[1]), float(point_values[2]))
+        checker = getattr(fn_mesh, "isPointInMesh", None)
+        if checker is not None:
+            for args in (
+                (point, 1.0e-5, om.MSpace.kWorld),
+                (point, om.MSpace.kWorld),
+                (point,),
+            ):
+                try:
+                    return bool(checker(*args))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    # Older Maya API builds do not expose isPointInMesh.  A parity ray keeps
+    # closed-ball correction working without relying on polygon winding.
+    try:
+        fn_mesh = om.MFnMesh(dag_path)
+        point = om.MFloatPoint(float(point_values[0]), float(point_values[1]), float(point_values[2]))
+        direction = om.MFloatVector(1.0, 0.17320508, 0.097531)
+        # Python API 2.0 uses (source, direction, space, maxParam,
+        # testBothDirections, ...).  The old API-1-style optional argument
+        # order silently failed every parity query in Maya 2026.
+        intersections = fn_mesh.allIntersections(
+            point,
+            direction,
+            om.MSpace.kWorld,
+            1.0e8,
+            False,
+        )
+        if isinstance(intersections, (tuple, list)):
+            # API 2.0 returns a tuple whose first item is MFloatPointArray,
+            # not a Python list/tuple.
+            points = intersections[0] if intersections else []
+            ray_params = intersections[1] if len(intersections) > 1 else []
+            if len(ray_params):
+                parameters = [ray_params[index] for index in range(len(ray_params))]
+            else:
+                parameters = [
+                    (points[index].x - point.x) * direction.x
+                    + (points[index].y - point.y) * direction.y
+                    + (points[index].z - point.z) * direction.z
+                    for index in range(len(points))
+                ]
+            return bool(len(_collision_unique_parameters(parameters)) % 2)
+        if hasattr(intersections, "__len__"):
+            return bool(len(intersections) % 2)
+    except Exception:
+        pass
+    return False
+
+
+def _segment_mesh_intersection(surface_node, start_values, end_values):
+    """Return the first finite segment hit using MFnMesh when available."""
+    dag_path = _surface_dag_path(surface_node)
+    if dag_path is None:
+        return None
+    start = om.MFloatPoint(float(start_values[0]), float(start_values[1]), float(start_values[2]))
+    delta = om.MFloatVector(
+        float(end_values[0]) - float(start_values[0]),
+        float(end_values[1]) - float(start_values[1]),
+        float(end_values[2]) - float(start_values[2]),
+    )
+    distance = float(delta.length())
+    if distance <= COLLISION_EPSILON:
+        return None
+    direction = delta / distance
+    try:
+        fn_mesh = om.MFnMesh(dag_path)
+    except Exception:
+        return None
+
+    try:
+        hit = fn_mesh.closestIntersection(
+            start,
+            direction,
+            om.MSpace.kWorld,
+            distance,
+            False,
+        )
+    except Exception:
+        hit = None
+    if not hit:
+        return None
+    try:
+        hit_point = hit[0] if isinstance(hit, (tuple, list)) else hit
+        hit_param = float(hit[1]) if isinstance(hit, (tuple, list)) and len(hit) > 1 else 0.0
+        face_index = int(hit[2]) if isinstance(hit, (tuple, list)) and len(hit) > 2 else -1
+    except Exception:
+        return None
+    if not hasattr(hit_point, "x"):
+        return None
+    try:
+        _, normal_values, _ = _closest_point_and_normal(surface_node, [hit_point.x, hit_point.y, hit_point.z])
+    except Exception:
+        normal_values = [0.0, 1.0, 0.0]
+    return {
+        "point": [hit_point.x, hit_point.y, hit_point.z],
+        "normal": normal_values,
+        "t": max(0.0, min(1.0, hit_param / distance if distance else 0.0)),
+        "face_index": face_index,
+    }
+
+
+def _mesh_collision_query(surface_node, point_values, previous_point=None, contact_normal=None):
+    """Query one mesh for the shared live collision solver."""
+    surface_point, surface_normal, face_index = _closest_point_and_normal(surface_node, point_values)
+    if not surface_point or not surface_normal:
+        return None
+    normal = _collision_normal(surface_normal)
+    closed = _mesh_is_closed(surface_node)
+    if contact_normal and not closed:
+        preferred = _collision_normal(contact_normal, fallback=normal)
+        if _collision_dot(normal, preferred) < 0.0:
+            normal = _collision_scale(normal, -1.0)
+    inside = _point_inside_mesh(surface_node, point_values) if closed else False
+    if closed:
+        normal = _collision_outward_normal(normal, surface_point, point_values, inside=inside)
+    sweep_hit = None
+    if previous_point is not None:
+        sweep_hit = _segment_mesh_intersection(surface_node, previous_point, point_values)
+        if sweep_hit and closed:
+            hit_normal = _collision_normal(sweep_hit.get("normal") or normal, fallback=normal)
+            hit_point = _collision_point(sweep_hit.get("point"))
+            hit_normal = _collision_outward_normal(hit_normal, hit_point, previous_point, inside=False)
+            sweep_hit["normal"] = list(hit_normal)
+    return {
+        "surface_id": _node_long_name(surface_node),
+        "surface": _node_long_name(surface_node),
+        "closest_point": list(surface_point),
+        "normal": list(normal),
+        "face_index": int(face_index),
+        "closed": bool(closed),
+        "inside": bool(inside),
+        "sweep_hit": sweep_hit,
+    }
 
 
 def _contact_group(create=True):
@@ -402,6 +906,14 @@ def _contact_payload(record_node):
             "constraint_nodes": payload.get("constraint_nodes", []),
             "list_name": payload.get("list_name", _short_name(control_node) if control_node else _short_name(record_node)),
             "control_label": payload.get("control_label", _short_name(control_node) if control_node else ""),
+            # New collision records are scene-backed beside legacy Surface
+            # Contact records.  Missing fields retain the old contract.
+            "mode": payload.get("mode", SURFACE_CONTACT_MODE),
+            "offset": float(payload.get("offset", DEFAULT_COLLISION_OFFSET) or 0.0),
+            "radius": float(payload.get("radius", DEFAULT_COLLISION_RADIUS) or 0.0),
+            "previous_valid_point": payload.get("previous_valid_point"),
+            "last_solved_point": payload.get("last_solved_point"),
+            "last_error": payload.get("last_error", ""),
         }
     )
     return payload
@@ -415,6 +927,12 @@ def _set_contact_payload(record_node, payload):
     payload.setdefault("constraint_nodes", [])
     payload.setdefault("list_name", _short_name(payload.get("control", "")) if payload.get("control") else _short_name(record_node))
     payload.setdefault("control_label", _short_name(payload.get("control", "")) if payload.get("control") else "")
+    payload.setdefault("mode", SURFACE_CONTACT_MODE)
+    payload.setdefault("offset", DEFAULT_COLLISION_OFFSET)
+    payload.setdefault("radius", DEFAULT_COLLISION_RADIUS)
+    payload.setdefault("previous_valid_point", None)
+    payload.setdefault("last_solved_point", None)
+    payload.setdefault("last_error", "")
     _store_json_attr(record_node, SURFACE_CONTACT_DATA_ATTR, payload)
 
 
@@ -433,45 +951,55 @@ def _create_contact_record(control_node, surface_node, payload):
     return record_node
 
 
+def _create_collision_record(control_node, surface_node, payload):
+    """Create a Live Mesh Collision record without changing legacy records."""
+    collision_payload = dict(payload or {})
+    collision_payload["mode"] = LIVE_MESH_COLLISION_MODE
+    collision_payload.setdefault("follow_normal", DEFAULT_COLLISION_FOLLOW_NORMAL)
+    collision_payload.setdefault("offset", DEFAULT_COLLISION_OFFSET)
+    collision_payload.setdefault("radius", DEFAULT_COLLISION_RADIUS)
+    collision_payload.setdefault("previous_valid_point", _collision_point(_world_translation(control_node)))
+    collision_payload.setdefault("last_solved_point", collision_payload.get("previous_valid_point"))
+    return _create_contact_record(control_node, surface_node, collision_payload)
+
+
+def _collision_record_from_inputs(control_node, surface_node, existing_payload=None, offset=DEFAULT_COLLISION_OFFSET, radius=DEFAULT_COLLISION_RADIUS, follow_normal=DEFAULT_COLLISION_FOLLOW_NORMAL):
+    """Build a conservative collision record without snapping a free control."""
+    existing_payload = dict(existing_payload or {})
+    current = _collision_point(_world_translation(control_node))
+    query = _mesh_collision_query(surface_node, current, previous_point=current, contact_normal=existing_payload.get("contact_normal"))
+    if not query:
+        return None, "Could not sample the selected collision surface."
+    normal = _collision_normal(query.get("normal"))
+    if not query.get("closed"):
+        closest = _collision_point(query.get("closest_point"))
+        if _collision_dot(_collision_sub(current, closest), normal) < 0.0:
+            normal = _collision_scale(normal, -1.0)
+    payload = {
+        "id": existing_payload.get("id") or uuid.uuid4().hex[:8],
+        "control": _node_long_name(control_node),
+        "surface": _node_long_name(surface_node),
+        "control_label": _short_name(control_node),
+        "list_name": existing_payload.get("list_name") or _short_name(control_node),
+        "enabled": bool(existing_payload.get("enabled", True)),
+        "mode": LIVE_MESH_COLLISION_MODE,
+        "follow_normal": bool(follow_normal),
+        "offset": max(0.0, float(offset)),
+        "radius": max(0.0, float(radius)),
+        "contact_normal": list(normal),
+        "previous_valid_point": list(existing_payload.get("previous_valid_point") or current),
+        "last_solved_point": list(existing_payload.get("last_solved_point") or current),
+        "last_error": "",
+    }
+    return payload, None
+
+
 def _contact_constraint_nodes(payload):
     nodes = []
     for node_name in (payload or {}).get("constraint_nodes", []) or []:
         if node_name and cmds.objExists(node_name):
             nodes.append(_node_long_name(node_name))
     return _dedupe_preserve_order(nodes)
-
-
-def _constraint_weight_aliases(constraint_node):
-    aliases = []
-    try:
-        alias_data = cmds.aliasAttr(constraint_node, query=True) or []
-    except Exception:
-        alias_data = []
-    for index in range(0, len(alias_data), 2):
-        alias = alias_data[index]
-        plug = alias_data[index + 1] if index + 1 < len(alias_data) else ""
-        plug_lower = str(plug).lower()
-        if "weight" in plug_lower or plug_lower.endswith("w0"):
-            aliases.append(alias)
-    if not aliases:
-        for candidate in ("w0", "targetW0"):
-            try:
-                if cmds.attributeQuery(candidate, node=constraint_node, exists=True):
-                    aliases.append(candidate)
-                    break
-            except Exception:
-                pass
-    return _dedupe_preserve_order(aliases)
-
-
-def _set_constraint_enabled(constraint_nodes, enabled):
-    value = 1.0 if enabled else 0.0
-    for node_name in _contact_constraint_nodes({"constraint_nodes": constraint_nodes}):
-        for alias in _constraint_weight_aliases(node_name):
-            try:
-                cmds.setAttr("{0}.{1}".format(node_name, alias), value)
-            except Exception:
-                pass
 
 
 def _record_enabled_has_anim(record_node):
@@ -484,6 +1012,20 @@ def _record_enabled_has_anim(record_node):
 
 def _set_record_enabled(record_node, enabled):
     _set_bool_attr(record_node, SURFACE_CONTACT_ENABLED_ATTR, bool(enabled))
+    if enabled:
+        payload = _contact_payload(record_node)
+        control_node = (payload or {}).get("control", "")
+        if (
+            payload
+            and payload.get("mode") == LIVE_MESH_COLLISION_MODE
+            and control_node
+            and cmds.objExists(control_node)
+        ):
+            current = list(_collision_point(_world_translation(control_node)))
+            payload["previous_valid_point"] = current
+            payload["last_solved_point"] = current
+            payload["last_error"] = ""
+            _set_contact_payload(record_node, payload)
     if _record_enabled_has_anim(record_node):
         try:
             cmds.setKeyframe(
@@ -508,44 +1050,24 @@ def _delete_contact_constraints(payload):
     return deleted
 
 
-def _sync_contact_constraints(record_node, payload, control_node, surface_node, recreate=False):
-    if recreate:
-        _delete_contact_constraints(payload)
-    existing = _contact_constraint_nodes(payload)
-    if existing and not recreate:
-        _set_constraint_enabled(existing, bool(payload.get("enabled", True)))
-        return True, None
-
-    created_nodes = []
-    try:
-        point_constraint = cmds.pointOnPolyConstraint(surface_node, control_node)[0]
-        created_nodes.append(_node_long_name(point_constraint))
-    except Exception as exc:
-        try:
-            geometry_constraint = cmds.geometryConstraint(surface_node, control_node)[0]
-            created_nodes.append(_node_long_name(geometry_constraint))
-        except Exception as fallback_exc:
-            return False, "Could not create the live surface clamp: {0}".format(fallback_exc or exc)
-
-    if payload.get("follow_normal", DEFAULT_FOLLOW_NORMAL):
-        try:
-            normal_constraint = cmds.normalConstraint(surface_node, control_node)[0]
-            created_nodes.append(_node_long_name(normal_constraint))
-        except Exception as exc:
-            _warning("Could not create the live surface normal follow: {0}".format(exc))
-
-    payload["constraint_nodes"] = created_nodes
-    _set_contact_payload(record_node, payload)
-    _set_constraint_enabled(created_nodes, bool(payload.get("enabled", True)))
-    return True, None
-
-
 def _find_record(control_node, surface_node):
     control_long = _node_long_name(control_node)
     surface_long = _node_long_name(surface_node)
     for record_node in _all_contact_records():
         payload = _contact_payload(record_node)
         if not payload:
+            continue
+        if payload.get("mode", SURFACE_CONTACT_MODE) == SURFACE_CONTACT_MODE and payload.get("control") == control_long and payload.get("surface") == surface_long:
+            return record_node
+    return ""
+
+
+def _find_collision_record(control_node, surface_node):
+    control_long = _node_long_name(control_node)
+    surface_long = _node_long_name(surface_node)
+    for record_node in _all_contact_records():
+        payload = _contact_payload(record_node)
+        if not payload or payload.get("mode") != LIVE_MESH_COLLISION_MODE:
             continue
         if payload.get("control") == control_long and payload.get("surface") == surface_long:
             return record_node
@@ -611,14 +1133,6 @@ def _basis_from_surface(surface_normal, tangent_hint, fallback_matrix=None):
     return tangent, normal, bitangent
 
 
-def _selected_record_nodes():
-    selected = []
-    for node_name in cmds.ls(selection=True, long=True, type="transform") or []:
-        if _get_bool_attr(node_name, SURFACE_CONTACT_MARKER_ATTR, False):
-            selected.append(_node_long_name(node_name))
-    return _dedupe_preserve_order(selected)
-
-
 def _node_mobject(node_name):
     if not MAYA_AVAILABLE or not node_name or not cmds.objExists(node_name):
         return None
@@ -630,7 +1144,131 @@ def _node_mobject(node_name):
         return None
 
 
+def _collision_translation_unlocked(control_node):
+    return all(
+        bool(hold_utils._attr_unlocked(control_node, attribute))
+        for attribute in ("translateX", "translateY", "translateZ")
+    )
+
+
+def _apply_collision_group(payloads, force=False):
+    """Solve every enabled collision record for one control as one system."""
+    payloads = [dict(item or {}) for item in (payloads or []) if item]
+    if not payloads:
+        return False, "There are no collision records to solve."
+    control_node = payloads[0].get("control", "")
+    if not control_node or not cmds.objExists(control_node):
+        return False, "The driven control no longer exists."
+    current = _collision_point(_world_translation(control_node))
+    previous = None
+    for payload in payloads:
+        candidate = payload.get("previous_valid_point") or payload.get("last_solved_point")
+        if candidate is not None:
+            previous = _collision_point(candidate)
+            break
+    if previous is None:
+        previous = current
+    samples = []
+    for payload in sorted(payloads, key=lambda item: (str(item.get("surface", "")), str(item.get("record", "")))):
+        surface_node = payload.get("surface", "")
+        if not surface_node or not cmds.objExists(surface_node):
+            return False, "The collision surface no longer exists."
+        initial_sample = _mesh_collision_query(
+            surface_node,
+            current,
+            previous_point=previous,
+            contact_normal=payload.get("contact_normal"),
+        )
+        if not initial_sample:
+            return False, "Could not sample collision surface {0}.".format(_short_name(surface_node))
+        clearance = max(
+            0.0,
+            float(payload.get("offset", DEFAULT_COLLISION_OFFSET) or 0.0),
+        ) + max(0.0, float(payload.get("radius", DEFAULT_COLLISION_RADIUS) or 0.0))
+        locked = not _collision_translation_unlocked(control_node)
+
+        def _query(point, query_previous, _surface_node=surface_node, _payload=payload, _clearance=clearance, _locked=locked):
+            sample = _mesh_collision_query(
+                _surface_node,
+                point,
+                previous_point=query_previous,
+                contact_normal=_payload.get("contact_normal"),
+            ) or {}
+            sample["record"] = _payload.get("record", "")
+            sample["clearance"] = _clearance
+            sample["locked"] = _locked
+            return sample
+
+        samples.append(_query)
+
+    result = solve_live_mesh_collision(current, previous_point=previous, surfaces=samples, max_iterations=COLLISION_MAX_ITERATIONS)
+    if not result.get("success"):
+        message = result.get("failure") or "The control could not be corrected without penetrating a collision surface."
+        for payload in payloads:
+            payload["last_error"] = message
+            if payload.get("record") and cmds.objExists(payload["record"]):
+                _set_contact_payload(payload["record"], payload)
+        return False, message
+
+    solved_point = _collision_point(result.get("position", current))
+    if result.get("changed") and not _collision_close(solved_point, current):
+        try:
+            _set_world_translation(control_node, solved_point)
+        except Exception as exc:
+            message = "The control could not be corrected: {0}".format(exc)
+            for payload in payloads:
+                payload["last_error"] = message
+                if payload.get("record") and cmds.objExists(payload["record"]):
+                    _set_contact_payload(payload["record"], payload)
+            return False, message
+
+    # Maya/evaluation may clamp, redirect, or reject a transform write.  Do
+    # not store the requested/previous solver point as proof: read back the
+    # actual world translation and validate that exact point against the same
+    # collision system before updating the saved payload.
+    actual_position = _collision_point(_world_translation(control_node))
+    if not _collision_close(actual_position, solved_point, epsilon=1.0e-4):
+        message = (
+            "The control did not reach the solved collision point "
+            "(requested {0}, actual {1})."
+        ).format(tuple(solved_point), tuple(actual_position))
+        for payload in payloads:
+            payload["last_error"] = message
+            if payload.get("record") and cmds.objExists(payload["record"]):
+                _set_contact_payload(payload["record"], payload)
+        return False, message
+    validation = solve_live_mesh_collision(
+        actual_position,
+        previous_point=actual_position,
+        surfaces=samples,
+        max_iterations=COLLISION_MAX_ITERATIONS,
+    )
+    if not validation.get("success") or validation.get("changed") or not _collision_close(
+        _collision_point(validation.get("position", actual_position)),
+        actual_position,
+        epsilon=1.0e-4,
+    ):
+        message = "The actual control world translation failed post-correction collision validation."
+        for payload in payloads:
+            payload["last_error"] = message
+            if payload.get("record") and cmds.objExists(payload["record"]):
+                _set_contact_payload(payload["record"], payload)
+        return False, message
+
+    for payload in payloads:
+        payload["previous_valid_point"] = list(actual_position)
+        payload["last_solved_point"] = list(actual_position)
+        payload["last_error"] = ""
+        if payload.get("record") and cmds.objExists(payload["record"]):
+            _set_contact_payload(payload["record"], payload)
+    return True, "Solved {0} collision surface(s) for {1}.".format(len(payloads), _short_name(control_node))
+
+
 def _apply_to_record_payload(payload, force=False):
+    if (payload or {}).get("mode") == LIVE_MESH_COLLISION_MODE:
+        if not payload.get("enabled", True):
+            return True, "Collision for {0} is disabled.".format(_short_name(payload.get("control", "")))
+        return _apply_collision_group([payload], force=force)
     control_node = payload.get("control", "")
     surface_node = payload.get("surface", "")
     record_node = payload.get("record", "")
@@ -668,6 +1306,28 @@ def _apply_to_record_payload(payload, force=False):
             _set_world_matrix(control_node, matrix)
         else:
             _set_world_translation(control_node, surface_point)
+        # Validate the transform that Maya actually accepted.  A cached
+        # requested point is not enough when constraints, locks, or evaluation
+        # order redirect the write.
+        actual_position = _collision_point(_world_translation(control_node))
+        expected_position = _collision_point(surface_point)
+        if not _collision_close(actual_position, expected_position, epsilon=1.0e-4):
+            return False, "The control did not reach the solved surface-contact point."
+        actual_surface_point, actual_surface_normal, _actual_face_index = _closest_point_and_normal(
+            surface_node,
+            actual_position,
+        )
+        if not actual_surface_point or not actual_surface_normal:
+            return False, "Could not validate the corrected surface contact."
+        actual_normal = _normalize(_vector(actual_surface_normal))
+        if _dot(actual_normal, contact_normal) < 0.0:
+            actual_normal = actual_normal * -1.0
+        actual_signed_distance = _dot(
+            _vector(actual_position) - _vector(actual_surface_point),
+            actual_normal,
+        )
+        if actual_signed_distance < -1.0e-4:
+            return False, "The actual corrected control remains inside the selected surface."
     return True, "Solved {0} on the selected surface.".format(_short_name(control_node))
 
 
@@ -697,6 +1357,8 @@ def _format_report(report):
         "Follow Surface Normal: {0}".format("Yes" if report.get("follow_normal") else "No"),
         "",
     ]
+    if report.get("surfaces"):
+        lines.insert(2, "Collision Surfaces: {0}".format(", ".join(_short_name(item) for item in report.get("surfaces", []))))
 
     errors = report.get("errors", [])
     warnings = report.get("warnings", [])
@@ -738,7 +1400,12 @@ class MayaSurfaceContactController(object):
     def __init__(self):
         self.control_nodes = []
         self.surface_node = ""
-        self.follow_surface_normal = DEFAULT_FOLLOW_NORMAL
+        self.surface_nodes = []
+        self.follow_surface_normal = DEFAULT_COLLISION_FOLLOW_NORMAL
+        self.mode = LIVE_MESH_COLLISION_MODE
+        self.collision_offset = DEFAULT_COLLISION_OFFSET
+        self.collision_radius = DEFAULT_COLLISION_RADIUS
+        self.collision_follow_normal = DEFAULT_COLLISION_FOLLOW_NORMAL
         self.report = None
         self.status_callback = None
         self.selected_records = []
@@ -882,7 +1549,8 @@ class MayaSurfaceContactController(object):
                 continue
             if not payload.get("enabled", True):
                 continue
-            for node_name in (payload.get("control", ""), payload.get("surface", "")):
+            surface_shape = _surface_shape(payload.get("surface", ""))
+            for node_name in (payload.get("record", ""), payload.get("control", ""), payload.get("surface", ""), surface_shape):
                 if node_name and cmds.objExists(node_name):
                     nodes.append(_node_long_name(node_name))
         return _dedupe_preserve_order(nodes)
@@ -932,7 +1600,27 @@ class MayaSurfaceContactController(object):
         return [node_name for node_name in self.control_nodes if node_name and cmds.objExists(node_name)]
 
     def _resolved_surface(self):
-        return self.surface_node if self.surface_node and cmds.objExists(self.surface_node) else ""
+        surfaces = self._resolved_surfaces()
+        return surfaces[0] if surfaces else ""
+
+    def _resolved_surfaces(self):
+        surfaces = []
+        candidates = list(self.surface_nodes or [])
+        if self.surface_node:
+            candidates.insert(0, self.surface_node)
+        for node_name in candidates:
+            if node_name and cmds.objExists(node_name) and _surface_shape(node_name):
+                surfaces.append(_node_long_name(node_name))
+        self.surface_nodes = _dedupe_preserve_order(surfaces)
+        self.surface_node = self.surface_nodes[0] if self.surface_nodes else ""
+        return list(self.surface_nodes)
+
+    def set_mode(self, mode):
+        mode = str(mode or SURFACE_CONTACT_MODE)
+        if mode not in (SURFACE_CONTACT_MODE, LIVE_MESH_COLLISION_MODE):
+            return False, "Unknown surface contact mode: {0}".format(mode)
+        self.mode = mode
+        return True, mode
 
     def set_controls_from_selection(self):
         if not MAYA_AVAILABLE:
@@ -951,8 +1639,68 @@ class MayaSurfaceContactController(object):
         if not surface_node:
             return False, "Pick a mesh surface first."
         self.surface_node = surface_node
+        self.surface_nodes = [surface_node]
         self.report = None
         return True, "Picked the surface {0}.".format(_short_name(surface_node))
+
+    def set_surfaces_from_selection(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        surface_nodes = _selected_surface_nodes()
+        if not surface_nodes:
+            return False, "Pick one or more mesh collision surfaces first."
+        self.surface_nodes = surface_nodes
+        self.surface_node = surface_nodes[0]
+        self.report = None
+        return True, "Picked {0} collision surface(s).".format(len(surface_nodes))
+
+    def set_inputs_from_selection(self):
+        """Resolve one surface plus controls atomically without self-contact records."""
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        surface_node = self._resolved_surface() or _selected_surface_node()
+        controls = self._resolved_controls() or _selected_controls()
+        if surface_node:
+            surface_long_name = _node_long_name(surface_node)
+            controls = [
+                control_node
+                for control_node in controls
+                if _node_long_name(control_node) != surface_long_name
+            ]
+        if not surface_node:
+            return False, "Pick one mesh surface with the controls first."
+        if not controls:
+            return False, "Pick one or more controls with the mesh surface first."
+        self.surface_node = surface_node
+        self.surface_nodes = [surface_node]
+        self.control_nodes = _dedupe_preserve_order(controls)
+        self.report = None
+        return True, "Picked {0} control(s) plus surface {1}.".format(
+            len(self.control_nodes),
+            _short_name(surface_node),
+        )
+
+    def set_collision_inputs_from_selection(self):
+        """Resolve multiple controls and multiple mesh surfaces atomically."""
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        # This button means "use the current combined selection."  Reusing
+        # previously-resolved inputs here prevented artists from changing the
+        # collision object after the first setup.
+        surface_nodes = _selected_surface_nodes()
+        controls = _selected_controls()
+        surface_lookup = set(_node_long_name(item) for item in surface_nodes)
+        controls = [item for item in controls if _node_long_name(item) not in surface_lookup]
+        if not surface_nodes:
+            return False, "Pick one or more mesh collision surfaces with the controls."
+        if not controls:
+            return False, "Pick one or more controls with the collision surfaces."
+        self.surface_nodes = _dedupe_preserve_order(surface_nodes)
+        self.surface_node = self.surface_nodes[0]
+        self.control_nodes = _dedupe_preserve_order(controls)
+        self.mode = LIVE_MESH_COLLISION_MODE
+        self.report = None
+        return True, "Picked {0} control(s) and {1} collision surface(s).".format(len(self.control_nodes), len(self.surface_nodes))
 
     def set_selected_records(self, record_nodes):
         self.selected_records = []
@@ -974,7 +1722,12 @@ class MayaSurfaceContactController(object):
             return False, "Pick a saved contact in the list first."
         self.control_nodes = [payload["control"]]
         self.surface_node = payload["surface"]
+        self.surface_nodes = [payload["surface"]]
         self.follow_surface_normal = bool(payload.get("follow_normal", DEFAULT_FOLLOW_NORMAL))
+        self.mode = payload.get("mode", SURFACE_CONTACT_MODE)
+        self.collision_offset = float(payload.get("offset", DEFAULT_COLLISION_OFFSET) or 0.0)
+        self.collision_radius = float(payload.get("radius", DEFAULT_COLLISION_RADIUS) or 0.0)
+        self.collision_follow_normal = bool(payload.get("follow_normal", DEFAULT_COLLISION_FOLLOW_NORMAL))
         self._refresh_live_callbacks()
         return True, "Loaded {0}.".format(payload["list_name"])
 
@@ -995,7 +1748,133 @@ class MayaSurfaceContactController(object):
                     return _dedupe_preserve_order(payloads)
         return [_contact_payload(record_node) for record_node in _all_contact_records() if _contact_payload(record_node)]
 
+    def collision_entries(self, from_selection=True):
+        return [
+            payload
+            for payload in self.contact_entries(from_selection=from_selection)
+            if payload and payload.get("mode") == LIVE_MESH_COLLISION_MODE
+        ]
+
+    def analyze_collision_setup(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        controls = self._resolved_controls()
+        surfaces = self._resolved_surfaces()
+        errors = []
+        warnings = []
+        existing_setups = []
+        if not controls:
+            errors.append("Pick one or more hand, foot, or object controls first.")
+        if not surfaces:
+            errors.append("Pick one or more mesh collision surfaces first.")
+        for surface_node in surfaces:
+            if not _surface_shape(surface_node):
+                errors.append("{0} is not a sampleable mesh surface.".format(_short_name(surface_node)))
+        for control_node in controls:
+            existing_setups.extend(
+                _contact_payload(record_node)
+                for record_node in _all_records_for_control(control_node)
+                if (_contact_payload(record_node) or {}).get("mode") == LIVE_MESH_COLLISION_MODE
+            )
+        existing_setups = [item for item in existing_setups if item]
+        preview = None
+        if controls and surfaces and _surface_shape(surfaces[0]):
+            try:
+                preview = _mesh_collision_query(surfaces[0], _world_translation(controls[0]))
+            except Exception as exc:
+                errors.append("Could not sample the selected collision surface: {0}".format(exc))
+        if len(surfaces) > 1:
+            warnings.append("All selected collision surfaces will be solved deterministically for every picked control.")
+        if self.collision_radius <= 0.0:
+            warnings.append("Proxy radius is 0.000 by default; no foot or hand volume is assumed.")
+        self.report = {
+            "mode": LIVE_MESH_COLLISION_MODE,
+            "controls": controls,
+            "surfaces": surfaces,
+            "surface": surfaces[0] if surfaces else "",
+            "offset": max(0.0, float(self.collision_offset)),
+            "radius": max(0.0, float(self.collision_radius)),
+            "follow_normal": bool(self.collision_follow_normal),
+            "errors": _dedupe_preserve_order(errors),
+            "warnings": _dedupe_preserve_order(warnings),
+            "existing_setups": existing_setups,
+            "preview": preview,
+        }
+        if errors:
+            return False, "This mesh collision setup is not safe yet. Read the red notes below."
+        if warnings:
+            return True, "This mesh collision setup can work, but read the yellow notes first."
+        return True, "This mesh collision setup looks ready."
+
+    def create_or_update_collision(self):
+        if not MAYA_AVAILABLE:
+            return False, "This tool only works inside Maya."
+        controls = self._resolved_controls()
+        surfaces = self._resolved_surfaces()
+        if not controls:
+            return False, "Pick one or more controls first."
+        if not surfaces:
+            return False, "Pick one or more mesh collision surfaces first."
+        updated = 0
+        created = 0
+        self.mode = LIVE_MESH_COLLISION_MODE
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="MayaLiveMeshCollisionCreate")
+            for control_node in controls:
+                for surface_node in surfaces:
+                    existing_record = _find_collision_record(control_node, surface_node)
+                    existing_payload = _contact_payload(existing_record) if existing_record else {}
+                    record_payload, error = _collision_record_from_inputs(
+                        control_node,
+                        surface_node,
+                        existing_payload,
+                        offset=self.collision_offset,
+                        radius=self.collision_radius,
+                        follow_normal=self.collision_follow_normal,
+                    )
+                    if error:
+                        return False, error
+                    if existing_record:
+                        success, message = self._save_record_payload(existing_record, record_payload, control_node, surface_node)
+                        if not success:
+                            return False, message
+                        target_record = existing_record
+                        updated += 1
+                    else:
+                        target_record = _create_collision_record(control_node, surface_node, record_payload)
+                        created += 1
+                    if not _contact_payload(target_record):
+                        return False, "The collision record could not be reloaded."
+            for control_node in controls:
+                group = [
+                    _contact_payload(record_node)
+                    for record_node in _all_records_for_control(control_node)
+                ]
+                group = [item for item in group if item and item.get("mode") == LIVE_MESH_COLLISION_MODE and item.get("enabled", True)]
+                if group:
+                    self._mute_live_callbacks()
+                    solved, message = _apply_collision_group(group, force=False)
+                    if not solved:
+                        return False, message
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self._refresh_live_callbacks()
+        self.report = None
+        total = updated + created
+        if not total:
+            return False, "Nothing was created or updated."
+        if created and updated:
+            return True, "Created {0} collision record(s) and updated {1}.".format(created, updated)
+        if created:
+            return True, "Created {0} live mesh collision record(s).".format(created)
+        return True, "Updated {0} live mesh collision record(s).".format(updated)
+
     def analyze_setup(self):
+        if self.mode == LIVE_MESH_COLLISION_MODE:
+            return self.analyze_collision_setup()
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
 
@@ -1090,6 +1969,8 @@ class MayaSurfaceContactController(object):
         return record_payload, None
 
     def create_or_update_contact(self):
+        if self.mode == LIVE_MESH_COLLISION_MODE:
+            return self.create_or_update_collision()
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
         controls = self._resolved_controls()
@@ -1147,10 +2028,17 @@ class MayaSurfaceContactController(object):
 
     def _target_records(self):
         if self.selected_records:
-            return [record_node for record_node in self.selected_records if cmds.objExists(record_node)]
-        records = []
-        for node_name in self._resolved_controls():
-            records.extend(_all_records_for_control(node_name))
+            records = [record_node for record_node in self.selected_records if cmds.objExists(record_node)]
+        else:
+            records = []
+            for node_name in self._resolved_controls():
+                records.extend(_all_records_for_control(node_name))
+        if self.mode == LIVE_MESH_COLLISION_MODE:
+            records = [
+                record_node
+                for record_node in records
+                if (_contact_payload(record_node) or {}).get("mode") == LIVE_MESH_COLLISION_MODE
+            ]
         return _dedupe_preserve_order(records)
 
     def enable_selected(self):
@@ -1219,6 +2107,8 @@ class MayaSurfaceContactController(object):
         return True, "Deleted {0} contact(s).".format(count)
 
     def delete_all(self):
+        if self.mode == LIVE_MESH_COLLISION_MODE:
+            return self.delete_all_collision()
         try:
             cmds.undoInfo(openChunk=True, chunkName="MayaSurfaceContactDeleteAll")
             deleted = _remove_all_records()
@@ -1234,6 +2124,33 @@ class MayaSurfaceContactController(object):
         if not deleted:
             return False, "There are no saved surface contacts yet."
         return True, "Deleted all {0} saved contact(s).".format(deleted)
+
+    def delete_all_collision(self):
+        records = [
+            payload.get("record")
+            for record_node in _all_contact_records()
+            for payload in [_contact_payload(record_node)]
+            if payload and payload.get("mode") == LIVE_MESH_COLLISION_MODE
+        ]
+        records = [record_node for record_node in _dedupe_preserve_order(records) if record_node and cmds.objExists(record_node)]
+        if not records:
+            return False, "There are no saved mesh collision records yet."
+        deleted = 0
+        try:
+            cmds.undoInfo(openChunk=True, chunkName="MayaSurfaceContactDeleteAllCollision")
+            for record_node in records:
+                if _delete_record(record_node):
+                    deleted += 1
+        finally:
+            try:
+                cmds.undoInfo(closeChunk=True)
+            except Exception:
+                pass
+        self.selected_records = []
+        self.solve_active_contacts(force=True)
+        self._refresh_live_callbacks()
+        self.report = None
+        return True, "Deleted all {0} mesh collision record(s).".format(deleted)
 
     def key_selected_state(self):
         records = self._target_records()
@@ -1286,18 +2203,35 @@ class MayaSurfaceContactController(object):
                 payload = _contact_payload(record_node)
                 if not payload:
                     continue
+                if self.mode == LIVE_MESH_COLLISION_MODE and payload.get("mode") != LIVE_MESH_COLLISION_MODE:
+                    continue
                 records.append(payload)
             if not records:
                 return False
-            solved_controls = {}
+            grouped = {}
             for payload in records:
-                solved_controls[payload.get("control", "")] = payload
-            for payload in solved_controls.values():
-                control_node = payload.get("control", "")
-                surface_node = payload.get("surface", "")
-                record_node = payload.get("record", "")
-                self._mute_live_callbacks()
-                _apply_to_record_payload(payload, force=bool(force))
+                control_name = payload.get("control", "")
+                if not control_name:
+                    continue
+                grouped.setdefault(control_name, []).append(payload)
+            for control_name in sorted(grouped):
+                payloads = grouped[control_name]
+                enabled_payloads = [item for item in payloads if item.get("enabled", True)]
+                collision_payloads = [item for item in enabled_payloads if item.get("mode") == LIVE_MESH_COLLISION_MODE]
+                if collision_payloads:
+                    self._mute_live_callbacks()
+                    solved, message = _apply_collision_group(collision_payloads, force=bool(force))
+                    if not solved:
+                        self._set_status(message, success=False)
+                        return False
+                for payload in enabled_payloads:
+                    if payload.get("mode") == LIVE_MESH_COLLISION_MODE:
+                        continue
+                    self._mute_live_callbacks()
+                    solved, message = _apply_to_record_payload(payload, force=bool(force))
+                    if not solved:
+                        self._set_status(message, success=False)
+                        return False
             if force:
                 self.analyze_setup()
             return True
@@ -1306,138 +2240,213 @@ class MayaSurfaceContactController(object):
             self._solving = False
 
 
+class MayaLiveMeshCollisionController(MayaSurfaceContactController):
+    """Explicit collision-mode controller for Surface Contact integrations."""
+
+    def __init__(self):
+        super(MayaLiveMeshCollisionController, self).__init__()
+        self.mode = LIVE_MESH_COLLISION_MODE
+        self.follow_surface_normal = DEFAULT_COLLISION_FOLLOW_NORMAL
+        self.collision_follow_normal = DEFAULT_COLLISION_FOLLOW_NORMAL
+
+    def analyze_setup(self):
+        return self.analyze_collision_setup()
+
+    def create_or_update_contact(self):
+        return self.create_or_update_collision()
+
+
 if QtWidgets:
     _WindowBase = type("MayaSurfaceContactWindowBase", (QtWidgets.QDialog,), {})
 
 
     class MayaSurfaceContactWindow(_WindowBase):
+        """Collision-first Surface Contact window.
+
+        The visible tool is deliberately mesh-collision only.  Legacy
+        single-surface records remain readable by the backend for old scenes,
+        but they are not exposed as the default workflow.
+        """
+
         def __init__(self, controller, parent=None):
             super(MayaSurfaceContactWindow, self).__init__(parent or _maya_main_window())
             self.controller = controller
+            self.controller.set_mode(LIVE_MESH_COLLISION_MODE)
             self.controller.set_status_callback(self._set_status)
             self._syncing_table = False
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Surface Contact")
-            self.setMinimumWidth(640)
-            self.setMinimumHeight(480)
-            self.resize(820, 760)
+            self.setMinimumWidth(560)
+            self.setMinimumHeight(430)
+            self.resize(760, 680)
             self._build_ui()
             self._sync_from_controller()
 
         def _build_ui(self):
-            main_layout = QtWidgets.QVBoxLayout(self)
+            root_layout = QtWidgets.QVBoxLayout(self)
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            scroll_area = QtWidgets.QScrollArea(self)
+            scroll_area.setObjectName("aminateSurfaceContactScroll")
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAlwaysOff", QtCore.Qt.ScrollBarAlwaysOff))
+            scroll_area.setVerticalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
+            scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+            content_widget = QtWidgets.QWidget()
+            content_widget.setObjectName("aminateSurfaceContactContent")
+            content_widget.setMinimumWidth(0)
+            content_widget.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+            main_layout = QtWidgets.QVBoxLayout(content_widget)
+
             intro = QtWidgets.QLabel(
-                "Use this for feet, hands, or any control that should stay on a selected mesh surface while the scene moves."
+                "Keep hand, foot, or object controls on or outside one or more live mesh surfaces. "
+                "Pick controls and meshes together, then create editable collision records."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
 
-            control_row = QtWidgets.QHBoxLayout()
+            controls_row = QtWidgets.QGridLayout()
             self.controls_line = QtWidgets.QLineEdit()
+            self.controls_line.setReadOnly(True)
             self.controls_line.setPlaceholderText("foot_ctrl, hand_ctrl")
-            self.controls_line.setToolTip("The control or controls that should stick to the surface.")
-            self.use_selection_button = QtWidgets.QPushButton("Load Selected Control(s)")
-            self.use_selection_button.setToolTip("Load the selected control(s) from the current Maya selection into the control box.")
-            control_row.addWidget(QtWidgets.QLabel("Control(s)"))
-            control_row.addWidget(self.controls_line, 1)
-            control_row.addWidget(self.use_selection_button)
-            main_layout.addLayout(control_row)
+            self.controls_line.setToolTip("Controls that must stay on or outside the selected collision meshes.")
+            self.use_inputs_button = QtWidgets.QPushButton("Use Controls + Meshes")
+            self.use_inputs_button.setToolTip(
+                "Select one or more hand, foot, or object controls and one or more mesh surfaces in Maya, then load them together."
+            )
+            controls_row.addWidget(QtWidgets.QLabel("Controls"), 0, 0)
+            controls_row.addWidget(self.controls_line, 0, 1)
+            controls_row.addWidget(self.use_inputs_button, 1, 0, 1, 2)
+            main_layout.addLayout(controls_row)
 
-            surface_row = QtWidgets.QHBoxLayout()
+            surfaces_row = QtWidgets.QGridLayout()
             self.surface_line = QtWidgets.QLineEdit()
-            self.surface_line.setPlaceholderText("surface mesh")
-            self.surface_line.setToolTip("The floor, wall, prop, or body mesh to stick to.")
-            self.use_surface_button = QtWidgets.QPushButton("Load Selected Surface")
-            self.use_surface_button.setToolTip("Load the selected surface mesh from the current Maya selection into the surface box.")
-            surface_row.addWidget(QtWidgets.QLabel("Surface"))
-            surface_row.addWidget(self.surface_line, 1)
-            surface_row.addWidget(self.use_surface_button)
-            main_layout.addLayout(surface_row)
+            self.surface_line.setReadOnly(True)
+            self.surface_line.setPlaceholderText("floor, slope, step, ball")
+            self.surface_line.setToolTip("One or more mesh surfaces used as collision objects.")
+            self.use_surfaces_button = QtWidgets.QPushButton("Use Selected Meshes")
+            self.use_surfaces_button.setToolTip(
+                "Select one or more mesh surfaces in Maya and load them as the collision set."
+            )
+            surfaces_row.addWidget(QtWidgets.QLabel("Meshes"), 0, 0)
+            surfaces_row.addWidget(self.surface_line, 0, 1)
+            surfaces_row.addWidget(self.use_surfaces_button, 1, 0, 1, 2)
+            main_layout.addLayout(surfaces_row)
 
-            options_row = QtWidgets.QHBoxLayout()
-            self.follow_normal_check = QtWidgets.QCheckBox("Follow Surface Normal")
-            self.follow_normal_check.setToolTip("Turn this on to keep the control aligned to the surface normal.")
-            options_row.addWidget(self.follow_normal_check)
-            options_row.addStretch(1)
-            main_layout.addLayout(options_row)
+            options_group = QtWidgets.QGroupBox("Collision Options")
+            options_layout = QtWidgets.QGridLayout(options_group)
+            self.offset_spin = QtWidgets.QDoubleSpinBox()
+            self.offset_spin.setRange(0.0, 100000.0)
+            self.offset_spin.setDecimals(4)
+            self.offset_spin.setToolTip("Explicit distance to keep the control origin outside each mesh surface.")
+            self.radius_spin = QtWidgets.QDoubleSpinBox()
+            self.radius_spin.setRange(0.0, 100000.0)
+            self.radius_spin.setDecimals(4)
+            self.radius_spin.setToolTip("Explicit proxy radius for the hand or foot volume. Zero means no assumed radius.")
+            self.follow_normal_check = QtWidgets.QCheckBox("Follow Surface Normal (Explicit)")
+            self.follow_normal_check.setToolTip(
+                "When enabled, rotate the control to the sampled surface normal. It is off until you choose it."
+            )
+            options_layout.addWidget(QtWidgets.QLabel("Offset"), 0, 0)
+            options_layout.addWidget(self.offset_spin, 0, 1)
+            options_layout.addWidget(QtWidgets.QLabel("Proxy Radius"), 0, 2)
+            options_layout.addWidget(self.radius_spin, 0, 3)
+            options_layout.addWidget(self.follow_normal_check, 1, 0, 1, 4)
+            main_layout.addWidget(options_group)
 
-            action_row = QtWidgets.QHBoxLayout()
+            action_layout = QtWidgets.QVBoxLayout()
             self.check_button = QtWidgets.QPushButton("Check Setup")
-            self.apply_button = QtWidgets.QPushButton("Create / Update Contact")
-            self.key_state_button = QtWidgets.QPushButton("Key State")
+            self.apply_button = QtWidgets.QPushButton("Create / Update Collision")
             self.refresh_button = QtWidgets.QPushButton("Refresh Now")
-            self.check_button.setToolTip("Check the selected control and surface before creating or updating the contact.")
-            self.apply_button.setToolTip("Create or refresh the live surface contact clamp setup.")
-            self.key_state_button.setToolTip("Key the selected contact state on the current frame so it can turn on or off in animation.")
-            self.refresh_button.setToolTip("Force the live clamp to solve again on the current frame. The live callbacks also keep it updated while you move the control or surface.")
-            action_row.addWidget(self.check_button)
-            action_row.addWidget(self.apply_button)
-            action_row.addWidget(self.key_state_button)
-            action_row.addWidget(self.refresh_button)
-            main_layout.addLayout(action_row)
+            self.apply_button.setProperty("aminateRole", "primary")
+            self.check_button.setToolTip("Validate controls, meshes, offset, radius, and collision samples.")
+            self.apply_button.setToolTip("Create or update live mesh collision records for every selected control and mesh.")
+            self.refresh_button.setToolTip("Solve enabled collision records again on the current frame.")
+            action_layout.addWidget(self.apply_button)
+            secondary_action_grid = QtWidgets.QGridLayout()
+            secondary_action_grid.setHorizontalSpacing(6)
+            secondary_action_grid.setVerticalSpacing(6)
+            secondary_action_grid.addWidget(self.check_button, 0, 0)
+            secondary_action_grid.addWidget(self.refresh_button, 0, 1)
+            secondary_action_grid.setColumnStretch(0, 1)
+            secondary_action_grid.setColumnStretch(1, 1)
+            action_layout.addLayout(secondary_action_grid)
+            main_layout.addLayout(action_layout)
 
-            contact_group = QtWidgets.QGroupBox("Saved Contacts In Scene")
-            contact_layout = QtWidgets.QVBoxLayout(contact_group)
-            self.contacts_table = QtWidgets.QTableWidget(0, 5)
-            self.contacts_table.setHorizontalHeaderLabels(["Control", "Surface", "Offset", "Normal", "State"])
+            collision_group = QtWidgets.QGroupBox("Saved Mesh Collision Records")
+            collision_layout = QtWidgets.QVBoxLayout(collision_group)
+            self.contacts_table = QtWidgets.QTableWidget(0, 6)
+            self.contacts_table.setHorizontalHeaderLabels(
+                ["Control", "Mesh", "Offset", "Radius", "Follow Normal", "State"]
+            )
             self.contacts_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             self.contacts_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
             self.contacts_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
             self.contacts_table.setAlternatingRowColors(True)
-            self.contacts_table.setToolTip("Pick a saved row to turn it on, turn it off, key it, or delete it.")
+            self.contacts_table.setToolTip(
+                "Saved collision records. Select one or more rows to enable, disable, or delete them."
+            )
             header = self.contacts_table.horizontalHeader()
-            header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+            header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
             header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-            header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
-            contact_layout.addWidget(self.contacts_table, 1)
+            for column_index in range(2, 6):
+                header.setSectionResizeMode(column_index, QtWidgets.QHeaderView.ResizeToContents)
+            collision_layout.addWidget(self.contacts_table, 1)
 
-            manage_row = QtWidgets.QHBoxLayout()
-            self.enable_button = QtWidgets.QPushButton("Turn On Selected")
-            self.disable_button = QtWidgets.QPushButton("Turn Off Selected")
+            management_grid = QtWidgets.QGridLayout()
+            self.enable_button = QtWidgets.QPushButton("Enable Selected")
+            self.disable_button = QtWidgets.QPushButton("Disable Selected")
             self.delete_button = QtWidgets.QPushButton("Delete Selected")
-            self.delete_all_button = QtWidgets.QPushButton("Delete All Contacts")
-            self.enable_button.setToolTip("Turn the selected surface contact rows on so they keep solving.")
-            self.disable_button.setToolTip("Turn the selected surface contact rows off and leave the last solved pose in place.")
-            self.delete_button.setToolTip("Remove the selected saved contact rows.")
-            self.delete_all_button.setToolTip("Remove every saved surface contact from the scene.")
-            manage_row.addWidget(self.enable_button)
-            manage_row.addWidget(self.disable_button)
-            manage_row.addWidget(self.delete_button)
-            manage_row.addWidget(self.delete_all_button)
-            contact_layout.addLayout(manage_row)
-            main_layout.addWidget(contact_group, 1)
+            self.delete_all_button = QtWidgets.QPushButton("Delete All Collision")
+            self.delete_button.setProperty("aminateRole", "danger")
+            self.delete_all_button.setProperty("aminateRole", "danger")
+            self.enable_button.setToolTip("Enable the selected mesh collision records.")
+            self.disable_button.setToolTip("Disable the selected mesh collision records without deleting them.")
+            self.delete_button.setToolTip("Delete the selected mesh collision records.")
+            self.delete_all_button.setToolTip("Delete every live mesh collision record while leaving legacy records untouched.")
+            management_grid.setHorizontalSpacing(6)
+            management_grid.setVerticalSpacing(6)
+            management_grid.addWidget(self.enable_button, 0, 0)
+            management_grid.addWidget(self.disable_button, 0, 1)
+            management_grid.addWidget(self.delete_button, 1, 0)
+            management_grid.addWidget(self.delete_all_button, 1, 1)
+            management_grid.setColumnStretch(0, 1)
+            management_grid.setColumnStretch(1, 1)
+            collision_layout.addLayout(management_grid)
+            main_layout.addWidget(collision_group, 1)
 
             self.report_box = QtWidgets.QPlainTextEdit()
             self.report_box.setReadOnly(True)
-            self.report_box.setToolTip("Helpful notes about the selected control and surface.")
+            self.report_box.setToolTip("Validation and collision-solver notes.")
             main_layout.addWidget(self.report_box, 1)
 
             self.status_label = QtWidgets.QLabel("Ready.")
             self.status_label.setWordWrap(True)
             main_layout.addWidget(self.status_label)
 
-            footer_layout = QtWidgets.QHBoxLayout()
-            self.brand_label = QtWidgets.QLabel('Built by Amir. Follow Amir at <a href="{0}">followamir.com</a>.'.format(FOLLOW_AMIR_URL))
+            footer_layout = QtWidgets.QVBoxLayout()
+            self.brand_label = QtWidgets.QLabel(
+                'Built by Amir. Follow Amir at <a href="{0}">followamir.com</a>.'.format(FOLLOW_AMIR_URL)
+            )
             self.brand_label.setOpenExternalLinks(False)
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.5 Beta")
+            self.version_label = QtWidgets.QLabel("Version 0.3.6")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
+            self.donate_button.setToolTip("Open Amir's Donate link.")
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
 
-            self.use_selection_button.clicked.connect(self._use_selected_controls)
-            self.use_surface_button.clicked.connect(self._use_selected_surface)
+            self.use_inputs_button.clicked.connect(self._use_selected_inputs)
+            self.use_surfaces_button.clicked.connect(self._use_selected_surfaces)
+            self.offset_spin.valueChanged.connect(self._sync_to_controller)
+            self.radius_spin.valueChanged.connect(self._sync_to_controller)
             self.follow_normal_check.toggled.connect(self._sync_to_controller)
             self.check_button.clicked.connect(self._analyze)
             self.apply_button.clicked.connect(self._apply)
-            self.key_state_button.clicked.connect(self._key_selected_state)
             self.refresh_button.clicked.connect(self._refresh_now)
             self.enable_button.clicked.connect(self._enable_selected)
             self.disable_button.clicked.connect(self._disable_selected)
@@ -1445,6 +2454,8 @@ if QtWidgets:
             self.delete_all_button.clicked.connect(self._delete_all)
             self.contacts_table.itemSelectionChanged.connect(self._on_contact_selection_changed)
             self.contacts_table.itemDoubleClicked.connect(self._load_selected_contact)
+            scroll_area.setWidget(content_widget)
+            root_layout.addWidget(scroll_area)
 
         def _selected_table_records(self):
             rows = sorted(set(index.row() for index in self.contacts_table.selectionModel().selectedRows()))
@@ -1458,7 +2469,7 @@ if QtWidgets:
 
         def _refresh_contacts_table(self):
             selected_records = set(self.controller.selected_records)
-            payloads = self.controller.contact_entries(from_selection=False)
+            payloads = self.controller.collision_entries(from_selection=False)
             self._syncing_table = True
             blocker = QtCore.QSignalBlocker(self.contacts_table)
             try:
@@ -1469,7 +2480,8 @@ if QtWidgets:
                     row_values = [
                         payload.get("control_label", _short_name(payload.get("control", ""))),
                         _short_name(payload.get("surface", "")),
-                        "0.00",
+                        "{0:.4f}".format(float(payload.get("offset", 0.0))),
+                        "{0:.4f}".format(float(payload.get("radius", 0.0))),
                         "Yes" if payload.get("follow_normal") else "No",
                         "On" if payload.get("enabled") else "Off",
                     ]
@@ -1488,18 +2500,26 @@ if QtWidgets:
 
         def _sync_from_controller(self):
             self.controls_line.setText(", ".join(_short_name(node_name) for node_name in self.controller.control_nodes))
-            self.surface_line.setText(_short_name(self.controller.surface_node))
+            self.surface_line.setText(", ".join(_short_name(node_name) for node_name in self.controller.surface_nodes))
+            self.offset_spin.blockSignals(True)
+            self.radius_spin.blockSignals(True)
             self.follow_normal_check.blockSignals(True)
-            self.follow_normal_check.setChecked(bool(self.controller.follow_surface_normal))
+            self.offset_spin.setValue(float(self.controller.collision_offset))
+            self.radius_spin.setValue(float(self.controller.collision_radius))
+            self.follow_normal_check.setChecked(bool(self.controller.collision_follow_normal))
+            self.offset_spin.blockSignals(False)
+            self.radius_spin.blockSignals(False)
             self.follow_normal_check.blockSignals(False)
             self._refresh_contacts_table()
             self.report_box.setPlainText(_format_report(self.controller.report))
 
         def _sync_to_controller(self):
+            self.controller.set_mode(LIVE_MESH_COLLISION_MODE)
             self.controller.control_nodes = _resolve_controls_from_text(self.controls_line.text())
-            resolved_surface = self.surface_line.text().strip()
-            self.controller.surface_node = _node_long_name(resolved_surface) if resolved_surface and cmds.objExists(resolved_surface) else resolved_surface
-            self.controller.follow_surface_normal = bool(self.follow_normal_check.isChecked())
+            self.controller.collision_offset = max(0.0, float(self.offset_spin.value()))
+            self.controller.collision_radius = max(0.0, float(self.radius_spin.value()))
+            self.controller.collision_follow_normal = bool(self.follow_normal_check.isChecked())
+            self.controller.follow_surface_normal = self.controller.collision_follow_normal
 
         def _set_status(self, message, success=True):
             self.status_label.setText(message)
@@ -1510,36 +2530,36 @@ if QtWidgets:
             self.report_box.setPlainText(_format_report(self.controller.report))
             self._refresh_contacts_table()
 
-        def _use_selected_controls(self):
-            success, message = self.controller.set_controls_from_selection()
+        def _use_selected_inputs(self):
+            success, message = self.controller.set_collision_inputs_from_selection()
             self._sync_from_controller()
             self._set_status(message, success)
 
-        def _use_selected_surface(self):
-            success, message = self.controller.set_surface_from_selection()
+        def _use_selected_surfaces(self):
+            success, message = self.controller.set_surfaces_from_selection()
             self._sync_from_controller()
             self._set_status(message, success)
 
         def _analyze(self):
             self._sync_to_controller()
-            success, message = self.controller.analyze_setup()
+            success, message = self.controller.analyze_collision_setup()
             self._set_status(message, success)
 
         def _apply(self):
             self._sync_to_controller()
-            success, message = self.controller.create_or_update_contact()
+            if not self.controller._resolved_controls() or not self.controller._resolved_surfaces():
+                success, message = self.controller.set_collision_inputs_from_selection()
+                if not success:
+                    self._set_status(message, False)
+                    return False
+            success, message = self.controller.create_or_update_collision()
             self._sync_from_controller()
             self._set_status(message, success)
+            return success
 
         def _refresh_now(self):
             self._sync_to_controller()
             success, message = self.controller.refresh_now()
-            self._sync_from_controller()
-            self._set_status(message, success)
-
-        def _key_selected_state(self):
-            self.controller.set_selected_records(self._selected_table_records())
-            success, message = self.controller.key_selected_state()
             self._sync_from_controller()
             self._set_status(message, success)
 
@@ -1562,7 +2582,7 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _delete_all(self):
-            success, message = self.controller.delete_all()
+            success, message = self.controller.delete_all_collision()
             self._sync_from_controller()
             self._set_status(message, success)
 
@@ -1595,34 +2615,20 @@ if QtWidgets:
                 self._set_status("Could not open the Donate link from this Maya session.", False)
 
         def closeEvent(self, event):
-            try:
-                self.controller.shutdown()
-            except Exception:
-                pass
-            try:
-                super(MayaSurfaceContactWindow, self).closeEvent(event)
-            except TypeError:
-                QtWidgets.QDialog.closeEvent(self, event)
-
-
-def _delete_workspace_control(workspace_control_name):
-    if MAYA_AVAILABLE and cmds.workspaceControl(workspace_control_name, exists=True):
-        try:
-            cmds.deleteUI(workspace_control_name, control=True)
-        except Exception:
-            pass
-
+            # Keep callbacks and the Qt wrapper alive for Maya 2026.
+            self.hide()
+            event.accept()
 
 def _close_existing_window():
-    global GLOBAL_WINDOW
+    """Hide and return the existing window instead of destroying Qt state."""
+    global GLOBAL_CONTROLLER, GLOBAL_WINDOW
     if GLOBAL_WINDOW is not None:
         try:
-            GLOBAL_WINDOW.close()
-            GLOBAL_WINDOW.deleteLater()
+            GLOBAL_WINDOW.hide()
+            GLOBAL_CONTROLLER = getattr(GLOBAL_WINDOW, "controller", GLOBAL_CONTROLLER)
+            return GLOBAL_WINDOW
         except Exception:
-            pass
-    GLOBAL_WINDOW = None
-    _delete_workspace_control(WORKSPACE_CONTROL_NAME)
+            GLOBAL_WINDOW = None
     if QtWidgets:
         application = QtWidgets.QApplication.instance()
         if application and hasattr(application, "topLevelWidgets"):
@@ -1631,10 +2637,13 @@ def _close_existing_window():
                     continue
                 try:
                     if getattr(widget, "objectName", lambda: "")() == WINDOW_OBJECT_NAME:
-                        widget.close()
-                        widget.deleteLater()
+                        widget.hide()
+                        GLOBAL_WINDOW = widget
+                        GLOBAL_CONTROLLER = getattr(widget, "controller", GLOBAL_CONTROLLER)
+                        return widget
                 except Exception:
                     pass
+    return None
 
 
 def launch_maya_surface_contact(dock=False):
@@ -1643,9 +2652,15 @@ def launch_maya_surface_contact(dock=False):
     if not (MAYA_AVAILABLE and QtWidgets):
         raise RuntimeError("Maya Surface Contact must be launched inside Maya with PySide available.")
 
-    _close_existing_window()
-    if dock:
-        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
+    existing = _close_existing_window()
+    if existing is not None:
+        existing.show()
+        try:
+            existing.raise_()
+            existing.activateWindow()
+        except Exception:
+            pass
+        return existing
 
     GLOBAL_CONTROLLER = MayaSurfaceContactController()
     GLOBAL_WINDOW = MayaSurfaceContactWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())

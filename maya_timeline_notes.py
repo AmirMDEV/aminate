@@ -847,8 +847,8 @@ if QtWidgets:
             self.controller.set_status_callback(self._set_status)
             self.setObjectName(WINDOW_OBJECT_NAME)
             self.setWindowTitle("Maya Timeline Notes")
-            self.setMinimumWidth(720)
-            self.setMinimumHeight(560)
+            self.setMinimumSize(360, 420)
+            self.resize(760, 700)
             self._loading_note_fields = False
             self._last_highlighted_range = None
             self._last_current_frame_notes_state = None
@@ -868,14 +868,59 @@ if QtWidgets:
                     self.note_auto_update_timer.stop()
             except Exception:
                 pass
-            try:
+            if os.environ.get("AMINATE_LEGACY_NATIVE_CLEANUP") == "1":
+                # Explicit recovery-only teardown. Normal close hides/reuses.
                 self.controller.shutdown()
+            # Keep the time-slider overlay/controller alive for safe reuse.
+            # Native destruction while Maya owns the Qt wrapper is unsafe.
+            self.hide()
+            event.ignore()
+
+        def showEvent(self, event):
+            try:
+                if hasattr(self, "range_sync_timer") and self.range_sync_timer:
+                    self.range_sync_timer.start()
             except Exception:
                 pass
-            super(MayaTimelineNotesWindow, self).closeEvent(event)
+            try:
+                if hasattr(self, "note_auto_update_timer") and self.note_auto_update_timer:
+                    # Single-shot timer remains idle until a field changes.
+                    self.note_auto_update_timer.stop()
+            except Exception:
+                pass
+            try:
+                super(MayaTimelineNotesWindow, self).showEvent(event)
+            except Exception:
+                pass
+
+        def hideEvent(self, event):
+            try:
+                if hasattr(self, "range_sync_timer") and self.range_sync_timer:
+                    self.range_sync_timer.stop()
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "note_auto_update_timer") and self.note_auto_update_timer:
+                    self.note_auto_update_timer.stop()
+            except Exception:
+                pass
+            try:
+                super(MayaTimelineNotesWindow, self).hideEvent(event)
+            except Exception:
+                pass
 
         def _build_ui(self):
-            main_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout = QtWidgets.QVBoxLayout(self)
+            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setSpacing(0)
+            scroll = QtWidgets.QScrollArea(self)
+            scroll.setObjectName("timelineNotesContentScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumWidth(0)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            content = QtWidgets.QWidget()
+            content.setMinimumWidth(0)
+            main_layout = QtWidgets.QVBoxLayout(content)
             intro = QtWidgets.QLabel(
                 "Make colored timeline ranges with titles, note text, export/import, and hover help on the Maya time slider."
             )
@@ -977,6 +1022,8 @@ if QtWidgets:
 
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
+            help_box.setObjectName("timelineNotesHelpBox")
+            help_box.setVisible(False)
             help_box.setPlainText(
                 "1. Type a short title and the full note text.\n"
                 "2. Leave Auto Use Highlighted Range on to follow the highlighted time-slider range, or turn it off and set Start and End yourself.\n"
@@ -986,6 +1033,14 @@ if QtWidgets:
                 "6. Hover over the colored range on the time slider to read the full note.\n"
                 "7. Export Notes if you want to move them to another scene later."
             )
+            help_toggle = QtWidgets.QToolButton()
+            help_toggle.setText("How to use")
+            help_toggle.setCheckable(True)
+            help_toggle.setChecked(False)
+            help_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            help_toggle.setToolTip("Show or hide the Timeline Notes quick guide.")
+            help_toggle.toggled.connect(help_box.setVisible)
+            notes_layout.addWidget(help_toggle)
             notes_layout.addWidget(help_box)
 
             self._build_customization_tab()
@@ -1007,6 +1062,8 @@ if QtWidgets:
             self.donate_button.clicked.connect(self._open_donate_url)
             footer_layout.addWidget(self.donate_button)
             main_layout.addLayout(footer_layout)
+            scroll.setWidget(content)
+            outer_layout.addWidget(scroll)
 
             self.current_color = tuple(getattr(self, "default_note_color", DEFAULT_NOTE_COLOR))
             self._refresh_color_preview()
@@ -1271,6 +1328,8 @@ if QtWidgets:
             self._schedule_auto_update_note()
 
         def _poll_live_timeline_state(self):
+            if not self.isVisible():
+                return
             self._sync_highlighted_range_if_needed()
             self._refresh_current_frame_notes()
 
@@ -1484,50 +1543,20 @@ if QtWidgets:
             _open_external_url(DONATE_URL)
 
 
-def _close_existing_window():
-    global GLOBAL_CONTROLLER
-    global GLOBAL_WINDOW
-    if GLOBAL_CONTROLLER is not None:
-        try:
-            GLOBAL_CONTROLLER.shutdown()
-        except Exception:
-            pass
-        GLOBAL_CONTROLLER = None
-    if GLOBAL_WINDOW is not None:
-        try:
-            GLOBAL_WINDOW.close()
-            GLOBAL_WINDOW.deleteLater()
-        except Exception:
-            pass
-    GLOBAL_WINDOW = None
-    if not QtWidgets:
-        return
-    app = QtWidgets.QApplication.instance()
-    if not app:
-        return
-    for widget in app.topLevelWidgets():
-        try:
-            if widget.objectName() == WINDOW_OBJECT_NAME:
-                widget.close()
-                widget.deleteLater()
-        except Exception:
-            pass
-
-
-if QtWidgets:
-    def _delete_workspace_control(name):
-        if MAYA_AVAILABLE and cmds and cmds.workspaceControl(name, exists=True):
-            cmds.deleteUI(name)
-
-
 def launch_maya_timeline_notes(dock=False):
     global GLOBAL_CONTROLLER, GLOBAL_WINDOW
     if not (MAYA_AVAILABLE and QtWidgets):
         raise RuntimeError("Maya Timeline Notes must be launched inside Maya with PySide available.")
 
-    _close_existing_window()
-    if dock:
-        _delete_workspace_control(WORKSPACE_CONTROL_NAME)
+    if GLOBAL_WINDOW is not None:
+        try:
+            GLOBAL_WINDOW.show()
+            GLOBAL_WINDOW.raise_()
+            GLOBAL_WINDOW.activateWindow()
+            return GLOBAL_WINDOW
+        except Exception:
+            GLOBAL_WINDOW = None
+            GLOBAL_CONTROLLER = None
 
     GLOBAL_CONTROLLER = MayaTimelineNotesController()
     GLOBAL_WINDOW = MayaTimelineNotesWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())

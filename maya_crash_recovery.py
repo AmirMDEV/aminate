@@ -28,8 +28,8 @@ except Exception:
 STATE_FILE_NAME = "maya_crash_recovery_state.json"
 STATE_VERSION = 1
 STATE_STALE_SECONDS = 7 * 24 * 60 * 60
-USER_SETUP_BEGIN = "# >>> AmirMayaAnimWorkflowTools crash recovery >>>"
-USER_SETUP_END = "# <<< AmirMayaAnimWorkflowTools crash recovery <<<"
+USER_SETUP_BEGIN = "# >>> AmirAminate crash recovery >>>"
+USER_SETUP_END = "# <<< AmirAminate crash recovery <<<"
 
 _BOOTSTRAPPED = False
 _SCRIPT_JOB_IDS = []
