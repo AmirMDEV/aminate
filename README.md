@@ -2,6 +2,12 @@
 
 # Aminate
 
+## Version 0.3.8 candidate
+
+The next version simplifies the tool pages, adds toolbar favourites, and keeps both package icons creating a scene ZIP. If the scene needs to be saved first, Package explains this in a popup. Window shortcuts and opacity are in Customization.
+
+See [UI_REFRESH_0_3_8.md](UI_REFRESH_0_3_8.md) for the module-by-module changes and validation limits. This source candidate is awaiting the required live Maya and release-package checks before publication.
+
 ## Docking layout
 
 Main Aminate panel supports Maya docking plus normal floating use. Aminate Timeline Toolkit Bar stays fixed at Maya bottom, cannot float or move, scrolls on narrow layouts. This split prevents shared dock lifecycle crashes. Docked Aminate uses Maya UI-element mode, so Maya's unsafe native close control stays unavailable in Maya 2026.
@@ -38,13 +44,13 @@ The sections in regular use in this release are:
 
 All 23 main tabs now have a plain-language, three-step coach inside Maya and a matching deep-linked lesson in the offline tutorial. The remaining tabs are `Surface Contact`, `Dynamic Pivot`, `Universal IK/FK`, `Animation Styling`, `Character Skinning`, `Rig Scale`, `Video Reference`, `Smear Frames`, and `Customization`.
 
-`Version 0.3.7`
+`Version 0.3.8`
 
-## What Is New In 0.3.7
+## What Was New In 0.3.7
 
 - Animator's Pencil single clicks now create a small dot at the cursor instead of an arbitrary line. Held drags keep the realtime drawing path.
 - Attaching a reference video switches the active main Maya viewport to the video's Pencil View camera while keeping the Reference Viewer independent. Return to the previous camera at any time without hiding the viewer.
-- The Maya drag-and-drop package is self-contained. The offline tutorial is shipped as a separate `Aminate_v0.3.7_offline_tutorial.zip` release asset.
+- The Maya drag-and-drop package is self-contained. The offline tutorial is shipped as a separate `Aminate_v0.3.8_offline_tutorial.zip` release asset.
 - These new Pencil and reference-video workflows are in beta testing. The `0.3.7` release itself is not beta-labelled.
 
 ## What Is New In 0.3.6
@@ -103,14 +109,14 @@ All 23 main tabs now have a plain-language, three-step coach inside Maya and a m
 
 ## Install
 
-1. Download `Aminate_v0.3.7.zip` from the latest release.
+1. Download `Aminate_v0.3.8.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `Aminate_v0_3_7_drag_this_file_into_Maya.py` into the Maya viewport.
+5. Drag `Aminate_v0_3_8_drag_this_file_into_Maya.py` into the Maya viewport.
 6. In a fresh Maya session, Aminate opens after installation.
 7. If Aminate is already open, the installer preserves that session. Restart Maya before reopening Aminate so it loads the update.
-8. Optionally download `Aminate_v0.3.7_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
+8. Optionally download `Aminate_v0.3.8_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
 
 ## How To Use
 

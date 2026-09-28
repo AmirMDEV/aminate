@@ -669,6 +669,8 @@ if QtWidgets:
             self.apply_selected_button.clicked.connect(self._apply_selected)
             self.scan_button.clicked.connect(self._scan_overlaps)
             self.clear_button.clicked.connect(self._clear_markers)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'styling', locals())
 
         def _sync_from_controller(self):
             self.enabled_check.blockSignals(True)

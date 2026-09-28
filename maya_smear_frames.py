@@ -1402,6 +1402,8 @@ if QtWidgets is not None:
             scroll_area.setWidget(content_widget)
             root_layout.addWidget(scroll_area)
             self._refresh_saved_list()
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'smear', locals())
 
         def _refresh_selection(self):
             self.selected_label.setText(self.controller.selected_mesh_label())
@@ -1480,11 +1482,15 @@ if QtWidgets is not None:
         def _edit_last(self):
             success, message, _target = self.controller.edit_smear_in_viewport(self._selected_output())
             self.status_label.setText(message)
+            if success:
+                self.edit_state_label.setText("Editing: {0}".format(_target))
             return success
 
         def _finish_editing(self):
             success, message = self.controller.finish_editing(self._selected_output())
             self.status_label.setText(message)
+            if success:
+                self.edit_state_label.setText("Editing finished. Smear is ready.")
             return success
 
         def _apply_name_and_range(self):

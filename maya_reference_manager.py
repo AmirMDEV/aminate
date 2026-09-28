@@ -461,6 +461,23 @@ def _clean_unknown_scene_data(remove_nodes=True, remove_plugins=True):
     }
 
 
+def package_result_folder(result):
+    """Show the downloadable ZIP, which sits beside the unpacked folder."""
+    result = result or {}
+    return os.path.dirname(result.get("zip_path") or "") or result.get("package_dir") or ""
+
+
+def package_result_message(result):
+    message = "Zip ready: {0}".format(result.get("zip_path") or "")
+    missing = int(result.get("missing_count") or 0)
+    if missing:
+        message += " Missing {0} file(s); check the package manifest.".format(missing)
+    warnings = result.get("warnings") or []
+    if warnings:
+        message += " " + " ".join(warnings)
+    return message, not bool(missing)
+
+
 class ReferencePackageController(object):
     def __init__(self, status_callback=None):
         self.status_callback = status_callback
@@ -523,8 +540,11 @@ class ReferencePackageController(object):
         if not MAYA_AVAILABLE:
             raise RuntimeError("Reference Manager must run inside Maya.")
         original_scene = _scene_path()
-        if not original_scene:
-            raise RuntimeError("Save the scene once before packaging.")
+        if not original_scene or not os.path.isfile(original_scene):
+            message = "Save your Maya scene first (File > Save Scene As), then click Package again. Packaging needs a saved scene file."
+            if not cmds.about(batch=True):
+                cmds.confirmDialog(title="Save Scene First", message=message, button=["OK"], defaultButton="OK")
+            raise RuntimeError(message)
         warnings = []
         if save_scene:
             cmds.file(save=True, force=True)
@@ -764,6 +784,8 @@ if QtWidgets:
             self.output_path.textChanged.connect(self._validate_package_inputs)
             self.package_name.textChanged.connect(self._validate_package_inputs)
             self._validate_package_inputs()
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'reference', locals())
 
         def _validate_package_inputs(self, *_args):
             output_dir = self.output_path.text().strip()
@@ -827,8 +849,9 @@ if QtWidgets:
             except Exception as exc:
                 self._set_status(str(exc), False)
                 return
-            self._set_status("Zip ready: {0}".format(result["zip_path"]), True)
             self.refresh_files()
+            # Refresh reports scan status; retain the actual package result last.
+            self._set_status(*package_result_message(result))
 
         def scan_unknown_data(self):
             try:
@@ -878,12 +901,14 @@ if QtWidgets:
 
         def open_package_folder(self):
             result = self.controller.last_result or {}
-            folder_path = result.get("package_dir") or self.output_path.text()
+            folder_path = package_result_folder(result) or self.output_path.text()
             if folder_path and os.path.exists(folder_path):
                 try:
                     os.startfile(folder_path)
                 except Exception:
                     self._set_status("Package folder is {0}".format(folder_path), True)
+            else:
+                self._set_status("Package a scene first or choose an existing output folder.", False)
 
     class MayaReferenceManagerWindow(_WindowBase):
         def __init__(self, controller=None, parent=None):

@@ -1975,6 +1975,8 @@ if QtWidgets:
             self.falloff_spin.valueChanged.connect(self._settings_changed)
             self.past_color_button.clicked.connect(lambda: self._pick_color("past"))
             self.future_color_button.clicked.connect(lambda: self._pick_color("future"))
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'onion', locals())
 
         def _populate_from_controller(self):
             self._syncing_ui = True

@@ -1762,6 +1762,8 @@ if QtWidgets:
             self.holds_table.itemDoubleClicked.connect(self._load_picked_hold)
             scroll_area.setWidget(content_widget)
             root_layout.addWidget(scroll_area)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'contact', locals())
 
         def _selected_table_locators(self):
             rows = sorted(set(index.row() for index in self.holds_table.selectionModel().selectedRows()))

@@ -78,9 +78,9 @@ DOCKED_WORKFLOW_MIN_HEIGHT = 480
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.7"
+VERSION_LABEL = "Version 0.3.8"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
-TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.7/Aminate_v0.3.7_offline_tutorial.zip"
+TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.8/Aminate_v0.3.8_offline_tutorial.zip"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "aminateShelfButton"
@@ -2855,7 +2855,11 @@ class AminateController(object):
         return self._controller("animation_styling_controller", maya_animation_styling.AnimationStylingController)
 
     def get_timing_controller(self):
-        return self._controller("timing_controller", maya_timing_tools.MayaTimingToolsController)
+        controller = self._controller("timing_controller", maya_timing_tools.MayaTimingToolsController)
+        if controller is not None:
+            # All toolbar instances and Reference Manager share package history.
+            controller.reference_package_controller = self.reference_manager_controller
+        return controller
 
     def get_timeline_notes_controller(self):
         return self._controller("timeline_notes_controller", maya_timeline_notes.MayaTimelineNotesController)
@@ -4436,26 +4440,27 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 return name
 
         def _ensure_tab_content(self, index):
-            if not hasattr(self, "tab_widget") or index is None or index < 0:
-                return
+            self._last_tab_error = ""
+            if not hasattr(self, "tab_widget") or index is None or index < 0 or index >= self.tab_widget.count():
+                self._last_tab_error = "Invalid Aminate tab."
+                return False
             tab_name = self.tab_widget.tabText(index)
             if tab_name in getattr(self, "_built_tab_names", set()):
-                return
+                return True
             builder = getattr(self, "_tab_builders", {}).get(tab_name)
             if not builder:
-                return
+                self._last_tab_error = "No builder registered for {0}.".format(tab_name)
+                return False
             try:
                 builder()
-                self._built_tab_names.add(tab_name)
                 _apply_aminate_combo_affordances(self.tab_widget.widget(index))
+                self._built_tab_names.add(tab_name)
+                return True
             except Exception as exc:
-                page = self.tab_widget.widget(index)
-                if page and not page.layout():
-                    layout = QtWidgets.QVBoxLayout(page)
-                    label = QtWidgets.QLabel("Could not open this Aminate tab: {0}".format(exc))
-                    label.setWordWrap(True)
-                    layout.addWidget(label)
-                _warning("Could not build Aminate tab {0}: {1}".format(tab_name, exc))
+                self._last_tab_error = "Could not build Aminate tab {0}: {1}".format(tab_name, exc)
+                self._set_status(self._last_tab_error, False)
+                _warning(self._last_tab_error)
+                return False
 
         def _configure_main_tab_bar(self):
             tab_bar = self.tab_widget.tabBar() if self.tab_widget else None
@@ -4804,6 +4809,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.edit_pivot_button.clicked.connect(self._edit_pivot)
             self.apply_pivot_button.clicked.connect(self._apply_pivot)
             self.clear_pivot_button.clicked.connect(self._clear_pivot)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'pivot', locals())
 
         def _build_contact_hold_tab(self):
             layout = QtWidgets.QVBoxLayout(self.contact_hold_page)
@@ -4948,6 +4955,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.save_profile_button.clicked.connect(self._save_profile)
             self.switch_fk_to_ik_button.clicked.connect(self._switch_fk_to_ik)
             self.switch_ik_to_fk_button.clicked.connect(self._switch_ik_to_fk)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'ikfk', locals())
 
         def _build_face_retarget_tab(self):
             layout = QtWidgets.QVBoxLayout(self.face_retarget_page)
@@ -4955,6 +4964,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             layout.addWidget(self._build_tab_intro(TAB_FACE_RETARGET))
             face_hint = QtWidgets.QLabel("Fill paired rows: source control on the left, target control on the right. A new empty row appears automatically and empty rows are ignored. Auto Map By Name pairs matching names quickly. Retarget All Controls matches the source starting pose and copies only the source's original key times.")
             face_hint.setWordWrap(True)
+            face_hint.hide()
             layout.addWidget(face_hint)
             self.face_retarget_panel = self._embed_tool_panel(
                 maya_face_retarget.MayaFaceRetargetWindow(self.controller.face_retarget_controller, parent=self.face_retarget_page),
@@ -5059,6 +5069,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 self.skin_page,
             )
             layout.addWidget(self.skin_transfer_panel, 0)
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'skin_tasks', locals())
 
         def _build_rig_scale_tab(self):
             layout = QtWidgets.QVBoxLayout(self.rig_scale_page)
@@ -5174,6 +5186,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             if self.quick_start_tool_list.count():
                 self.quick_start_tool_list.setCurrentRow(0)
             self._filter_quick_start_tools("")
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'quick_start', locals())
             return
 
         def _filter_quick_start_tools(self, query):
@@ -5415,17 +5429,24 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
 
         def _set_initial_tab(self, initial_tab):
             if isinstance(initial_tab, str):
-                found_index = self._find_tab_index(initial_tab)
-                self.tab_widget.setCurrentIndex(0 if found_index is None else found_index)
-                self._ensure_tab_content(self.tab_widget.currentIndex())
-                return
-            try:
-                initial_index = int(initial_tab)
-            except (TypeError, ValueError):
-                initial_index = 0
-            initial_index = max(0, min(initial_index, self.tab_widget.count() - 1))
+                initial_index = self._find_tab_index(initial_tab)
+                if initial_index is None:
+                    self._last_tab_error = "Unknown Aminate tab: {0}".format(initial_tab)
+                    return False
+            else:
+                try:
+                    initial_index = int(initial_tab)
+                except (TypeError, ValueError):
+                    initial_index = 0
+                initial_index = max(0, min(initial_index, self.tab_widget.count() - 1))
+            previous_index = self.tab_widget.currentIndex()
             self.tab_widget.setCurrentIndex(initial_index)
-            self._ensure_tab_content(self.tab_widget.currentIndex())
+            # currentChanged builds a newly selected page synchronously. Do not
+            # immediately invoke a failed builder a second time on the same click.
+            if previous_index != initial_index:
+                tab_name = self.tab_widget.tabText(initial_index)
+                return tab_name in getattr(self, "_built_tab_names", set())
+            return self._ensure_tab_content(initial_index)
 
         def _set_status(self, message, success=True):
             if not hasattr(self, "status_label"):

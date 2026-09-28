@@ -1828,6 +1828,8 @@ class ControlPickerPanel(QtWidgets.QWidget):
         self.status_label = QtWidgets.QLabel("Ready.")
         self.status_label.setWordWrap(True)
         main_layout.addWidget(self.status_label)
+        import maya_aminate_ui
+        maya_aminate_ui.apply(self, 'picker', locals())
 
     def _load_initial_state(self):
         state = self.controller.load_state()
