@@ -2855,7 +2855,11 @@ class AminateController(object):
         return self._controller("animation_styling_controller", maya_animation_styling.AnimationStylingController)
 
     def get_timing_controller(self):
-        return self._controller("timing_controller", maya_timing_tools.MayaTimingToolsController)
+        controller = self._controller("timing_controller", maya_timing_tools.MayaTimingToolsController)
+        if controller is not None:
+            # All toolbar instances and Reference Manager share package history.
+            controller.reference_package_controller = self.reference_manager_controller
+        return controller
 
     def get_timeline_notes_controller(self):
         return self._controller("timeline_notes_controller", maya_timeline_notes.MayaTimelineNotesController)

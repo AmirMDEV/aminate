@@ -6430,10 +6430,6 @@ class MayaTimingToolsController(object):
                 attribute=attrs,
             )
         except Exception as exc:
-            try:
-                cmds.undoInfo(closeChunk=True)
-            except Exception:
-                pass
             return False, "Could not bake selected controls: {0}".format(exc)
         finally:
             try:
@@ -6542,7 +6538,10 @@ class MayaTimingToolsController(object):
         self.create_history_auto_snapshot("Before Reference Manager package")
         try:
             import maya_reference_manager
-            controller = maya_reference_manager.ReferencePackageController()
+            controller = getattr(self, "reference_package_controller", None)
+            if controller is None:
+                controller = maya_reference_manager.ReferencePackageController()
+                self.reference_package_controller = controller
             result = controller.package_current_scene(
                 include_references=True,
                 include_external=True,
@@ -6552,7 +6551,7 @@ class MayaTimingToolsController(object):
         except Exception as exc:
             return False, "Could not package scene to zip: {0}".format(exc)
 
-        package_dir = result.get("package_dir") or os.path.dirname(result.get("zip_path") or "")
+        package_dir = maya_reference_manager.package_result_folder(result)
         opened_folder = False
         if package_dir and os.path.isdir(package_dir):
             try:
