@@ -2119,7 +2119,11 @@ def _central_action_toolbar_tools():
             item.get("help") or "",
         ).strip()
         hydrated.append(item)
-    return tuple(hydrated)
+    order = {"Keys": 0, "Review": 1, "Scene": 2}
+    for item in hydrated:
+        command = item["command"]
+        item["group"] = "Keys" if command in ("nudge_left", "nudge_right", "insert_inbetween", "tween_machine", "remove_current", "reset_pose", "bake_twos") else ("Review" if command == "playblast_1080p" else "Scene")
+    return tuple(sorted(hydrated, key=lambda item: order[item["group"]]))
 
 
 # Compatibility shape retained for existing callers. Values now come from
@@ -7596,6 +7600,11 @@ if QtWidgets:
             self.value_label.setObjectName("tweenMachineValueLabel")
             self.value_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             header_layout.addWidget(self.value_label)
+            settings_button = QtWidgets.QToolButton()
+            settings_button.setText("Settings")
+            settings_button.setToolTip("Window shortcuts and opacity in Customization.")
+            settings_button.clicked.connect(lambda: _open_workflow_tab("customization"))
+            header_layout.addWidget(settings_button)
             close_button = QtWidgets.QPushButton("X")
             close_button.setObjectName("tweenMachineCloseButton")
             close_button.setToolTip("Close Tween Machine.")
@@ -8208,7 +8217,13 @@ if QtWidgets:
             layout = QtWidgets.QHBoxLayout()
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(3)
+            previous_group = None
             for tool in STUDENT_CORE_TOOLS:
+                if tool["group"] != previous_group:
+                    group_label = QtWidgets.QLabel(tool["group"])
+                    group_label.setProperty("aminateRole", "muted")
+                    layout.addWidget(group_label)
+                    previous_group = tool["group"]
                 button = QtWidgets.QToolButton()
                 button.setObjectName("studentTimelineBar_{0}".format(tool["command"]))
                 icon = _make_action_icon(tool)
@@ -8293,6 +8308,8 @@ if QtWidgets:
                     self._workflow_button_group.addButton(button)
                     self._workflow_buttons[tool["tab"]] = button
                 layout.addWidget(button)
+            import maya_aminate_ui
+            maya_aminate_ui.add_toolbar_menu(self, layout)
             layout.addStretch(1)
             self.game_mode_button = QtWidgets.QToolButton()
             self.game_mode_button.setObjectName("toolkitBarGameAnimationModeButton")
@@ -9292,7 +9309,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.6")
+            self.version_label = QtWidgets.QLabel("Version 0.3.8")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -9360,6 +9377,8 @@ if QtWidgets:
             self.teacher_demo_log_timer.timeout.connect(self._refresh_teacher_demo_edit_log)
             self.teacher_demo_log_timer.start()
             self._refresh_teacher_demo_edit_log()
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'scene', locals())
 
         def _sync_from_controller(self):
             self.auto_key_button.blockSignals(True)

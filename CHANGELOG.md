@@ -1,8 +1,14 @@
 # Changelog
 
-## Unreleased
+## Version 0.3.8 - release candidate
 
-- Nothing recorded yet.
+- Simplified every tool page into task groups with secondary options behind disclosures. Added Quick Start task shortcuts, toolbar favourites and a More tools menu.
+- Kept both toolbar package buttons connected to ZIP creation. An unnamed scene or a scene missing on disk now shows a Save Scene First popup before packaging starts.
+- Added clear create/update actions, retarget scope, visual Picker default, Pencil drawing/layer groups, History snapshot management, and separated skinning tasks.
+- Added Onion Skin preview switching, Channel Box selection pinning, optional Graph Editor Outliner, and central window shortcuts/opacity in Customization.
+- Improved narrow panel layouts and added a shared UI module to both runtime and installer manifests.
+- Carried forward the toolbar fixes: empty selection does nothing, layer-aware keyed-control lookup, safe static-curve cleanup, undo handling and honest tool-opening errors.
+- Validation: 29 automated regressions and Qt construction of all 23 tool pages at five widths. Maya scene queries were mocked. Live Maya and release-package/install gates are still required before publication.
 
 ## Version 0.3.7 - 2026-08-01
 

@@ -4114,6 +4114,8 @@ if QtWidgets:
             self.skeleton_line.editingFinished.connect(self._sync_controller_values)
             self.suffix_line.editingFinished.connect(self._sync_controller_values)
             self._update_scale_input_ui()
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'rig_scale', locals())
 
         def _scale_mode_changed(self, *_args):
             self._update_scale_input_ui()

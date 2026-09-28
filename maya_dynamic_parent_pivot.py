@@ -78,9 +78,9 @@ DOCKED_WORKFLOW_MIN_HEIGHT = 480
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.7"
+VERSION_LABEL = "Version 0.3.8"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
-TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.7/Aminate_v0.3.7_offline_tutorial.zip"
+TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.8/Aminate_v0.3.8_offline_tutorial.zip"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "aminateShelfButton"
@@ -4809,6 +4809,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.edit_pivot_button.clicked.connect(self._edit_pivot)
             self.apply_pivot_button.clicked.connect(self._apply_pivot)
             self.clear_pivot_button.clicked.connect(self._clear_pivot)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'pivot', locals())
 
         def _build_contact_hold_tab(self):
             layout = QtWidgets.QVBoxLayout(self.contact_hold_page)
@@ -4953,6 +4955,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.save_profile_button.clicked.connect(self._save_profile)
             self.switch_fk_to_ik_button.clicked.connect(self._switch_fk_to_ik)
             self.switch_ik_to_fk_button.clicked.connect(self._switch_ik_to_fk)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'ikfk', locals())
 
         def _build_face_retarget_tab(self):
             layout = QtWidgets.QVBoxLayout(self.face_retarget_page)
@@ -4960,6 +4964,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             layout.addWidget(self._build_tab_intro(TAB_FACE_RETARGET))
             face_hint = QtWidgets.QLabel("Fill paired rows: source control on the left, target control on the right. A new empty row appears automatically and empty rows are ignored. Auto Map By Name pairs matching names quickly. Retarget All Controls matches the source starting pose and copies only the source's original key times.")
             face_hint.setWordWrap(True)
+            face_hint.hide()
             layout.addWidget(face_hint)
             self.face_retarget_panel = self._embed_tool_panel(
                 maya_face_retarget.MayaFaceRetargetWindow(self.controller.face_retarget_controller, parent=self.face_retarget_page),
@@ -5064,6 +5069,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 self.skin_page,
             )
             layout.addWidget(self.skin_transfer_panel, 0)
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'skin_tasks', locals())
 
         def _build_rig_scale_tab(self):
             layout = QtWidgets.QVBoxLayout(self.rig_scale_page)
@@ -5179,6 +5186,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             if self.quick_start_tool_list.count():
                 self.quick_start_tool_list.setCurrentRow(0)
             self._filter_quick_start_tools("")
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'quick_start', locals())
             return
 
         def _filter_quick_start_tools(self, query):

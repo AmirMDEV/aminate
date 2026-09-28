@@ -793,6 +793,8 @@ if QtWidgets:
             self.load_target_button.clicked.connect(self._load_targets)
             self.copy_loaded_button.clicked.connect(self._copy_loaded)
             self.policy_combo.currentTextChanged.connect(self.controller.set_already_skinned_policy)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'skin_transfer', locals())
 
         def _sync_lists(self):
             self.source_line.setText(_short_list(self.controller.sources))

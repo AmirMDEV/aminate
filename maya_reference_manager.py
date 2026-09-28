@@ -540,8 +540,11 @@ class ReferencePackageController(object):
         if not MAYA_AVAILABLE:
             raise RuntimeError("Reference Manager must run inside Maya.")
         original_scene = _scene_path()
-        if not original_scene:
-            raise RuntimeError("Save the scene once before packaging.")
+        if not original_scene or not os.path.isfile(original_scene):
+            message = "Save your Maya scene first (File > Save Scene As), then click Package again. Packaging needs a saved scene file."
+            if not cmds.about(batch=True):
+                cmds.confirmDialog(title="Save Scene First", message=message, button=["OK"], defaultButton="OK")
+            raise RuntimeError(message)
         warnings = []
         if save_scene:
             cmds.file(save=True, force=True)
@@ -781,6 +784,8 @@ if QtWidgets:
             self.output_path.textChanged.connect(self._validate_package_inputs)
             self.package_name.textChanged.connect(self._validate_package_inputs)
             self._validate_package_inputs()
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'reference', locals())
 
         def _validate_package_inputs(self, *_args):
             output_dir = self.output_path.text().strip()

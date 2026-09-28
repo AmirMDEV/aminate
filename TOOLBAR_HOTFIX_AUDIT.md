@@ -10,7 +10,7 @@ Status: source candidate, not a verified Maya release.
 - Reference Manager overwrote its ZIP completion message with dependency-refresh status. Completion now remains visible, including missing-file and package warnings. Opening a nonexistent output folder now reports an actionable message.
 - Failed Bake on Twos closed the undo chunk in both except and finally. It now closes once.
 
-These findings do not establish that every reported unresponsive button is fixed. No live Maya session, failing-scene reproduction, or Qt click test was available.
+These findings do not establish that every reported unresponsive button is fixed. Live Maya and failing-scene reproduction remain unavailable. The v0.3.8 follow-up now includes Qt construction and routing checks; see UI_REFRESH_0_3_8.md.
 
 ## Follow-up fixes
 
