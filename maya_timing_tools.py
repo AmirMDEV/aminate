@@ -2141,7 +2141,7 @@ TOOLKIT_BAR_SIMPLE_HELP = {
     "export_selected_animation_fbx": "Export selected animation with the visible playback range.",
     "workflow_quick_start": "Open the beginner guide for choosing the right Aminate tool.",
     "workflow_scene_helpers": "Open the helper tools for safer scene setup.",
-    "workflow_reference_manager": "Open the packager for scene files and references.",
+    "workflow_reference_manager": "Save and package this scene and its linked files into a zip.",
     "workflow_dynamic_parenting": "Open the tool for switching what a prop follows.",
     "workflow_hand_foot_hold": "Open the tool that keeps hands or feet planted.",
     "workflow_surface_contact": "Open the tool that sticks controls to a surface.",
@@ -2184,7 +2184,7 @@ TOOLKIT_BAR_KID_HELP = {
     "export_selected_animation_fbx": "Send picked animation to an FBX using the visible range.",
     "workflow_quick_start": "Open the beginner map for Aminate.",
     "workflow_scene_helpers": "Open helpers for clean Maya scene setup.",
-    "workflow_reference_manager": "Open the file packer.",
+    "workflow_reference_manager": "Create a scene zip.",
     "workflow_dynamic_parenting": "Choose what a prop follows over time.",
     "workflow_hand_foot_hold": "Keep a hand or foot stuck in place.",
     "workflow_surface_contact": "Keep a control touching a surface.",
@@ -3542,45 +3542,95 @@ def _selected_mesh_transform_nodes():
 
 
 def _scene_keyed_transforms():
+    """Follow animation outputs through layer mixers, stopping at controls."""
     if not cmds:
         return []
     try:
-        anim_curves = cmds.ls(type="animCurve") or []
+        curves = cmds.ls(type="animCurve") or []
     except Exception:
-        anim_curves = []
-    if not anim_curves:
         return []
-    try:
-        destinations = cmds.listConnections(anim_curves, source=False, destination=True, plugs=True) or []
-    except Exception:
-        destinations = []
+    pending = collections.deque(curve + ".output" for curve in curves)
+    visited = set()
     nodes = []
-    seen = set()
-    for plug_name in destinations:
-        node_name = (plug_name or "").split(".", 1)[0]
-        if not node_name or node_name in seen:
+    while pending:
+        source = pending.popleft()
+        if source in visited:
             continue
-        seen.add(node_name)
+        visited.add(source)
         try:
-            if cmds.nodeType(node_name) == "transform":
-                nodes.append(node_name)
-                continue
+            destinations = cmds.listConnections(source, source=False, destination=True, plugs=True) or []
         except Exception:
-            pass
-        try:
-            parents = cmds.listRelatives(node_name, parent=True, fullPath=True) or []
-        except Exception:
-            parents = []
-        for parent_name in parents:
-            if not parent_name or parent_name in seen:
-                continue
-            seen.add(parent_name)
+            continue
+        for plug in destinations:
+            node = plug.split(".", 1)[0]
             try:
-                if cmds.nodeType(parent_name) == "transform":
-                    nodes.append(parent_name)
+                node_type = cmds.nodeType(node)
+                if node_type in ("transform", "joint"):
+                    nodes.append(node)
+                elif node_type.startswith("animBlendNode") or node_type in (
+                    "pairBlend", "unitConversion", "unitToTimeConversion", "timeToUnitConversion",
+                ):
+                    # Only known animation mixers/converters, never the entire rig graph.
+                    pending.append(node)
+                else:
+                    for parent in cmds.listRelatives(node, parent=True, fullPath=True) or []:
+                        if cmds.nodeType(parent) in ("transform", "joint"):
+                            nodes.append(parent)
             except Exception:
                 continue
     return _dedupe_preserve_order(nodes)
+
+
+def _is_proven_static_curve(curve_name):
+    # Maya's static predicate includes tangents; equal key values alone do not.
+    if not om2 or not oma2:
+        return False
+    try:
+        selection = om2.MSelectionList()
+        selection.add(curve_name)
+        curve = oma2.MFnAnimCurve(selection.getDependNode(0))
+        return bool(curve.numKeys > 1 and curve.isStatic)
+    except Exception:
+        return False
+
+
+def _remove_static_curve_preserving_value(curve_name, selected_nodes):
+    """Only remove a proven constant curve driving one selected scalar plug."""
+    if not _is_proven_static_curve(curve_name):
+        return False
+    output = curve_name + ".output"
+    destination = None
+    disconnected = False
+    try:
+        if cmds.referenceQuery(curve_name, isNodeReferenced=True):
+            return False
+        if any(cmds.lockNode(curve_name, query=True, lock=True) or []):
+            return False
+        destinations = cmds.listConnections(output, source=False, destination=True, plugs=True) or []
+        if len(destinations) != 1:
+            return False
+        destination = destinations[0]
+        target = destination.split(".", 1)[0]
+        target_paths = cmds.ls(target, long=True) or []
+        selected_paths = cmds.ls(selected_nodes, long=True) or []
+        if not set(target_paths).intersection(selected_paths):
+            return False
+        if cmds.getAttr(destination, lock=True):
+            return False
+        value = cmds.getAttr(destination)
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            return False
+        cmds.disconnectAttr(output, destination)
+        disconnected = True
+        # Read and write the destination's UI units, not the API's internal units.
+        cmds.setAttr(destination, value)
+        cmds.delete(curve_name)
+        return True
+    except Exception:
+        if disconnected:
+            # Restore the original driver if setting/deleting failed.
+            cmds.connectAttr(output, destination, force=True)
+        return False
 
 
 def _settable_keyable_attrs(node_name):
@@ -4608,18 +4658,17 @@ def _open_workflow_tab(tab_alias):
     try:
         import maya_dynamic_parent_pivot as workflow
         window = getattr(workflow, "GLOBAL_WINDOW", None)
-        if window and hasattr(window, "_set_initial_tab"):
-            window._set_initial_tab(tab_alias)
-            try:
-                window.show()
-            except Exception:
-                pass
-            return True, "Opened {0}.".format(tab_alias.replace("_", " ").title())
-    except Exception:
-        pass
-    try:
-        import aminate
-        aminate.launch_aminate(dock=True, initial_tab=tab_alias)
+        if window is None or not _qt_object_valid(window):
+            import aminate
+            window = aminate.launch_aminate(dock=True, initial_tab=tab_alias)
+        if window is None:
+            return False, "Could not open workflow tab: Aminate did not return a window."
+        if not window._set_initial_tab(tab_alias):
+            detail = getattr(window, "_last_tab_error", "") or "Tab content is unavailable."
+            return False, "Could not open workflow tab: {0}".format(detail)
+        window.show()
+        if not window.isVisible():
+            return False, "The requested tab is ready, but Aminate is not visible. Reopen Aminate from its shelf button."
         return True, "Opened {0}.".format(tab_alias.replace("_", " ").title())
     except Exception as exc:
         return False, "Could not open workflow tab: {0}".format(exc)
@@ -6093,11 +6142,7 @@ class MayaTimingToolsController(object):
         )
 
     def _student_core_targets(self):
-        nodes = _selected_transform_nodes()
-        if nodes:
-            return nodes, "selected controls"
-        nodes = _scene_keyed_transforms()
-        return nodes, "all keyed controls"
+        return _selected_transform_nodes(), "selected controls"
 
     def nudge_keys(self, frame_delta):
         if not MAYA_AVAILABLE:
@@ -6462,27 +6507,15 @@ class MayaTimingToolsController(object):
             for node_name in nodes:
                 curves = cmds.listConnections(node_name, source=True, destination=False, type="animCurve") or []
                 for curve_name in _dedupe_preserve_order(curves):
-                    try:
-                        values = cmds.keyframe(curve_name, query=True, valueChange=True) or []
-                    except Exception:
-                        values = []
-                    if len(values) <= 1:
-                        continue
-                    first_value = float(values[0])
-                    if not all(abs(float(value) - first_value) <= 1.0e-5 for value in values):
-                        continue
-                    try:
-                        cmds.delete(curve_name)
+                    if _remove_static_curve_preserving_value(curve_name, nodes):
                         deleted += 1
-                    except Exception:
-                        continue
         finally:
             try:
                 cmds.undoInfo(closeChunk=True)
             except Exception:
                 pass
         if not deleted:
-            return True, "No static curves needed cleaning on selected controls."
+            return True, "No safely removable static curves found on selected controls."
         return True, "Deleted {0} static animation curve(s) on selected controls.".format(deleted)
 
     def combine_selected_meshes_freeze_edit_pivot(self):
@@ -8225,7 +8258,8 @@ if QtWidgets:
                     icon=workflow_icon,
                 )
                 button.setToolTip("{0}: {1}".format(tool["label"], tool["tooltip"]))
-                button.setCheckable(True)
+                is_package_action = tool["tab"] == "reference_manager"
+                button.setCheckable(not is_package_action)
                 button.setProperty("_aminateWorkflowTab", tool["tab"])
                 button.setProperty("_aminateHoverAccent", tool["color"])
                 button.setProperty("_aminateHoverHelp", tool.get("help") or "")
@@ -8254,9 +8288,10 @@ if QtWidgets:
                 button.toggled.connect(
                     lambda checked, target=button, accent=tool["color"]: _set_workflow_button_glow(target, checked, accent)
                 )
-                button.clicked.connect(lambda _checked=False, tab=tool["tab"]: self._open_workflow_tab(tab))
-                self._workflow_button_group.addButton(button)
-                self._workflow_buttons[tool["tab"]] = button
+                button.clicked.connect(lambda _checked=False, tab=tool["tab"]: self._run_workflow_button(tab))
+                if not is_package_action:
+                    self._workflow_button_group.addButton(button)
+                    self._workflow_buttons[tool["tab"]] = button
                 layout.addWidget(button)
             layout.addStretch(1)
             self.game_mode_button = QtWidgets.QToolButton()
@@ -8651,6 +8686,11 @@ if QtWidgets:
 
         def _sync_game_mode_buttons(self):
             _sync_timeline_bar_game_buttons(self.controller)
+
+        def _run_workflow_button(self, tab_alias):
+            if tab_alias == "reference_manager":
+                return self._run("package_scene_zip")
+            return self._open_workflow_tab(tab_alias)
 
         def _open_workflow_tab(self, tab_alias):
             success, message = _open_workflow_tab(tab_alias)

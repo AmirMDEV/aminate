@@ -4440,26 +4440,27 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 return name
 
         def _ensure_tab_content(self, index):
-            if not hasattr(self, "tab_widget") or index is None or index < 0:
-                return
+            self._last_tab_error = ""
+            if not hasattr(self, "tab_widget") or index is None or index < 0 or index >= self.tab_widget.count():
+                self._last_tab_error = "Invalid Aminate tab."
+                return False
             tab_name = self.tab_widget.tabText(index)
             if tab_name in getattr(self, "_built_tab_names", set()):
-                return
+                return True
             builder = getattr(self, "_tab_builders", {}).get(tab_name)
             if not builder:
-                return
+                self._last_tab_error = "No builder registered for {0}.".format(tab_name)
+                return False
             try:
                 builder()
-                self._built_tab_names.add(tab_name)
                 _apply_aminate_combo_affordances(self.tab_widget.widget(index))
+                self._built_tab_names.add(tab_name)
+                return True
             except Exception as exc:
-                page = self.tab_widget.widget(index)
-                if page and not page.layout():
-                    layout = QtWidgets.QVBoxLayout(page)
-                    label = QtWidgets.QLabel("Could not open this Aminate tab: {0}".format(exc))
-                    label.setWordWrap(True)
-                    layout.addWidget(label)
-                _warning("Could not build Aminate tab {0}: {1}".format(tab_name, exc))
+                self._last_tab_error = "Could not build Aminate tab {0}: {1}".format(tab_name, exc)
+                self._set_status(self._last_tab_error, False)
+                _warning(self._last_tab_error)
+                return False
 
         def _configure_main_tab_bar(self):
             tab_bar = self.tab_widget.tabBar() if self.tab_widget else None
@@ -5419,17 +5420,24 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
 
         def _set_initial_tab(self, initial_tab):
             if isinstance(initial_tab, str):
-                found_index = self._find_tab_index(initial_tab)
-                self.tab_widget.setCurrentIndex(0 if found_index is None else found_index)
-                self._ensure_tab_content(self.tab_widget.currentIndex())
-                return
-            try:
-                initial_index = int(initial_tab)
-            except (TypeError, ValueError):
-                initial_index = 0
-            initial_index = max(0, min(initial_index, self.tab_widget.count() - 1))
+                initial_index = self._find_tab_index(initial_tab)
+                if initial_index is None:
+                    self._last_tab_error = "Unknown Aminate tab: {0}".format(initial_tab)
+                    return False
+            else:
+                try:
+                    initial_index = int(initial_tab)
+                except (TypeError, ValueError):
+                    initial_index = 0
+                initial_index = max(0, min(initial_index, self.tab_widget.count() - 1))
+            previous_index = self.tab_widget.currentIndex()
             self.tab_widget.setCurrentIndex(initial_index)
-            self._ensure_tab_content(self.tab_widget.currentIndex())
+            # currentChanged builds a newly selected page synchronously. Do not
+            # immediately invoke a failed builder a second time on the same click.
+            if previous_index != initial_index:
+                tab_name = self.tab_widget.tabText(initial_index)
+                return tab_name in getattr(self, "_built_tab_names", set())
+            return self._ensure_tab_content(initial_index)
 
         def _set_status(self, message, success=True):
             if not hasattr(self, "status_label"):

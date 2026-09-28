@@ -12,6 +12,16 @@ Status: source candidate, not a verified Maya release.
 
 These findings do not establish that every reported unresponsive button is fixed. No live Maya session, failing-scene reproduction, or Qt click test was available.
 
+## Follow-up fixes
+
+- Both toolbar package icons now run the same ZIP action, as requested. Reference Manager remains accessible through main tab navigation. The former navigation icon is momentary, with updated help.
+- Nudge, In and Cut no longer fall back to all scene controls when nothing is selected. Explicit Graph Editor key selection still supports nudging.
+- Animated-control selection follows known animation-layer mixers, pairBlend and conversion nodes with cycle protection, stopping at transforms/joints.
+- Static cleanup uses Maya API MFnAnimCurve.isStatic instead of equal key values. It preserves the destination value before deletion and reconnects on failure. Unverifiable, referenced, locked, shared-output, indirect and unselected destinations are retained.
+- Workflow opening reports build/show/visibility failures. Tab creation returns a result; unknown aliases no longer silently choose Quick Start.
+
+API reference: https://help.autodesk.com/cloudhelp/2026/ENU/MAYA-API-REF/py_ref/class_open_maya_anim_1_1_m_fn_anim_curve.html
+
 ## Routing audit
 
 | Controls | Expected behaviour | Evidence / remaining check |
@@ -21,7 +31,7 @@ These findings do not establish that every reported unresponsive button is fixed
 | Tween | Open percentage popup | All three toolbar _run implementations tested with popup stub |
 | Zero | Reset settable translate/rotate to 0, scale to 1 | Route checked; locked-channel and Auto Key behaviour needs Maya |
 | 2s | Bake playback range every two frames | Route and failed-bake undo regression tested |
-| Anim / Clean | Select animated transforms / clean static curves on selected controls | Routes checked; layer-connected curves need live QA |
+| Anim / Clean | Select animated transforms / clean static curves on selected controls | Routes and synthetic layer graph traversal checked; real layer scenes need live QA |
 | Combine / Freeze / Pivot | Combine meshes, freeze and enter pivot edit mode | Route checked; mesh operations need Maya |
 | ZIP | Save and package scene plus dependencies, open ZIP directory | Shared-controller routing tested; real archive built with mocked Maya access |
 | Playblast | Save full-scale 1080p AVI | Route checked; viewport and codec availability require Maya |
@@ -31,11 +41,11 @@ These findings do not establish that every reported unresponsive button is fixed
 | Layer controls | Create/delete, add/remove selection, mute/solo/lock/weight | Signals and controller targets inspected; interactive operations need Maya |
 | History strip | Snapshot, restore and branch actions | Separate history subsystem; not runtime-tested by this hotfix |
 
-All three action-button builders bind command values as lambda defaults; workflow buttons similarly bind their tab values. The ZIP action and Reference Manager navigation icon are distinct: ZIP packages immediately, while Reference Manager opens options. Existing documented behaviour is retained.
+All three action-button builders bind command values as lambda defaults; workflow buttons similarly bind their tab values. Both toolbar package icons now package immediately. Main tab navigation still opens Reference Manager options.
 
 ## Verification
 
-Run `python -m unittest discover -s tests -v` (eight tests), Python compilation and `git diff --check`.
+Run `python -m unittest discover -s tests -v` (18 tests), Python compilation and `git diff --check`.
 Headless tests establish routing and the listed regressions only; they do not establish live Maya correctness.
 
 ## Required before release
