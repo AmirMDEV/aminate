@@ -459,8 +459,8 @@ def _selected_skeleton_candidate():
 
 
 def _is_descendant_or_same(node_name, root_name):
-    long_node = _node_long_name(node_name)
-    long_root = _node_long_name(root_name)
+    long_node = node_name if str(node_name).startswith("|") else _node_long_name(node_name)
+    long_root = root_name if str(root_name).startswith("|") else _node_long_name(root_name)
     return long_node == long_root or long_node.startswith(long_root + "|")
 
 
@@ -1712,25 +1712,39 @@ def _scale_sample_nodes(character_root, skeleton_roots):
     return result
 
 
-def _plug_has_time_dependency(plug_name, visited=None, depth=0):
-    if not plug_name or not cmds.objExists(plug_name) or depth > 24:
+def _plug_has_time_dependency(plug_name, visited=None, depth=0, query_cache=None):
+    # Cache only Maya query answers, not graph traversal results: a negative
+    # result can depend on the current cycle path or remaining depth budget.
+    # The caller owns this snapshot for one synchronous dependency scan.
+    if query_cache is None:
+        query_cache = {}
+
+    def query(kind, name, callback):
+        key = (kind, name)
+        if key not in query_cache:
+            query_cache[key] = callback()
+        return query_cache[key]
+
+    if not plug_name or depth > 24 or not query("exists", plug_name, lambda: cmds.objExists(plug_name)):
         return False
     visited = set(visited or ())
     try:
-        if cmds.keyframe(plug_name, query=True, name=True):
-            return True
-    except Exception:
-        pass
-    try:
-        upstream_plugs = cmds.listConnections(
+        upstream_plugs = query("inputs", plug_name, lambda: cmds.listConnections(
             plug_name,
             source=True,
             destination=False,
             plugs=True,
             skipConversionNodes=False,
-        ) or []
+        )) or []
     except Exception:
         upstream_plugs = []
+    if not upstream_plugs:
+        return False
+    try:
+        if query("keys", plug_name, lambda: cmds.keyframe(plug_name, query=True, name=True)):
+            return True
+    except Exception:
+        pass
     time_dependent_types = {
         "expression",
         "time",
@@ -1744,26 +1758,26 @@ def _plug_has_time_dependency(plug_name, visited=None, depth=0):
     for source_plug in upstream_plugs:
         node_name = str(source_plug).partition(".")[0]
         try:
-            canonical = _node_long_name(node_name)
+            canonical = query("long_name", node_name, lambda: _node_long_name(node_name))
         except Exception:
             canonical = str(node_name)
         if canonical in visited:
             continue
         visited.add(canonical)
         try:
-            node_type = str(cmds.nodeType(node_name))
+            node_type = query("type", node_name, lambda: str(cmds.nodeType(node_name)))
         except Exception:
             node_type = ""
         if node_type.startswith("animCurve") or node_type in time_dependent_types:
             return True
         if node_type in ("transform", "joint"):
             try:
-                if cmds.keyframe(node_name, query=True, name=True):
+                if query("keys", node_name, lambda: cmds.keyframe(node_name, query=True, name=True)):
                     return True
             except Exception:
                 pass
             continue
-        if _plug_has_time_dependency(node_name, visited=visited, depth=depth + 1):
+        if _plug_has_time_dependency(node_name, visited=visited, depth=depth + 1, query_cache=query_cache):
             return True
     return False
 
@@ -1771,8 +1785,9 @@ def _plug_has_time_dependency(plug_name, visited=None, depth=0):
 def _animated_scale_blockers(character_root, skeleton_roots, sample_times):
     nodes = _scale_sample_nodes(character_root, skeleton_roots)
     time_driven = []
+    query_cache = {}
     for node_name in nodes:
-        if any(_plug_has_time_dependency(node_name + ".scale" + axis) for axis in ("X", "Y", "Z")):
+        if any(_plug_has_time_dependency(node_name + ".scale" + axis, query_cache=query_cache) for axis in ("X", "Y", "Z")):
             time_driven.append(node_name)
 
     # Static scale channels cannot vary between frames.  Do not change Maya's

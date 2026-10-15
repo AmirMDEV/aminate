@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.3.9 - 2026-10-15
+
+- Fix Floating Graph Editor close/reopen and hotkey toggle by preserving the native editor and floating host.
+- Restrict Cycle Inf to intended curves, verify writes, preserve selections, and support one-step Undo. Display feedback for Cycle Inf, Euler Flip, and Refresh.
+- Speed up Control Picker and Rig Scale analysis using scan-local query caches. Picker scans preserve selection.
+- Verified on Amanda in the same Maya 2026.2 instance: 8,284 nodes, 827 joints, 52 skin clusters, and 1,205 identical picker records. Picker scan 2.79 to 1.98 seconds; profiled rig analysis 40.50 to 7.25 seconds. Fresh startup remains untested.
+
 ## Version 0.3.8 - 2026-10-15
 
 - Made the bottom Toolkit Bar compact by default, with a persistent collapse control and optional History/Layers rows. Hidden layer controls stop polling the scene.

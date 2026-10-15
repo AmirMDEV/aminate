@@ -427,7 +427,7 @@ def _root_group(create=True):
     if not create:
         return None
     try:
-        root = cmds.group(empty=True, name=CONTROL_PICKER_GROUP_NAME)
+        root = cmds.createNode("transform", name=CONTROL_PICKER_GROUP_NAME, skipSelect=True)
     except Exception:
         return None
     try:
@@ -487,7 +487,9 @@ def _control_shapes(node_name):
         return []
 
 
-def _shape_types(node_name):
+def _shape_types(node_name, cache=None):
+    if cache is not None and node_name in cache:
+        return cache[node_name]
     types = []
     for shape_name in _control_shapes(node_name):
         try:
@@ -496,6 +498,8 @@ def _shape_types(node_name):
             continue
         if shape_type and shape_type not in types:
             types.append(shape_type)
+    if cache is not None:
+        cache[node_name] = types
     return types
 
 
@@ -524,7 +528,7 @@ def _keyable_attrs(node_name):
     return _dedupe_preserve_order([attr_name for attr_name in attrs if attr_name])
 
 
-def _looks_like_control(node_name):
+def _looks_like_control(node_name, shape_cache=None):
     short_name = _short_name(node_name).lower()
     if short_name in {"persp", "top", "front", "side"}:
         return False
@@ -532,7 +536,7 @@ def _looks_like_control(node_name):
         return False
     if any(token in short_name for token in ("_grp", ".grp", "-grp", "group")) and not any(token in short_name for token in ("ctrl", "ctl", "control")):
         return False
-    shape_types = _shape_types(node_name)
+    shape_types = _shape_types(node_name, shape_cache)
     if not shape_types:
         return False
     if all(shape_type in ("nurbsCurve", "nurbsSurface") for shape_type in shape_types):
@@ -814,7 +818,7 @@ def _hierarchy_candidates(root_name, node_types=("transform",)):
     return _dedupe_preserve_order(candidates)
 
 
-def _looks_like_geometry(node_name):
+def _looks_like_geometry(node_name, shape_cache=None):
     if not MAYA_AVAILABLE or not cmds or not node_name or not cmds.objExists(node_name):
         return False
     try:
@@ -823,7 +827,7 @@ def _looks_like_geometry(node_name):
         node_type = ""
     if node_type in ("mesh", "nurbsSurface", "subdiv"):
         return True
-    shape_types = _shape_types(node_name)
+    shape_types = _shape_types(node_name, shape_cache)
     if not shape_types:
         return False
     if all(shape_type in ("mesh", "nurbsSurface", "subdiv") for shape_type in shape_types):
@@ -890,7 +894,7 @@ def _category_from_node(node_name):
     return _category_from_name(node_name)
 
 
-def _discover_role_names(root_name, role):
+def _discover_role_names(root_name, role, shape_cache=None):
     if role == "geometry":
         node_types = ("transform",)
     elif role == "skeleton":
@@ -907,10 +911,10 @@ def _discover_role_names(root_name, role):
         if _contains_any(short_name, ("_grp", "_group", ".grp", "-grp", "group")) and not _contains_any(short_name, ("ctrl", "ctl", "control", "switch", "geo", "mesh", "joint", "bone", "skel")):
             continue
         if role == "controls":
-            if not _looks_like_control(node_name):
+            if not _looks_like_control(node_name, shape_cache):
                 continue
         elif role == "geometry":
-            if not _looks_like_geometry(node_name):
+            if not _looks_like_geometry(node_name, shape_cache):
                 continue
         elif role == "skeleton":
             if not _looks_like_skeleton(node_name):
@@ -919,11 +923,11 @@ def _discover_role_names(root_name, role):
     return discovered
 
 
-def _default_record(node_name):
+def _default_record(node_name, category=None):
     return {
         "maya_name": _node_long_name(node_name),
         "label": _short_name(node_name),
-        "category": _category_from_node(node_name),
+        "category": category if category is not None else _category_from_node(node_name),
         "side": _side_from_name(node_name),
         "group_path": [],
         "world_position": _world_position(node_name),
@@ -1231,6 +1235,9 @@ class ControlPickerController(object):
         existing_order = [record["maya_name"] for record in existing_records]
         records = []
         seen = set()
+        # This cache belongs to one synchronous scan; never retain scene data
+        # across edits, reference changes, or subsequent scans.
+        shape_cache = {}
         role_roots = (
             ("controls", controls_root or existing_state.get("source_root") or ""),
             ("geometry", geometry_root or existing_state.get("geometry_root") or ""),
@@ -1240,24 +1247,29 @@ class ControlPickerController(object):
             role_root = _node_long_name(role_root) if role_root and cmds and cmds.objExists(role_root) else ""
             if not role_root:
                 continue
-            role_names = _discover_role_names(role_root, role)
-            ordered_names = [maya_name for maya_name in existing_order if maya_name in role_names]
-            ordered_names.extend(maya_name for maya_name in role_names if maya_name not in ordered_names)
+            role_names = _discover_role_names(role_root, role, shape_cache)
+            role_name_set = set(role_names)
+            ordered_names = [maya_name for maya_name in existing_order if maya_name in role_name_set]
+            ordered_set = set(ordered_names)
+            ordered_names.extend(maya_name for maya_name in role_names if maya_name not in ordered_set)
             for node_name in ordered_names:
                 if node_name in seen:
                     continue
                 seen.add(node_name)
-                record = dict(records_by_name.get(node_name) or _default_record(node_name))
+                previous = records_by_name.get(node_name)
+                category = {"geometry": "Geometry", "skeleton": "Skeleton"}.get(role)
+                record = dict(previous or _default_record(node_name, category=category))
                 record["maya_name"] = _node_long_name(node_name)
                 record["label"] = record.get("label") or _short_name(node_name)
-                record["world_position"] = _world_position(node_name)
+                if previous:
+                    record["world_position"] = _world_position(node_name)
                 if role == "geometry":
                     record["category"] = "Geometry"
                     record["side"] = "Center"
                 elif role == "skeleton":
                     record["category"] = "Skeleton"
                     record["side"] = "Center" if (record.get("side") or "Unknown") == "Unknown" else record.get("side")
-                else:
+                elif previous:
                     record["category"] = "FK/IK" if _fkik_switch_attr_name(node_name) else (record.get("category") or _category_from_node(node_name))
                 records.append(record)
         records = self._normalize_records(records)

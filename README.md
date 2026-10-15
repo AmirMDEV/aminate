@@ -2,7 +2,13 @@
 
 # Aminate
 
-## Version 0.3.8
+## Version 0.3.9
+
+Floating Graph Editor now retains its window through Close and reopen. Its hotkey toggle works again, and Cycle Inf changes only the intended curves with one-step Undo. Graph actions now show their result in the window.
+
+Control Picker and Rig Scale analysis avoid repeated queries on heavy rigs. On one Amanda rig test in Maya 2026.2, picker scanning improved from 2.79 to 1.98 seconds and profiled rig analysis from 40.50 to 7.25 seconds. Results vary by scene. Testing reused one Maya instance; a fresh-start test of this patch is not claimed.
+
+### Included from 0.3.8
 
 The Toolkit Bar now uses a compact row by default. Its left arrow collapses it to a small Aminate strip; the History and Layers button restores the extra rows when needed. Your choices are remembered. Tool pages use collapsible sections, and Customization includes toolbar favourites, shortcuts and opacity.
 
@@ -44,7 +50,7 @@ The sections in regular use in this release are:
 
 There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap and Root Motion. The offline tutorial includes searchable lessons and button help.
 
-`Version 0.3.8`
+`Version 0.3.9`
 
 ## What Was New In 0.3.7
 
@@ -109,14 +115,14 @@ There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap an
 
 ## Install
 
-1. Download `Aminate_v0.3.8.zip` from the latest release.
+1. Download `Aminate_v0.3.9.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `Aminate_v0_3_8_drag_this_file_into_Maya.py` into the Maya viewport.
+5. Drag `Aminate_v0_3_9_drag_this_file_into_Maya.py` into the Maya viewport.
 6. In a fresh Maya session, Aminate opens after installation.
 7. If Aminate is already open, the installer preserves that session. Restart Maya before reopening Aminate so it loads the update.
-8. Optionally download `Aminate_v0.3.8_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
+8. Optionally download `Aminate_v0.3.9_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
 
 ## How To Use
 

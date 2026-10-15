@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
 import functools
+import os
 import re
 import time
 
@@ -67,6 +68,7 @@ GRAPH_EDITOR_BUTTON_NAMES = (
 )
 _GLOBAL_MANAGER = None
 _GRAPH_EDITOR_RESIZE_FILTER = None
+_GRAPH_EDITOR_CLOSE_ROOT = None
 _GRAPH_EDITOR_RESIZE_ROOT = None
 _GRAPH_EDITOR_SHOW_OUTLINER = True
 
@@ -90,6 +92,12 @@ if QtCore:
     class _GraphEditorResizeFilter(QtCore.QObject):
         def eventFilter(self, watched, event):
             try:
+                if event.type() == QtCore.QEvent.Close:
+                    # Retain Maya's native editor and panel registrations.
+                    # Closing the floating workspace's host can orphan them.
+                    event.ignore()
+                    watched.hide()
+                    return True
                 resize_event = getattr(QtCore.QEvent, "Resize", None)
                 if resize_event is not None and event.type() == resize_event:
                     _schedule_graph_editor_resize()
@@ -722,7 +730,11 @@ def _graph_editor_root_name():
 
 
 def _graph_editor_root_widget():
-    return _qt_window_from_maya_window(_graph_editor_root_name())
+    widget = _qt_window_from_maya_window(_graph_editor_root_name())
+    if _qt_object_valid(widget):
+        return widget
+    retained = globals().get("_GRAPH_EDITOR_RESIZE_ROOT")
+    return retained if _qt_object_valid(retained) else None
 
 
 def _graph_editor_owned_widget(name, layout=False):
@@ -752,6 +764,8 @@ def _qt_native_pointer(widget):
 
 
 def _graph_editor_root_exists():
+    if _qt_object_valid(_graph_editor_root_widget()):
+        return True
     if not cmds:
         return False
     try:
@@ -788,6 +802,19 @@ def _graph_editor_root_visible():
 def _set_graph_editor_root_visible(visible):
     if not cmds:
         return False
+    root_widget = _graph_editor_root_widget()
+    if _qt_object_valid(root_widget):
+        host = root_widget.window()
+        # Never hide Maya itself when the graph is docked.
+        floating_host = _qt_object_valid(host) and host.objectName() != "MayaWindow"
+        if visible:
+            root_widget.show()
+            if floating_host:
+                host.showNormal() if host.isMinimized() else host.show()
+                host.raise_()
+        else:
+            (host if floating_host else root_widget).hide()
+        return bool(root_widget.isVisible()) == bool(visible)
     try:
         if cmds.workspaceControl(GRAPH_EDITOR_WORKSPACE_CONTROL_NAME, exists=True):
             root_widget = _graph_editor_root_widget()
@@ -894,20 +921,24 @@ def _apply_graph_editor_opacity(opacity=None):
 
 def _detach_graph_editor_resize_filter():
     """Remove the observer from its recorded native owner before rebinding."""
-    global _GRAPH_EDITOR_RESIZE_ROOT
+    global _GRAPH_EDITOR_RESIZE_ROOT, _GRAPH_EDITOR_CLOSE_ROOT
     widget = _GRAPH_EDITOR_RESIZE_ROOT
     if _qt_object_valid(widget) and _qt_object_valid(_GRAPH_EDITOR_RESIZE_FILTER):
         widget.removeEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
     _GRAPH_EDITOR_RESIZE_ROOT = None
+    if _qt_object_valid(_GRAPH_EDITOR_CLOSE_ROOT) and _qt_object_valid(_GRAPH_EDITOR_RESIZE_FILTER):
+        _GRAPH_EDITOR_CLOSE_ROOT.removeEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+    _GRAPH_EDITOR_CLOSE_ROOT = None
 
 
 def _apply_graph_editor_style():
-    global _GRAPH_EDITOR_RESIZE_FILTER, _GRAPH_EDITOR_RESIZE_ROOT
+    global _GRAPH_EDITOR_RESIZE_FILTER, _GRAPH_EDITOR_RESIZE_ROOT, _GRAPH_EDITOR_CLOSE_ROOT
     widget = _graph_editor_root_widget()
     if not _qt_object_valid(widget):
         return None
     try:
-        widget.setObjectName(GRAPH_EDITOR_WINDOW_NAME)
+        # Maya owns this name and uses it to resolve the workspace after close.
+        # Renaming it makes subsequent launches lose the retained dock host.
         widget.setMinimumSize(760, 420)
         try:
             widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -1002,28 +1033,35 @@ def _apply_graph_editor_style():
                 _GRAPH_EDITOR_RESIZE_FILTER.setParent(widget)
                 widget.installEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
                 _GRAPH_EDITOR_RESIZE_ROOT = widget
+            host = widget.window()
+            if _qt_object_valid(host) and host.objectName() != "MayaWindow":
+                host.setWindowTitle("Aminate Floating Graph Editor")
+                if _qt_object_valid(_GRAPH_EDITOR_CLOSE_ROOT) and _qt_native_pointer(_GRAPH_EDITOR_CLOSE_ROOT) != _qt_native_pointer(host):
+                    _GRAPH_EDITOR_CLOSE_ROOT.removeEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+                host.removeEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+                host.installEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+                _GRAPH_EDITOR_CLOSE_ROOT = host
     except Exception:
         pass
     return widget
 
 
+def _graph_editor_names():
+    """Only the animation editor owned by this floating panel."""
+    names = [GRAPH_EDITOR_PANEL_NAME + "GraphEd"]
+    try:
+        control = cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, query=True, control=True)
+        if control:
+            names.extend([control, control + "GraphEd"])
+    except Exception:
+        pass
+    return list(dict.fromkeys(names))
+
+
 def _fit_graph_editor_curves():
     if not cmds:
         return False
-    editor_names = []
-    try:
-        panel_control = cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, query=True, control=True)
-        if panel_control:
-            editor_names.extend([panel_control, panel_control + "GraphEd"])
-    except Exception:
-        pass
-    editor_names.extend([GRAPH_EDITOR_PANEL_NAME + "GraphEd", "graphEditor1GraphEd"])
-    try:
-        for editor_name in cmds.lsUI(editors=True) or []:
-            if "GraphEd" in editor_name or "graphEditor" in editor_name:
-                editor_names.append(editor_name)
-    except Exception:
-        pass
+    editor_names = _graph_editor_names()
     did_fit = False
     for editor_name in dict.fromkeys(editor_names):
         try:
@@ -1043,38 +1081,24 @@ def _graph_editor_curve_names():
     if not cmds:
         return []
     curves = []
-    editor_names = []
-    try:
-        panel_control = cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, query=True, control=True)
-        if panel_control:
-            editor_names.extend([panel_control, panel_control + "GraphEd"])
-    except Exception:
-        pass
-    editor_names.extend([GRAPH_EDITOR_PANEL_NAME + "GraphEd", "graphEditor1GraphEd"])
-    try:
-        for editor_name in cmds.lsUI(editors=True) or []:
-            if "GraphEd" in editor_name or "graphEditor" in editor_name:
-                editor_names.append(editor_name)
-    except Exception:
-        pass
-    for editor_name in dict.fromkeys(editor_names):
+    for editor_name in _graph_editor_names():
         try:
             if cmds.animCurveEditor(editor_name, exists=True):
                 curves.extend(cmds.animCurveEditor(editor_name, query=True, curvesShown=True) or [])
         except Exception:
             pass
+    # Selected keys narrow the visible curves; a different editor's selection
+    # must not broaden the operation to unrelated curves.
     try:
-        curves.extend(cmds.keyframe(query=True, selected=True, name=True) or [])
+        selected = set(cmds.keyframe(query=True, selected=True, name=True) or [])
+        narrowed = [curve for curve in curves if curve in selected]
+        if narrowed:
+            curves = narrowed
     except Exception:
         pass
-    for node_name in cmds.ls(selection=True, long=True) or []:
+    for node_name in ([] if curves else cmds.ls(selection=True, long=True) or []):
         try:
             curves.extend(cmds.listConnections(node_name, source=True, destination=False, type="animCurve") or [])
-        except Exception:
-            pass
-    if not curves:
-        try:
-            curves.extend(cmds.ls(type="animCurve") or [])
         except Exception:
             pass
     return [curve for curve in dict.fromkeys(curves) if curve and cmds.objExists(curve)]
@@ -1083,19 +1107,7 @@ def _graph_editor_curve_names():
 def _set_graph_editor_infinity_view(enabled=True):
     if not cmds:
         return False
-    editor_names = [GRAPH_EDITOR_PANEL_NAME + "GraphEd", "graphEditor1GraphEd"]
-    try:
-        panel_control = cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, query=True, control=True)
-        if panel_control:
-            editor_names.extend([panel_control, panel_control + "GraphEd"])
-    except Exception:
-        pass
-    try:
-        for editor_name in cmds.lsUI(editors=True) or []:
-            if "GraphEd" in editor_name or "graphEditor" in editor_name:
-                editor_names.append(editor_name)
-    except Exception:
-        pass
+    editor_names = _graph_editor_names()
     did_update = False
     for editor_name in dict.fromkeys(editor_names):
         try:
@@ -1184,51 +1196,56 @@ def apply_cycle_infinity_to_graph_editor():
     curves = _graph_editor_curve_names()
     if not curves:
         return False, "No animation curves found for cycle infinity."
-    selected_nodes = cmds.ls(selection=True, long=True) or []
-    try:
-        selected_keys = cmds.keyframe(query=True, selected=True, name=True) or []
-    except Exception:
-        selected_keys = []
     changed = 0
+    cmds.undoInfo(openChunk=True, chunkName="Aminate Cycle Infinity")
     try:
-        cmds.selectKey(clear=True)
-    except Exception:
-        pass
-    for curve_name in curves:
-        try:
-            cmds.selectKey(curve_name, add=True)
-            changed += 1
-        except Exception:
-            try:
-                cmds.setAttr(curve_name + ".preInfinity", 3)
-                cmds.setAttr(curve_name + ".postInfinity", 3)
-                changed += 1
-            except Exception:
-                pass
-    try:
-        cmds.setInfinity(preInfinite="cycle", postInfinite="cycle")
-    except Exception:
         for curve_name in curves:
             try:
+                # Explicit curve attributes avoid Maya's active-keyset default,
+                # which can silently ignore setInfinity on named animCurves.
                 cmds.setAttr(curve_name + ".preInfinity", 3)
                 cmds.setAttr(curve_name + ".postInfinity", 3)
+                if (cmds.getAttr(curve_name + ".preInfinity") == 3
+                        and cmds.getAttr(curve_name + ".postInfinity") == 3):
+                    changed += 1
             except Exception:
                 pass
-    try:
-        cmds.selectKey(clear=True)
-        for curve_name in selected_keys:
-            if curve_name and cmds.objExists(curve_name):
-                cmds.selectKey(curve_name, add=True)
-    except Exception:
-        pass
-    try:
-        if selected_nodes:
-            cmds.select(selected_nodes, replace=True)
-    except Exception:
-        pass
+    finally:
+        cmds.undoInfo(closeChunk=True)
     _set_graph_editor_infinity_view(True)
     _fit_graph_editor_curves()
-    return True, "Cycle infinity enabled on {0} curve(s).".format(changed)
+    return changed == len(curves), "Cycle infinity enabled on {0} of {1} curve(s).".format(changed, len(curves))
+
+
+def _run_graph_editor_action(action):
+    try:
+        success, message = action()
+    except Exception as exc:
+        success, message = False, str(exc)
+    status = GRAPH_EDITOR_CONTAINER_NAME + "Status"
+    if cmds.text(status, exists=True):
+        cmds.text(status, edit=True, label=message, annotation=message)
+    return success, message
+
+
+def _refresh_graph_editor():
+    _configure_graph_editor_outliner_panel()
+    _resize_graph_editor_split()
+    _apply_graph_editor_style()
+    _fit_graph_editor_curves()
+    return True, "Graph Editor refreshed."
+
+
+def _configure_graph_editor_actions():
+    status = GRAPH_EDITOR_CONTAINER_NAME + "Status"
+    if not cmds.text(status, exists=True):
+        cmds.text(status, parent=GRAPH_EDITOR_CONTAINER_NAME, label="", align="left", height=22)
+        cmds.formLayout(GRAPH_EDITOR_CONTAINER_NAME, edit=True,
+                        attachForm=[(status, "left", 8), (status, "right", 8), (status, "bottom", 0)],
+                        attachControl=[(GRAPH_EDITOR_PANE_NAME, "bottom", 2, status)])
+    for button, action in zip(GRAPH_EDITOR_BUTTON_NAMES[:3],
+                              (apply_cycle_infinity_to_graph_editor, apply_euler_flip_to_graph_editor, _refresh_graph_editor)):
+        cmds.button(button, edit=True, command=lambda *_args, action=action: _run_graph_editor_action(action))
 
 
 def apply_euler_flip_to_graph_editor():
@@ -1272,7 +1289,7 @@ def _resize_graph_editor_split():
             header_height = max(GRAPH_EDITOR_HEADER_HEIGHT, int(cmds.rowLayout(GRAPH_EDITOR_HEADER_NAME, query=True, height=True) or GRAPH_EDITOR_HEADER_HEIGHT))
         except Exception:
             pass
-        height = max(GRAPH_EDITOR_MIN_BODY_HEIGHT, int(window_height) - header_height - 4)
+        height = max(GRAPH_EDITOR_MIN_BODY_HEIGHT, int(window_height) - header_height - 28)
         outliner_width = int(min(380, max(220, width * 0.26)))
         graph_width = max(420, width - outliner_width - 8) if _GRAPH_EDITOR_SHOW_OUTLINER else width
         outliner_percent = int(min(45, max(18, round((float(outliner_width) / float(width)) * 100.0))))
@@ -1460,6 +1477,7 @@ def _ensure_graph_editor_window():
                 _delete_graph_editor_ui()
             else:
                 _configure_graph_editor_outliner_panel()
+                _configure_graph_editor_actions()
                 _apply_graph_editor_style()
                 _apply_graph_editor_opacity()
                 _schedule_graph_editor_resize()
@@ -1467,7 +1485,7 @@ def _ensure_graph_editor_window():
         except Exception:
             _delete_graph_editor_ui()
     if _graph_editor_root_exists():
-        return True, "Floating Graph Editor is ready."
+        return False, "The retained Graph Editor is incomplete; its native panels were preserved."
     stale_panel_exists = False
     try:
         stale_panel_exists = bool(cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, exists=True))
@@ -1594,6 +1612,7 @@ def _ensure_graph_editor_window():
         except Exception:
             pass
         set_graph_editor_outliner_visible(_GRAPH_EDITOR_SHOW_OUTLINER)
+        _configure_graph_editor_actions()
         _apply_graph_editor_style()
         _apply_graph_editor_opacity()
         _fit_graph_editor_curves()
@@ -1614,16 +1633,18 @@ def show_floating_graph_editor():
         return False, "Maya is not available."
     try:
         if _graph_editor_root_visible():
+            _configure_graph_editor_actions()
             _apply_graph_editor_opacity()
             _schedule_graph_editor_resize()
             return True, "Floating Graph Editor already open."
     except Exception:
         pass
     success, message = _ensure_graph_editor_window()
-    if not success and not _graph_editor_root_exists():
+    if not success:
         return success, message
     try:
-        _set_graph_editor_root_visible(True)
+        if not _set_graph_editor_root_visible(True):
+            return False, "Could not restore the retained Graph Editor window."
         _place_graph_editor_near_cursor()
         _resize_graph_editor_split()
         _schedule_graph_editor_resize()
