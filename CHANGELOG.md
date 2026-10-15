@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.3.10 - 2026-10-15
+
+- Evaluate shared source key times once during Controls Retargeter baking, preserving authored output times and sampling all source values before target writes.
+- Replace Hand / Foot Hold mirror lookup's whole-scene transform scan with exact opposite-name queries, retaining ambiguity and already-used-target checks.
+- Verified on a second production rig, Magpie, in the same Maya 2026.2 process: 9,666 nodes, 214 joints, 14 skin clusters and 73,802 mesh vertices. Identical retarget output took 2.92 seconds instead of 4.99 seconds; normal scene evaluations fell from 20 to 11. Mirror lookup in the loaded scene took 0.00029 seconds instead of 0.209 seconds. These timings are scene-specific.
+- Exercised all 26 pages and representative retarget, contact, picker, onion skin, parenting, pivot, IK/FK, notes, styling, video, pencil, skinning, rig building, mocap, root motion, smear and preference workflows. Rechecked Graph Editor close/reopen and actual bottom-bar collapse/expand controls.
+- Added regression coverage for sparse retarget keys, source-before-target ordering, time restoration and mirror ambiguity. Package and installed-file parity passed. Live checks retained existing native UI; fresh startup, History restore and a full Magpie export are not claimed. Full-range contact suggestions remain costly because the rig requires normal scene evaluation.
+
 ## Version 0.3.9 - 2026-10-15
 
 - Fix Floating Graph Editor close/reopen and hotkey toggle by preserving the native editor and floating host.

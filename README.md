@@ -2,7 +2,13 @@
 
 # Aminate
 
-## Version 0.3.9
+## Version 0.3.10
+
+Controls Retargeter now evaluates each shared source key time once. In a Magpie production-rig comparison, the same output keys and values took 2.92 seconds instead of 4.99 seconds, with 11 scene evaluations instead of 20. Hand / Foot Hold mirror lookup now searches exact opposite names instead of scanning every scene transform.
+
+This second rig audit reused the existing Maya 2026.2 instance and covered all 26 tool pages plus representative functional workflows. The rig contained 9,666 nodes, 214 joints and 73,802 mesh vertices. The bottom bar collapsed from 57 to 34 pixels, and Floating Graph Editor reopened after title-bar Close. Fresh startup and every possible rig combination remain untested. Full-range contact suggestions can still be slow on this rig.
+
+### Included from 0.3.9
 
 Floating Graph Editor now retains its window through Close and reopen. Its hotkey toggle works again, and Cycle Inf changes only the intended curves with one-step Undo. Graph actions now show their result in the window.
 
@@ -50,7 +56,7 @@ The sections in regular use in this release are:
 
 There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap and Root Motion. The offline tutorial includes searchable lessons and button help.
 
-`Version 0.3.9`
+`Version 0.3.10`
 
 ## What Was New In 0.3.7
 

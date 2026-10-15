@@ -894,47 +894,44 @@ class FaceRetargetController(object):
                 original_time = None
 
             sampled_entries = []
+            entries_by_time = {}
             for payload in entries:
                 source_node = payload["source"]
                 target_node = payload["target"]
                 source_times = _source_key_times(source_node, attributes=bake_attrs)
                 if not source_times:
                     continue
-                source_start_time = source_times[0]
-                cmds.currentTime(source_start_time, edit=True)
                 baselines = {}
                 for attr_name in bake_attrs:
                     source_attr = "{0}.{1}".format(source_node, attr_name)
                     target_attr = "{0}.{1}".format(target_node, attr_name)
                     if not cmds.objExists(source_attr) or not cmds.objExists(target_attr):
                         continue
-                    try:
-                        baselines[attr_name] = (
-                            float(cmds.getAttr(source_attr)),
-                            float(cmds.getAttr(target_attr)),
-                        )
-                    except Exception:
-                        continue
-                samples = {}
-                for time_value in source_times:
-                    cmds.currentTime(time_value, edit=True)
-                    samples[time_value] = {}
-                    for attr_name in baselines:
-                        try:
-                            samples[time_value][attr_name] = float(
-                                cmds.getAttr("{0}.{1}".format(source_node, attr_name))
-                            )
-                        except Exception:
-                            pass
-                sampled_entries.append(
-                    {
+                    baselines[attr_name] = None
+                item = {
                         "source": source_node,
                         "target": target_node,
                         "times": source_times,
                         "baselines": baselines,
-                        "samples": samples,
+                        "samples": {},
                     }
-                )
+                sampled_entries.append(item)
+                for time_value in source_times:
+                    entries_by_time.setdefault(time_value, []).append(item)
+
+            # Evaluate the production scene once per authored time, then sample
+            # every paired control at that time before writing any target keys.
+            # Keep normal Maya evaluation; update=False produces stale rig poses.
+            for time_value in sorted(entries_by_time):
+                cmds.currentTime(time_value, edit=True)
+                for item in entries_by_time[time_value]:
+                    sample = {}
+                    for attr_name in item["baselines"]:
+                        try:
+                            sample[attr_name] = float(cmds.getAttr("{0}.{1}".format(item["source"], attr_name)))
+                        except Exception:
+                            pass
+                    item["samples"][time_value] = sample
 
             if not sampled_entries:
                 return False, "No authored translate or rotate keys were found on the paired source controls."
@@ -1230,7 +1227,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 0, 0, 1, 2)
-            self.version_label = QtWidgets.QLabel("Version 0.3.9")
+            self.version_label = QtWidgets.QLabel("Version 0.3.10")
             footer_layout.addWidget(self.version_label, 1, 0)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)

@@ -176,12 +176,6 @@ def _swap_side_names(local_name):
     return _dedupe_preserve_order(swaps)
 
 
-def _scene_controls():
-    transforms = cmds.ls(long=True, type="transform") or []
-    joints = cmds.ls(long=True, type="joint") or []
-    return _dedupe_preserve_order(transforms + joints)
-
-
 def _find_other_side_control(node_name, taken_nodes=None):
     taken_lookup = set(_node_long_name(item) for item in (taken_nodes or []))
     current_name = _node_long_name(node_name)
@@ -192,15 +186,13 @@ def _find_other_side_control(node_name, taken_nodes=None):
     if not candidate_leaves:
         return None, "{0} does not look like a left or right control name yet.".format(_short_name(node_name))
 
-    all_controls = _scene_controls()
     for candidate_leaf in candidate_leaves:
-        matches = []
-        for candidate_node in all_controls:
-            candidate_long = _node_long_name(candidate_node)
-            if candidate_long in taken_lookup:
-                continue
-            if _leaf_name(candidate_node) == candidate_leaf:
-                matches.append(candidate_long)
+        # Maya resolves the exact namespaced leaf, including ambiguous DAG
+        # matches. Avoid thousands of redundant ls calls across unrelated rigs.
+        matches = [
+            candidate for candidate in (cmds.ls(candidate_leaf, long=True, type=("transform", "joint")) or [])
+            if candidate not in taken_lookup and _leaf_name(candidate) == candidate_leaf
+        ]
         if len(matches) == 1:
             return matches[0], None
         if len(matches) > 1:
