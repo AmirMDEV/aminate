@@ -2,15 +2,15 @@
 
 # Aminate
 
-## Version 0.3.8 candidate
+## Version 0.3.8
 
-The next version simplifies the tool pages, adds toolbar favourites, and keeps both package icons creating a scene ZIP. If the scene needs to be saved first, Package explains this in a popup. Window shortcuts and opacity are in Customization.
+The Toolkit Bar now uses a compact row by default. Its left arrow collapses it to a small Aminate strip; the History and Layers button restores the extra rows when needed. Your choices are remembered. Tool pages use collapsible sections, and Customization includes toolbar favourites, shortcuts and opacity.
 
-See [UI_REFRESH_0_3_8.md](UI_REFRESH_0_3_8.md) for the module-by-module changes and validation limits. This source candidate is awaiting the required live Maya and release-package checks before publication.
+Both package icons create a scene ZIP. Unsaved scenes show a Save Scene First message. This release also improves selection safety, static-curve cleanup, undo handling and retained UI stability. The installed build was checked in Maya 2026.2, including all 26 panel constructors and the compact bar controls.
 
 ## Docking layout
 
-Main Aminate panel supports Maya docking plus normal floating use. Aminate Timeline Toolkit Bar stays fixed at Maya bottom, cannot float or move, scrolls on narrow layouts. This split prevents shared dock lifecycle crashes. Docked Aminate uses Maya UI-element mode, so Maya's unsafe native close control stays unavailable in Maya 2026.
+The main Aminate panel stays docked. The Toolkit Bar stays fixed at Maya's bottom edge and scrolls on narrow layouts. Collapsing it preserves its existing widgets and state. This avoids rebuilding Maya-owned docking controls.
 
 By Amir Mansaray
 
@@ -19,7 +19,7 @@ A tabbed Maya toolset for animation workflow helpers.
 ## Docs And Wiki
 
 - [Release-root tutorial and FAQ](tutorial.html) is the simplest offline starting point in the separate tutorial asset.
-- [Searchable local docs](docs/index.html) cover all 23 tabs with child-friendly steps, screenshots, GIFs, videos, expected results, troubleshooting, and button help.
+- [Searchable local docs](docs/index.html) provide tool lessons, screenshots, GIFs, expected results, troubleshooting, and button help.
 - [Tracked feature wiki](docs/wiki/README.md) is the canonical full feature map for the private repo, public repo, and release package.
 - [Release process](AMINATE_RELEASE_PROCESS.md) is the required checklist for drag-and-drop update packages.
 - Public project: [AmirMDEV/aminate](https://github.com/AmirMDEV/aminate).
@@ -42,7 +42,7 @@ The sections in regular use in this release are:
 - `Hand / Foot Hold`, mainly the foot-hold workflow
 - `Timeline Notes`
 
-All 23 main tabs now have a plain-language, three-step coach inside Maya and a matching deep-linked lesson in the offline tutorial. The remaining tabs are `Surface Contact`, `Dynamic Pivot`, `Universal IK/FK`, `Animation Styling`, `Character Skinning`, `Rig Scale`, `Video Reference`, `Smear Frames`, and `Customization`.
+There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap and Root Motion. The offline tutorial includes searchable lessons and button help.
 
 `Version 0.3.8`
 
@@ -133,6 +133,7 @@ Simple example:
 5. Use `Zero` to reset selected controls to translate 0, rotate 0, and scale 1.
 6. Use `2s` to bake selected controls every two frames across the playback range.
 7. Use `Open Toolkit Bar` if the fixed color-coded strip at Maya's bottom edge is hidden. The bar cannot float or move; narrow layouts scroll horizontally.
+8. Use the left arrow to collapse or restore the bar. Use `Show History and Layers` to reveal the extra rows when needed.
 
 ### Scene Helpers
 

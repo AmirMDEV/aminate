@@ -1043,21 +1043,16 @@ if QtWidgets:
             main_layout.setContentsMargins(3, 8, 3, 8)
             main_layout.setSpacing(10)
 
-            intro_group = QtWidgets.QGroupBox("How To Use")
-            intro_layout = QtWidgets.QVBoxLayout(intro_group)
             intro = QtWidgets.QLabel(
-                "Put a source control on the left and its target control on the right. Each completed row becomes one retarget pair. Empty rows are ignored.\n"
-                "Use Auto Map By Name for fast name matching, or fill rows manually from Maya selection.\n"
-                "Click Retarget All Controls to match the source's starting pose and copy motion only at the source's original keyframes."
+                "Copy from the left control to the right control. Check each pair before retargeting."
             )
             intro.setWordWrap(True)
-            intro_layout.addWidget(intro)
-            main_layout.addWidget(intro_group)
+            main_layout.addWidget(intro)
 
             pair_map_group = QtWidgets.QGroupBox("Control Pairs")
             pair_map_layout = QtWidgets.QVBoxLayout(pair_map_group)
             pair_map_hint = QtWidgets.QLabel(
-                "Each row is one source control paired to one target control. Pick controls into the boxes, or type names. A blank row is always added automatically and is ignored by Retarget."
+                "One row per pair. Empty rows are skipped."
             )
             pair_map_hint.setWordWrap(True)
             pair_map_layout.addWidget(pair_map_hint)
@@ -1149,9 +1144,7 @@ if QtWidgets:
             quick_group = QtWidgets.QGroupBox(PAIR_EDITOR_GROUP_LABEL)
             quick_layout = QtWidgets.QVBoxLayout(quick_group)
             quick_hint = QtWidgets.QLabel(
-                "Pick a saved pair of controls first. Quick Pair Edit only changes that selected row.\n"
-                "The drop-downs list scene controls and also keep the loaded source and target lists handy.\n"
-                "Pair By Order maps source item 1 to target item 1, source item 2 to target item 2, and so on."
+                "Pick a saved pair below, then change its source or target here."
             )
             quick_hint.setWordWrap(True)
             quick_layout.addWidget(quick_hint)
@@ -1187,7 +1180,7 @@ if QtWidgets:
 
             advanced_layout.addWidget(quick_group)
 
-            pair_group = QtWidgets.QGroupBox("Saved Pair Of Controls In Scene")
+            pair_group = QtWidgets.QGroupBox("Saved Control Pairs")
             pair_layout = QtWidgets.QVBoxLayout(pair_group)
             self.pairs_table = QtWidgets.QTableWidget(0, 4)
             self.pairs_table.setHorizontalHeaderLabels(["Source", "Target", "Mode", "State"])
@@ -1203,9 +1196,9 @@ if QtWidgets:
             pair_layout.addWidget(self.pairs_table, 1)
 
             manage_row = QtWidgets.QHBoxLayout()
-            self.load_pair_button = QtWidgets.QPushButton("Load Selected Pair Of Controls")
-            self.delete_pair_button = QtWidgets.QPushButton("Delete Selected Pair Of Controls")
-            self.delete_all_button = QtWidgets.QPushButton("Delete All Pair Of Controls")
+            self.load_pair_button = QtWidgets.QPushButton("Load Pair")
+            self.delete_pair_button = QtWidgets.QPushButton("Delete Pair")
+            self.delete_all_button = QtWidgets.QPushButton("Delete All Pairs")
             self.load_pair_button.setToolTip("Load the selected saved pair of controls row into the Source and Target lists.")
             self.delete_pair_button.setToolTip("Remove the selected saved pair of controls row from the scene.")
             self.delete_all_button.setToolTip("Remove every saved face pair of controls from the scene.")

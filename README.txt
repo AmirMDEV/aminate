@@ -3,7 +3,8 @@ Aminate release package
 How to install or update:
 1. Open Maya.
 2. Drag 'Aminate_v0_3_8_drag_this_file_into_Maya.py' into the Maya viewport.
-3. The tool updates installed files, refreshes the shelf button, opens Aminate, and docks it.
+3. The tool updates installed files and refreshes the shelf button. In a fresh Maya session it opens Aminate.
+If Aminate is already loaded, the installer preserves the session. Restart Maya before reopening Aminate to load the update.
 Use the versioned drag file above. Maya caches dropped Python files by filename, so the versioned name avoids older installer code being reused in the same Maya session.
 Do not move the installer out of this folder. It needs the aminate_package folder beside it.
 

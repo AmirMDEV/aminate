@@ -126,7 +126,7 @@ RECIPES = {
   ('2. Retarget', True, 'retarget_row'),
   ('Motion options', False, 'options_row'),
   ('Saved pairs and manual mapping', False, 'advanced_group'),
-  ('Details', False, 'intro_group self.report_box')]),
+  ('Details', False, 'self.report_box')]),
  'rotation': ('main_layout', [
   ('1. Analyse selected controls', True, 'self.analyze_button'),
   ('2. Review findings', True, 'self.split_layout'),

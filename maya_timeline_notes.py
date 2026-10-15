@@ -840,6 +840,8 @@ class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
 
 
 if QtWidgets:
+    from maya_aminate_layout import ResponsiveRow
+
     class MayaTimelineNotesWindow(_WindowBase):
         def __init__(self, controller, parent=None):
             super(MayaTimelineNotesWindow, self).__init__(parent or _maya_main_window())
@@ -922,7 +924,7 @@ if QtWidgets:
             content.setMinimumWidth(0)
             main_layout = QtWidgets.QVBoxLayout(content)
             intro = QtWidgets.QLabel(
-                "Make colored timeline ranges with titles, note text, export/import, and hover help on the Maya time slider."
+                "Mark a range of frames with a note. Hover over its colour on the timeline to read it."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
@@ -956,24 +958,24 @@ if QtWidgets:
             self.note_text = QtWidgets.QPlainTextEdit()
             self.note_text.setPlaceholderText("Write the full formatted note here. New lines are kept in the hover tooltip.")
             form.addWidget(QtWidgets.QLabel("Title"), 0, 0)
-            form.addWidget(self.title_line, 0, 1, 1, 3)
+            form.addWidget(self.title_line, 0, 1)
             form.addWidget(QtWidgets.QLabel("Start"), 1, 0)
             form.addWidget(self.start_spin, 1, 1)
-            form.addWidget(QtWidgets.QLabel("End"), 1, 2)
-            form.addWidget(self.end_spin, 1, 3)
-            form.addWidget(QtWidgets.QLabel("Opacity"), 2, 0)
-            form.addWidget(self.opacity_spin, 2, 1)
-            form.addWidget(QtWidgets.QLabel("Color"), 2, 2)
+            form.addWidget(QtWidgets.QLabel("End"), 2, 0)
+            form.addWidget(self.end_spin, 2, 1)
+            form.addWidget(QtWidgets.QLabel("Opacity"), 3, 0)
+            form.addWidget(self.opacity_spin, 3, 1)
+            form.addWidget(QtWidgets.QLabel("Color"), 4, 0)
             color_row = QtWidgets.QHBoxLayout()
             color_row.addWidget(self.color_button)
             color_row.addWidget(self.color_preview)
             color_holder = QtWidgets.QWidget()
             color_holder.setLayout(color_row)
-            form.addWidget(color_holder, 2, 3)
+            form.addWidget(color_holder, 4, 1)
             notes_layout.addLayout(form)
             notes_layout.addWidget(self.note_text, 1)
 
-            range_row = QtWidgets.QHBoxLayout()
+            range_row = ResponsiveRow()
             self.auto_highlight_range_check = QtWidgets.QCheckBox("Auto Use Highlighted Range")
             self.auto_highlight_range_check.setChecked(True)
             self.auto_highlight_range_check.setToolTip("When this is on, the Start and End boxes follow the highlighted range on Maya's time slider.")

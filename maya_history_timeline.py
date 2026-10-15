@@ -46,13 +46,6 @@ MANIFEST_VERSION = 1
 AMINATE_HISTORY_VERSION = "0.1"
 AUTO_SNAPSHOT_SUPPRESS_UNTIL_OPTION = "AmirMayaHistoryAutoSnapshotSuppressUntil"
 AUTO_SNAPSHOT_ENABLED_OPTION = "AmirMayaHistoryAutoSnapshotEnabled"
-HISTORY_SECURITY_PROMPT_OPTION_VARS = (
-    "SafeModeOption",
-    "SafeModeImportOption",
-    "SafeModeBuiltInCheck",
-    "SafeModeUserSetupHashOption",
-    "TrustCenterPathOption",
-)
 AUTO_SNAPSHOT_SETTLE_SECONDS = 1.5
 AUTO_SNAPSHOT_UNCHANGED_SIGNATURE_SCAN_SECONDS = 30.0
 DEFAULT_AUTO_SNAPSHOT_ENABLED = True
@@ -67,7 +60,7 @@ DEFAULT_AUTO_SNAPSHOT_MODE = "all"
 AUTO_SNAPSHOT_MODE_ALL = "all"
 AUTO_SNAPSHOT_MODE_CUSTOM = "custom"
 AUTO_SNAPSHOT_TRIGGER_LABELS = (
-    ("keyframes", "After setting or deleting keyframes, including Auto Key"),
+    ("keyframes", "After key changes (including Auto Key)"),
     ("constraints", "After creating or keying constraints"),
     ("nodes", "After creating or deleting objects"),
     ("animation_layers", "After animation layer changes"),
@@ -345,20 +338,6 @@ def _set_auto_snapshot_enabled_option(enabled):
         cmds.optionVar(intValue=(AUTO_SNAPSHOT_ENABLED_OPTION, 1 if enabled else 0))
     except Exception:
         pass
-
-
-def _quiet_scene_file_prompts_for_history():
-    if not MAYA_AVAILABLE or not cmds:
-        return
-    try:
-        cmds.file(prompt=False)
-    except Exception:
-        pass
-    for option_name in HISTORY_SECURITY_PROMPT_OPTION_VARS:
-        try:
-            cmds.optionVar(intValue=(option_name, 0))
-        except Exception:
-            pass
 
 
 def _scene_summary_changed(previous_summary, current_summary):
@@ -665,22 +644,8 @@ class MayaHistoryTimelineController(object):
                 controller.stop_default_action_snapshots()
             except Exception:
                 pass
-        HISTORY_ACTION_TIMER_CONTROLLERS[:] = []
-        if QtCore and QtWidgets:
-            app = QtWidgets.QApplication.instance()
-            if app and hasattr(app, "allWidgets"):
-                for widget in app.allWidgets():
-                    for timer in widget.findChildren(QtCore.QTimer, "aminateHistoryDefaultActionSnapshotTimer"):
-                        if timer is self._action_timer:
-                            continue
-                        try:
-                            timer.stop()
-                        except Exception:
-                            pass
-                        try:
-                            timer.deleteLater()
-                        except Exception:
-                            pass
+        # Each timer is registered when created and removed by its controller.
+        # Never discover similarly named timers through Maya's native widgets.
 
     def start_default_action_snapshots(self, parent=None, interval_ms=2000):
         """Watch for eligible edits and checkpoint them at the configured cadence."""
@@ -1281,35 +1246,34 @@ class MayaHistoryTimelineController(object):
 
     def _load_manifest(self, context):
         manifest_path = context.get("manifest_path", "")
-        recovered = False
-        if manifest_path and os.path.exists(manifest_path):
+        def read_manifest(path):
+            if not path or not os.path.exists(path):
+                return None
             try:
-                with open(manifest_path, "r", encoding="utf-8") as handle:
-                    manifest = json.load(handle)
+                with open(path, "r", encoding="utf-8") as handle:
+                    value = json.load(handle)
+                if not isinstance(value, dict):
+                    return None
+                snapshots = value.get("snapshots", [])
+                branches = value.get("branches", {})
+                events = value.get("events", [])
+                if not isinstance(snapshots, list) or not all(isinstance(item, dict) for item in snapshots):
+                    return None
+                if not isinstance(branches, dict) or not all(isinstance(item, dict) for item in branches.values()):
+                    return None
+                if not isinstance(events, list):
+                    return None
+                return value
             except Exception:
-                manifest = None
-                backup_path = manifest_path + ".bak"
-                if os.path.exists(backup_path):
-                    try:
-                        with open(backup_path, "r", encoding="utf-8") as handle:
-                            manifest = json.load(handle)
-                        recovered = isinstance(manifest, dict)
-                    except Exception:
-                        manifest = None
-                if not isinstance(manifest, dict):
-                    manifest = {}
-        else:
-            manifest = None
-            backup_path = manifest_path + ".bak" if manifest_path else ""
-            if backup_path and os.path.exists(backup_path):
-                try:
-                    with open(backup_path, "r", encoding="utf-8") as handle:
-                        manifest = json.load(handle)
-                    recovered = isinstance(manifest, dict)
-                except Exception:
-                    manifest = None
-            if not isinstance(manifest, dict):
-                manifest = {}
+                return None
+
+        manifest = read_manifest(manifest_path)
+        recovered = False
+        if manifest is None:
+            manifest = read_manifest(manifest_path + ".bak" if manifest_path else "")
+            recovered = manifest is not None
+        if manifest is None:
+            manifest = {}
         manifest.setdefault("version", MANIFEST_VERSION)
         manifest.setdefault("aminate_history_version", AMINATE_HISTORY_VERSION)
         manifest.setdefault("original_scene_path", context.get("original_scene_path", ""))
@@ -1752,6 +1716,7 @@ class MayaHistoryTimelineController(object):
         # protected points, and reparent surviving children when an old ordinary
         # point is pruned so no future branch is orphaned.
         keep_ids.add(manifest.get("current_snapshot_id", ""))
+        keep_ids.update(getattr(self, "_restore_protected_snapshot_ids", ()))
         branch_heads = {}
         for item in snapshots:
             branch_heads[item.get("branch_id") or "main"] = item.get("id")
@@ -1794,7 +1759,6 @@ class MayaHistoryTimelineController(object):
         if not os.path.isdir(os.path.dirname(snapshot_path)):
             os.makedirs(os.path.dirname(snapshot_path))
         file_type = _scene_file_type(context.get("original_scene_path", "") or self._current_scene_path())
-        _quiet_scene_file_prompts_for_history()
         try:
             cmds.file(
                 snapshot_path,
@@ -1850,12 +1814,19 @@ class MayaHistoryTimelineController(object):
         if save_current_first:
             recovery_label = "Recovery before jump"
             recovery_note = "Automatic recovery checkpoint created before restoring {0}.".format(record.get("label", snapshot_id))
-            recovery_ok, recovery_message, _recovery = self.create_snapshot(
-                label=recovery_label,
-                note=recovery_note,
-                auto=True,
-                reason="Recovery before jump",
-            )
+            # Recovery creation enforces the cap. Retain the selected target
+            # until the jump completes, even when that temporarily exceeds it.
+            previous_protected = getattr(self, "_restore_protected_snapshot_ids", set())
+            self._restore_protected_snapshot_ids = previous_protected | {snapshot_id}
+            try:
+                recovery_ok, recovery_message, _recovery = self.create_snapshot(
+                    label=recovery_label,
+                    note=recovery_note,
+                    auto=True,
+                    reason="Recovery before jump",
+                )
+            finally:
+                self._restore_protected_snapshot_ids = previous_protected
             if not recovery_ok:
                 return False, "Restore cancelled because the recovery checkpoint failed: {0}".format(recovery_message)
         was_watching = self._action_timer is not None
@@ -1863,7 +1834,6 @@ class MayaHistoryTimelineController(object):
         self.stop_default_action_snapshots()
         self._auto_snapshot_busy = True
         try:
-            _quiet_scene_file_prompts_for_history()
             cmds.file(snapshot_path, open=True, force=True, prompt=False)
             cmds.file(rename=record.get("original_scene_path") or context.get("original_scene_path"))
         except Exception as exc:
@@ -1897,6 +1867,7 @@ class MayaHistoryTimelineController(object):
         if not force and any(item.get("locked") for item in snapshots):
             return False, "Some milestone snapshots are locked. Confirm delete all first."
         removed = 0
+        failed = []
         for record in snapshots:
             snapshot_path = record.get("snapshot_path", "")
             if snapshot_path and os.path.exists(snapshot_path):
@@ -1904,18 +1875,47 @@ class MayaHistoryTimelineController(object):
                     os.remove(snapshot_path)
                     removed += 1
                 except Exception:
-                    pass
-        manifest["snapshots"] = []
-        manifest["current_snapshot_id"] = ""
-        manifest["active_branch_id"] = "main"
-        manifest["branches"] = {"main": {"id": "main", "label": "Main", "color": BRANCH_COLOR_PALETTE[0], "parent_id": "", "index": 0}}
-        manifest.setdefault("events", []).append({"type": "delete_all", "timestamp": _now_iso(), "count": len(snapshots)})
+                    failed.append(record)
+        manifest["snapshots"] = failed
+        if failed:
+            surviving_ids = {item.get("id") for item in failed}
+            records_by_id = {item.get("id"): item for item in snapshots}
+
+            def surviving_parent(parent_id):
+                visited = set()
+                while parent_id and parent_id not in surviving_ids:
+                    if parent_id in visited:
+                        return ""
+                    visited.add(parent_id)
+                    parent_id = records_by_id.get(parent_id, {}).get("parent_id", "")
+                return parent_id
+
+            for item in failed:
+                item["parent_id"] = surviving_parent(item.get("parent_id", ""))
+                if item.get("branched_from_id"):
+                    item["branched_from_id"] = surviving_parent(item["branched_from_id"])
+                    parent = records_by_id.get(item["branched_from_id"], {})
+                    item["branched_from_label"] = parent.get("label", item["branched_from_id"])
+            for branch in (manifest.get("branches") or {}).values():
+                branch["parent_id"] = surviving_parent(branch.get("parent_id", ""))
+            if manifest.get("current_snapshot_id") not in surviving_ids:
+                manifest["current_snapshot_id"] = failed[-1].get("id", "")
+            current = self._snapshot_for_id(manifest, manifest["current_snapshot_id"])
+            manifest["active_branch_id"] = current.get("branch_id", "main") if current else "main"
+        else:
+            manifest["current_snapshot_id"] = ""
+            manifest["active_branch_id"] = "main"
+            manifest["branches"] = {"main": {"id": "main", "label": "Main", "color": BRANCH_COLOR_PALETTE[0], "parent_id": "", "index": 0}}
+        manifest.setdefault("events", []).append({"type": "delete_all", "timestamp": _now_iso(), "count": len(snapshots) - len(failed), "failed_snapshot_ids": [item.get("id") for item in failed]})
         self._save_manifest(context, manifest)
         self._mark_action_baseline()
         _notify_history_ui_changed()
-        message = "Deleted all History Timeline snapshots: {0}.".format(removed)
-        self._emit_status(message, True)
-        return True, message
+        if failed:
+            message = "Deleted {0} snapshot files; {1} could not be deleted and remain in History Timeline. Retry after releasing those files.".format(removed, len(failed))
+        else:
+            message = "Deleted all History Timeline snapshots: {0}.".format(removed)
+        self._emit_status(message, not failed)
+        return not failed, message
 
     def _refresh_outliners_after_restore(self):
         if not MAYA_AVAILABLE:
@@ -2215,6 +2215,8 @@ def _restore_choice(parent=None, label="snapshot"):
 
 
 if QtWidgets:
+    from maya_aminate_layout import ResponsiveRow
+
     class HistoryTimelineStrip(QtWidgets.QFrame):
         def __init__(self, controller=None, status_callback=None, parent=None, max_markers=12, marker_click_callback=None):
             super(HistoryTimelineStrip, self).__init__(parent)
@@ -2642,7 +2644,7 @@ if QtWidgets:
             layout.setSpacing(6)
 
             intro = QtWidgets.QLabel(
-                "Save scene snapshots you can return to when Maya undo is not enough. Restore the whole scene, branch from older work, and keep snapshots under control with custom auto-save rules."
+                "Save scene copies to return to later. Restoring a snapshot replaces the whole open scene."
             )
             intro.setWordWrap(True)
             layout.addWidget(intro)
@@ -2698,13 +2700,12 @@ if QtWidgets:
             self.note_field.setPlaceholderText("Note, e.g. before polish")
             form.addWidget(QtWidgets.QLabel("Label"), 0, 0)
             form.addWidget(self.label_field, 0, 1)
-            form.addWidget(QtWidgets.QLabel("Color"), 0, 2)
-            form.addWidget(self.color_field, 0, 3)
-            form.addWidget(self.pick_color_button, 0, 4)
-            form.addWidget(QtWidgets.QLabel("Note"), 1, 0)
-            form.addWidget(self.note_field, 1, 1, 1, 4)
+            form.addWidget(QtWidgets.QLabel("Color"), 1, 0)
+            form.addWidget(self.color_field, 1, 1)
+            form.addWidget(self.pick_color_button, 1, 2)
+            form.addWidget(QtWidgets.QLabel("Note"), 2, 0)
+            form.addWidget(self.note_field, 2, 1, 1, 2)
             form.setColumnStretch(1, 2)
-            form.setColumnStretch(3, 1)
             layout.addLayout(form)
 
             settings_box = QtWidgets.QGroupBox("History Timeline Settings")
@@ -2731,9 +2732,9 @@ if QtWidgets:
             settings_row.addWidget(QtWidgets.QLabel("Max snapshots"), 0, 0)
             settings_row.addWidget(self.snapshot_cap_spin, 0, 1)
             settings_row.addWidget(self.apply_cap_button, 0, 2)
-            settings_row.addWidget(self.storage_size_label, 0, 3)
-            settings_row.addWidget(self.warning_label, 1, 0, 1, 4)
-            settings_row.setColumnStretch(3, 1)
+            settings_row.addWidget(self.storage_size_label, 1, 0, 1, 3)
+            settings_row.addWidget(self.warning_label, 2, 0, 1, 3)
+            settings_row.setColumnStretch(1, 1)
             layout.addWidget(settings_box)
 
             auto_box = QtWidgets.QGroupBox("Auto History Save Rules")
@@ -2743,7 +2744,7 @@ if QtWidgets:
             self.auto_enabled_checkbox.setObjectName("historyTimelineAutoEnabledCheckBox")
             self.auto_enabled_checkbox.setToolTip("Turn this off to stop the History background watcher completely. Manual Save Step and Save Milestone still work.")
             auto_layout.addWidget(self.auto_enabled_checkbox)
-            interval_row = QtWidgets.QHBoxLayout()
+            interval_row = ResponsiveRow()
             interval_row.addWidget(QtWidgets.QLabel("Checkpoint interval (minutes)"))
             self.auto_interval_spin = QtWidgets.QDoubleSpinBox()
             self.auto_interval_spin.setObjectName("historyTimelineAutoIntervalMinutesSpin")
@@ -2782,9 +2783,8 @@ if QtWidgets:
                 checkbox.setObjectName(trigger_object_names.get(trigger_id, "historyTimelineTriggerCheckBox"))
                 checkbox.setToolTip("Custom Auto History trigger: {0}.".format(trigger_label))
                 self.auto_trigger_checkboxes[trigger_id] = checkbox
-                trigger_row.addWidget(checkbox, index // 2, index % 2)
+                trigger_row.addWidget(checkbox, index, 0)
             trigger_row.setColumnStretch(0, 1)
-            trigger_row.setColumnStretch(1, 1)
             auto_layout.addLayout(trigger_row)
             auto_button_row = QtWidgets.QHBoxLayout()
             self.apply_auto_rules_button = QtWidgets.QPushButton("Save Auto Rules")
@@ -2820,7 +2820,7 @@ if QtWidgets:
                 self.open_folder_button,
             )
             for index, button in enumerate(buttons):
-                button_row.addWidget(button, index // 5, index % 5)
+                button_row.addWidget(button, index, 0)
                 button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             actions_box = QtWidgets.QGroupBox("Save / Restore")
             actions_box.setObjectName("historyTimelineActionsBox")

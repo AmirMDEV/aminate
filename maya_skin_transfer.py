@@ -695,7 +695,7 @@ if QtWidgets:
             self.show_footer = bool(show_footer)
             self.controller.set_status_callback(self._set_status)
             self.setObjectName(WINDOW_OBJECT_NAME)
-            self.setWindowTitle("Exact Skin Transfer")
+            self.setWindowTitle("Skin Transfer")
             self.setMinimumSize(420, 240)
             self._build_ui()
             self._sync_lists()
@@ -705,12 +705,12 @@ if QtWidgets:
             main_layout.setContentsMargins(12, 12, 12, 12)
             main_layout.setSpacing(10)
 
-            title = QtWidgets.QLabel("Exact Skin Transfer")
+            title = QtWidgets.QLabel("Skin Transfer")
             title.setStyleSheet("font-size: 16px; font-weight: 800; color: #F2F2F2;")
             main_layout.addWidget(title)
 
             help_text = QtWidgets.QLabel(
-                "Load one or more skinned source meshes, then one or more target meshes. Transfer Skin uses exact vertex order when possible and closest-point transfer for body-to-clothing or different topology."
+                "Load the meshes to copy skin from, then the meshes to copy skin to."
             )
             help_text.setWordWrap(True)
             main_layout.addWidget(help_text)
@@ -737,7 +737,7 @@ if QtWidgets:
             self.target_badge = QtWidgets.QLabel("Target: pick one or more target mesh(es) next.")
             self.load_source_button = QtWidgets.QPushButton("Use Selection As Sources")
             self.load_target_button = QtWidgets.QPushButton("Use Selection As Targets")
-            self.copy_loaded_button = QtWidgets.QPushButton("Transfer Skin (Auto)")
+            self.copy_loaded_button = QtWidgets.QPushButton("Transfer Skin")
             self.copy_loaded_button.setMinimumHeight(34)
             for action_button in (self.load_source_button, self.load_target_button, self.copy_loaded_button):
                 action_button.setMinimumWidth(0)
@@ -763,7 +763,7 @@ if QtWidgets:
             main_layout.addLayout(policy_row)
 
             note = QtWidgets.QLabel(
-                "Supported workflows: one source -> many targets, matching source/target counts, or name-matched sets. Exact topology is copied directly; different topology uses closest-point transfer with influence remapping and coverage metrics."
+                "Matching meshes get an exact copy. Different shapes use the nearest surface; check the result carefully."
             )
             note.setWordWrap(True)
             note.setStyleSheet("color: #B8D7FF;")

@@ -2298,8 +2298,7 @@ if QtWidgets:
             main_layout = QtWidgets.QVBoxLayout(content_widget)
 
             intro = QtWidgets.QLabel(
-                "Keep hand, foot, or object controls on or outside one or more live mesh surfaces. "
-                "Pick controls and meshes together, then create editable collision records."
+                "Select controls and the floor or other surface. Click Use Controls + Meshes to load them."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
@@ -2619,7 +2618,7 @@ if QtWidgets:
         def closeEvent(self, event):
             # Keep callbacks and the Qt wrapper alive for Maya 2026.
             self.hide()
-            event.accept()
+            event.ignore()
 
 def _close_existing_window():
     """Hide and return the existing window instead of destroying Qt state."""

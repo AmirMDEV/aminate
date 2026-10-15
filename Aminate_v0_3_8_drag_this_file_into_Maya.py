@@ -11,10 +11,18 @@ PACKAGE_FOLDER_NAME = "Aminate"
 PAYLOAD_DIR_NAME = "aminate_package"
 DEFAULT_MANIFEST_FILE_NAME = "manifest.json"
 DEFAULT_RUNTIME_FILES = [
+    "maya_control_rig_modules.py",
+    "aminate_skeleton_map.py",
+    "maya_control_rig_builder.py",
+    "maya_multi_performer_mocap.py",
+    "maya_control_rig_ui.py",
+
     "aminate.py",
+    "maya_anim_workflow_tools.py",
     "aminate_package_manifest.py",
     "maya_aminate_customization.py",
     "maya_aminate_theme.py",
+    "maya_aminate_layout.py",
     "maya_aminate_ui.py",
     "maya_animation_assistant.py",
     "maya_animation_styling.py",
@@ -33,6 +41,7 @@ DEFAULT_RUNTIME_FILES = [
     "maya_onion_skin.py",
     "maya_reference_manager.py",
     "maya_rig_scale_export.py",
+    "maya_root_motion.py",
     "maya_selected_animation_fbx_export.py",
     "maya_rotation_doctor.py",
     "maya_shelf_utils.py",

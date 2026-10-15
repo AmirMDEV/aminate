@@ -59,8 +59,15 @@ GRAPH_EDITOR_HEADER_NAME = "aminateFloatingGraphEditorHeader"
 GRAPH_EDITOR_PANEL_NAME = "aminateFloatingGraphEditorPanel"
 GRAPH_EDITOR_OUTLINER_PANEL_NAME = "aminateFloatingGraphEditorOutlinerPanel"
 GRAPH_EDITOR_PANE_NAME = "aminateFloatingGraphEditorPane"
+GRAPH_EDITOR_BUTTON_NAMES = (
+    "aminateFloatingGraphEditorCycleButton",
+    "aminateFloatingGraphEditorEulerButton",
+    "aminateFloatingGraphEditorRefreshButton",
+    "aminateFloatingGraphEditorCloseButton",
+)
 _GLOBAL_MANAGER = None
 _GRAPH_EDITOR_RESIZE_FILTER = None
+_GRAPH_EDITOR_RESIZE_ROOT = None
 _GRAPH_EDITOR_SHOW_OUTLINER = True
 
 
@@ -546,27 +553,61 @@ def _is_text_entry_widget(widget):
     return isinstance(widget, text_widgets)
 
 
-_TEXT_ENTRY_FOCUS_ACTIVE = False
-
-
-def _track_text_entry_focus(obj, event):
-    global _TEXT_ENTRY_FOCUS_ACTIVE
-    if not QtCore or event is None:
-        return
-    try:
-        event_type = event.type()
-    except Exception:
-        return
-    if event_type == QtCore.QEvent.FocusIn and _is_text_entry_widget(obj):
-        _TEXT_ENTRY_FOCUS_ACTIVE = True
-    elif event_type == QtCore.QEvent.FocusOut and _is_text_entry_widget(obj):
-        _TEXT_ENTRY_FOCUS_ACTIVE = False
-
-
 def _has_text_entry_focus():
     if not QtWidgets:
         return False
-    return bool(_TEXT_ENTRY_FOCUS_ACTIVE or _is_text_entry_widget(QtWidgets.QApplication.focusWidget()))
+    widget = QtWidgets.QApplication.focusWidget()
+    return _qt_object_valid(widget) and _is_text_entry_widget(widget)
+
+
+class _FocusedWidgetHotkeyFilter(object):
+    """Observe keyboard events without wrapping unrelated native Qt objects."""
+
+    def __init__(self, manager):
+        self._manager = manager
+        self._widget = None
+        self._app = QtWidgets.QApplication.instance()
+        self._closed = False
+        # Retain this exact callable for signal disconnection during shutdown.
+        self._focus_callback = self._focus_changed
+        if _qt_object_valid(self._app):
+            self._app.focusChanged.connect(self._focus_callback)
+            self._focus_changed(None, self._app.focusWidget())
+
+    def _remove_widget_filter(self):
+        widget = self._widget
+        if _qt_object_valid(widget) and _qt_object_valid(self._manager):
+            try:
+                widget.removeEventFilter(self._manager)
+            except RuntimeError:
+                pass
+        self._widget = None
+
+    def _focus_changed(self, old, new):
+        if self._closed:
+            return
+        # Read current focus: a preceding signal handler may have redirected it.
+        widget = self._app.focusWidget() if _qt_object_valid(self._app) else None
+        if widget is self._widget:
+            return
+        self._remove_widget_filter()
+        if (isinstance(widget, QtWidgets.QWidget) and _qt_object_valid(widget)
+                and _qt_object_valid(self._manager)):
+            self._widget = widget
+            widget.installEventFilter(self._manager)
+
+    def shutdown(self):
+        if self._closed:
+            return
+        self._closed = True
+        if _qt_object_valid(self._app):
+            try:
+                self._app.focusChanged.disconnect(self._focus_callback)
+            except (RuntimeError, TypeError):
+                pass
+        self._remove_widget_filter()
+        self._manager = None
+        self._app = None
 
 
 def _selected_nodes():
@@ -684,6 +725,32 @@ def _graph_editor_root_widget():
     return _qt_window_from_maya_window(_graph_editor_root_name())
 
 
+def _graph_editor_owned_widget(name, layout=False):
+    """Wrap only a named Aminate control, never walk Maya's native subtree."""
+    if not omui or not shiboken or not QtWidgets:
+        return None
+    if name not in GRAPH_EDITOR_BUTTON_NAMES + (GRAPH_EDITOR_CONTAINER_NAME, GRAPH_EDITOR_PANE_NAME):
+        return None
+    try:
+        finder = omui.MQtUtil.findLayout if layout else omui.MQtUtil.findControl
+        pointer = finder(name)
+        if pointer:
+            widget_type = QtWidgets.QWidget if layout else QtWidgets.QPushButton
+            return shiboken.wrapInstance(int(pointer), widget_type)
+    except Exception:
+        pass
+    return None
+
+
+def _qt_native_pointer(widget):
+    if not _qt_object_valid(widget) or not shiboken:
+        return None
+    try:
+        return int(shiboken.getCppPointer(widget)[0])
+    except Exception:
+        return None
+
+
 def _graph_editor_root_exists():
     if not cmds:
         return False
@@ -770,7 +837,7 @@ def _maya_main_window():
     if not ptr:
         return None
     try:
-        return shiboken.wrapInstance(int(ptr), QtWidgets.QWidget)
+        return shiboken.wrapInstance(int(ptr), QtWidgets.QMainWindow)
     except Exception:
         return None
 
@@ -825,10 +892,19 @@ def _apply_graph_editor_opacity(opacity=None):
     return widget
 
 
+def _detach_graph_editor_resize_filter():
+    """Remove the observer from its recorded native owner before rebinding."""
+    global _GRAPH_EDITOR_RESIZE_ROOT
+    widget = _GRAPH_EDITOR_RESIZE_ROOT
+    if _qt_object_valid(widget) and _qt_object_valid(_GRAPH_EDITOR_RESIZE_FILTER):
+        widget.removeEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+    _GRAPH_EDITOR_RESIZE_ROOT = None
+
+
 def _apply_graph_editor_style():
-    global _GRAPH_EDITOR_RESIZE_FILTER
+    global _GRAPH_EDITOR_RESIZE_FILTER, _GRAPH_EDITOR_RESIZE_ROOT
     widget = _graph_editor_root_widget()
-    if not widget:
+    if not _qt_object_valid(widget):
         return None
     try:
         widget.setObjectName(GRAPH_EDITOR_WINDOW_NAME)
@@ -897,23 +973,35 @@ def _apply_graph_editor_style():
             }
             """
         )
-        for button in widget.findChildren(QtWidgets.QPushButton):
+        for name in GRAPH_EDITOR_BUTTON_NAMES:
+            button = _graph_editor_owned_widget(name)
+            if not _qt_object_valid(button):
+                continue
             try:
                 button.setFlat(True)
                 button.setAutoDefault(False)
                 button.setDefault(False)
             except Exception:
                 pass
-        for child in widget.findChildren(QtWidgets.QWidget):
-            if child.objectName() in (GRAPH_EDITOR_CONTAINER_NAME, GRAPH_EDITOR_PANE_NAME):
+        for name in (GRAPH_EDITOR_CONTAINER_NAME, GRAPH_EDITOR_PANE_NAME):
+            child = _graph_editor_owned_widget(name, layout=True)
+            if _qt_object_valid(child):
                 try:
                     child.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
                     child.setMinimumSize(1, 1)
                 except Exception:
                     pass
-        if QtCore and _GRAPH_EDITOR_RESIZE_FILTER is None:
-            _GRAPH_EDITOR_RESIZE_FILTER = _GraphEditorResizeFilter(widget)
-            widget.installEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+        if QtCore:
+            if not _qt_object_valid(_GRAPH_EDITOR_RESIZE_FILTER):
+                _GRAPH_EDITOR_RESIZE_FILTER = _GraphEditorResizeFilter(widget)
+                widget.installEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+                _GRAPH_EDITOR_RESIZE_ROOT = widget
+            elif (_qt_native_pointer(_GRAPH_EDITOR_RESIZE_ROOT) is None or
+                  _qt_native_pointer(_GRAPH_EDITOR_RESIZE_ROOT) != _qt_native_pointer(widget)):
+                _detach_graph_editor_resize_filter()
+                _GRAPH_EDITOR_RESIZE_FILTER.setParent(widget)
+                widget.installEventFilter(_GRAPH_EDITOR_RESIZE_FILTER)
+                _GRAPH_EDITOR_RESIZE_ROOT = widget
     except Exception:
         pass
     return widget
@@ -1175,7 +1263,7 @@ def _resize_graph_editor_split():
     if not cmds:
         return False
     try:
-        if not cmds.window(GRAPH_EDITOR_WINDOW_NAME, exists=True) or not cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, exists=True):
+        if not _graph_editor_root_exists() or not cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, exists=True):
             return False
         width, window_height = _graph_editor_window_size()
         width = max(760, int(width))
@@ -1405,7 +1493,7 @@ def _ensure_graph_editor_window():
         cmds.workspaceControl(
             GRAPH_EDITOR_WORKSPACE_CONTROL_NAME,
             label="Aminate Floating Graph Editor",
-            retain=False,
+            retain=True,
             floating=True,
             initialWidth=DEFAULT_GRAPH_EDITOR_WIDTH,
             initialHeight=DEFAULT_GRAPH_EDITOR_HEIGHT,
@@ -1433,6 +1521,7 @@ def _ensure_graph_editor_window():
             backgroundColor=(0.188, 0.188, 0.188),
         )
         cmds.button(
+            GRAPH_EDITOR_BUTTON_NAMES[0],
             label="Cycle Inf",
             annotation="Set selected or visible animation curves to pre-cycle and post-cycle, then show infinities in the Graph Editor View.",
             height=24,
@@ -1440,6 +1529,7 @@ def _ensure_graph_editor_window():
             command=lambda *_args: apply_cycle_infinity_to_graph_editor(),
         )
         cmds.button(
+            GRAPH_EDITOR_BUTTON_NAMES[1],
             label="Euler Flip",
             annotation="Blender-style fix for selected rotation keys: rewrites the current key to the nearest safe Euler equivalent.",
             height=24,
@@ -1447,12 +1537,14 @@ def _ensure_graph_editor_window():
             command=lambda *_args: apply_euler_flip_to_graph_editor(),
         )
         cmds.button(
+            GRAPH_EDITOR_BUTTON_NAMES[2],
             label="Refresh",
             height=24,
             backgroundColor=(0.17, 0.17, 0.17),
             command=lambda *_args: (_configure_graph_editor_outliner_panel(), _resize_graph_editor_split(), _apply_graph_editor_style(), _fit_graph_editor_curves()),
         )
         cmds.button(
+            GRAPH_EDITOR_BUTTON_NAMES[3],
             label="Close",
             height=24,
             backgroundColor=(0.13, 0.13, 0.13),
@@ -1875,14 +1967,12 @@ if QtWidgets:
             self.hotkey_text = normalize_hotkey(hotkey_text or get_hotkey())
             self.hotkey_parts = hotkey_to_parts(self.hotkey_text)
             self.graph_hotkey_text = normalize_hotkey(graph_hotkey_text or get_graph_editor_hotkey(), default_value=DEFAULT_GRAPH_EDITOR_HOTKEY)
-            # Graph editor hotkey uses the same raw app-wide event filter path as the channel box.
+            # Both raw hotkeys observe only the actual focused widget.
             self.graph_hotkey_parts = graph_hotkey_to_parts(self.graph_hotkey_text)
             self.dialog = None
             self.graph_shortcut = None
             self._last_trigger_time = 0.0
-            app = QtWidgets.QApplication.instance()
-            if app:
-                app.installEventFilter(self)
+            self._focus_filter = _FocusedWidgetHotkeyFilter(self)
             self._install_graph_shortcut()
 
         def set_hotkey(self, hotkey_text):
@@ -1915,7 +2005,7 @@ if QtWidgets:
             if self.graph_shortcut is None or self.graph_shortcut.parent() is not parent_widget:
                 if self.graph_shortcut is not None:
                     try:
-                        self.graph_shortcut.activated.disconnect(self.toggle_graph)
+                        self.graph_shortcut.activated.disconnect(self._activate_graph_shortcut)
                     except Exception:
                         pass
                     try:
@@ -1931,7 +2021,7 @@ if QtWidgets:
                     self.graph_shortcut.setAutoRepeat(False)
                 except Exception:
                     pass
-                self.graph_shortcut.activated.connect(self.toggle_graph)
+                self.graph_shortcut.activated.connect(self._activate_graph_shortcut)
             try:
                 self.graph_shortcut.setKey(QtGui.QKeySequence(_qt_shortcut_text(self.graph_hotkey_text)))
             except Exception:
@@ -1945,15 +2035,10 @@ if QtWidgets:
                     pass
 
         def shutdown(self):
-            app = QtWidgets.QApplication.instance()
-            if app:
-                try:
-                    app.removeEventFilter(self)
-                except Exception:
-                    pass
+            self._focus_filter.shutdown()
             if self.graph_shortcut is not None:
                 try:
-                    self.graph_shortcut.activated.disconnect(self.toggle_graph)
+                    self.graph_shortcut.activated.disconnect(self._activate_graph_shortcut)
                 except Exception:
                     pass
                 try:
@@ -1981,6 +2066,10 @@ if QtWidgets:
 
         def toggle_graph(self):
             toggle_floating_graph_editor()
+
+        def _activate_graph_shortcut(self):
+            if not _has_text_entry_focus():
+                self.toggle_graph()
 
         def _event_matches(self, event, parts):
             if event.type() != QtCore.QEvent.KeyPress:
@@ -2013,7 +2102,6 @@ if QtWidgets:
 
         def eventFilter(self, obj, event):
             try:
-                _track_text_entry_focus(obj, event)
                 matched_channel = self._event_matches(event, self.hotkey_parts)
                 if matched_channel:
                     if _has_text_entry_focus():

@@ -3964,7 +3964,7 @@ if QtWidgets:
             main_layout.addWidget(description)
 
             note = QtWidgets.QLabel(
-                "Size always uses the selected rig's original size. 150% always means 1.5x original, never 1.5x the previous copy. Existing animation is baked onto the copied skeleton."
+                "150% means 1.5 times the original size. Make Copy keeps the original rig and copies its animation."
             )
             note.setWordWrap(True)
             note.setStyleSheet("color: #B8D7FF;")

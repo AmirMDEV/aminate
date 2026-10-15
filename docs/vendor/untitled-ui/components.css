@@ -1,0 +1,52 @@
+/* Derived button geometry from upstream/components/base/buttons/button.tsx (MIT).
+   Other primitives are a portable adapter; full React Aria parity is not claimed. */
+:host { all: initial; display: block; color-scheme: light; font-family: "UntitledInter", Inter, sans-serif; font-size:16px; line-height:1.5; color:var(--color-text-primary); -webkit-font-smoothing:antialiased; }
+:host([data-theme="dark"]) { color-scheme: dark; }
+*, *::before, *::after { box-sizing:border-box; }
+[hidden] { display:none !important; }
+button, input, select, textarea { font:inherit; color:inherit; }
+.uu-surface { background:var(--color-bg-primary); color:var(--color-text-primary); padding:24px; border:1px solid var(--color-border-secondary); border-radius:12px; }
+.uu-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.uu-stack { display:grid; gap:20px; }
+.uu-title { font-size:20px; line-height:30px; font-weight:600; margin:0; }
+.uu-description { font-size:14px; line-height:20px; color:var(--color-text-tertiary); margin:4px 0 0; }
+.uu-divider { border:0; border-top:1px solid var(--color-border-secondary); margin:0; }
+.uu-button { position:relative; display:inline-flex; height:max-content; align-items:center; justify-content:center; white-space:nowrap; cursor:pointer; border:0; margin:0; padding:8px 12px; gap:4px; border-radius:8px; font-size:14px; line-height:20px; font-weight:600; outline-color:var(--color-focus-ring); transition:background-color 100ms ease-linear,color 100ms ease-linear; }
+.uu-button > span { padding:0 2px; }
+.uu-button::before { position:absolute; border-radius:7px; pointer-events:none; }
+.uu-button[data-size="xs"] { padding:6px 10px; }
+.uu-button[data-size="md"] { padding:10px 14px; }
+.uu-button[data-size="lg"] { padding:10px 16px; gap:6px; font-size:16px; line-height:24px; }
+.uu-button[data-size="xl"] { padding:12px 18px; gap:6px; font-size:16px; line-height:24px; }
+.uu-button[data-color="primary"] { background:var(--color-bg-brand-solid); color:white; box-shadow:var(--shadow-xs-skeuomorphic); }
+.uu-button[data-color="primary"]::before, .uu-button[data-color="primary-destructive"]::before { content:""; inset:1px; border:1px solid rgb(255 255 255 / .12); mask-image:linear-gradient(to bottom,black,transparent); }
+.uu-button[data-color="primary"]:hover, .uu-button[data-color="primary"][aria-busy="true"] { background:var(--color-bg-brand-solid_hover); }
+.uu-button[data-color="secondary"] { background:var(--color-bg-primary); color:var(--color-text-secondary); box-shadow:inset 0 0 0 1px var(--color-border-primary),var(--shadow-xs-skeuomorphic); }
+.uu-button[data-color="secondary"]:hover { background:var(--color-bg-primary_hover); color:var(--color-text-secondary_hover); }
+.uu-button[data-color="tertiary"] { background:transparent; color:var(--color-text-tertiary); }
+.uu-button[data-color="tertiary"]:hover { background:var(--color-bg-primary_hover); color:var(--color-text-tertiary_hover); }
+.uu-button[data-color="primary-destructive"] { background:var(--color-bg-error-solid); color:white; box-shadow:var(--shadow-xs-skeuomorphic); outline-color:var(--color-focus-ring-error); }
+.uu-button[data-color="primary-destructive"]:hover { background:var(--color-bg-error-solid_hover); }
+.uu-button:disabled { cursor:not-allowed; opacity:.5; }
+.uu-button:focus-visible, .uu-input:focus-visible, .uu-checkbox:focus-visible { outline:2px solid var(--color-focus-ring); outline-offset:2px; }
+.uu-button[aria-busy="true"] > span { visibility:hidden; }
+.uu-button[aria-busy="true"]::after { content:""; position:absolute; width:20px; height:20px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:uu-spin 1s linear infinite; }
+@keyframes uu-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
+.uu-field { display:grid; gap:6px; min-width:0; }
+.uu-label { color:var(--color-text-secondary); font-size:14px; line-height:20px; font-weight:500; }
+.uu-input { appearance:none; width:100%; min-width:0; padding:10px 14px; border:1px solid var(--color-border-primary); border-radius:8px; background:var(--color-bg-primary); color:var(--color-text-primary); box-shadow:var(--shadow-xs); font-size:16px; line-height:24px; }
+.uu-input::placeholder { color:var(--color-text-placeholder); }
+.uu-input[aria-invalid="true"] { border-color:var(--color-border-error); }
+.uu-hint { color:var(--color-text-tertiary); font-size:14px; line-height:20px; margin:0; }
+.uu-error { color:var(--color-text-error-primary); }
+.uu-check-label { display:flex; align-items:flex-start; gap:8px; font-size:14px; color:var(--color-text-secondary); cursor:pointer; }
+.uu-checkbox { appearance:none; margin:2px 0 0; flex:none; width:16px; height:16px; border:1px solid var(--color-border-primary); border-radius:4px; background:var(--color-bg-primary); display:grid; place-content:center; }
+.uu-checkbox:checked { background:var(--color-bg-brand-solid); border-color:var(--color-bg-brand-solid); }
+.uu-checkbox:checked::before { content:""; width:8px; height:5px; border-left:2px solid white; border-bottom:2px solid white; transform:translateY(-1px) rotate(-45deg); }
+.uu-dialog { color:var(--color-text-primary); background:var(--color-bg-primary); border:1px solid var(--color-border-secondary); border-radius:12px; padding:24px; width:min(400px,calc(100vw - 32px)); box-shadow:var(--shadow-xl); }
+.uu-dialog::backdrop { background:rgb(0 0 0 / .5); }
+.uu-status { font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0; }
+@media (max-width:480px) { .uu-surface { padding:16px; } }
+@media (pointer:coarse) { .uu-button { min-height:44px; } .uu-check-label { min-height:44px; align-items:center; } }
+@media (forced-colors:active) { .uu-button,.uu-input,.uu-checkbox { border:1px solid ButtonText; } .uu-checkbox:checked { background:Highlight; } }

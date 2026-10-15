@@ -80,7 +80,7 @@ def _maya_main_window():
         ptr = omui.MQtUtil.mainWindow()
         if ptr is None:
             return None
-        return shiboken.wrapInstance(int(ptr), QtWidgets.QWidget)
+        return shiboken.wrapInstance(int(ptr), QtWidgets.QMainWindow)
     except Exception:
         return None
 
@@ -636,6 +636,8 @@ class ReferencePackageController(object):
 
 
 if QtWidgets:
+    from maya_aminate_layout import ResponsiveRow
+
     try:
         from maya.OpenMayaUI import MQtUtil
         _HAS_MAYA_MAIN_WINDOW = MQtUtil.mainWindow() is not None
@@ -673,7 +675,7 @@ if QtWidgets:
             layout.setSpacing(8)
 
             intro = QtWidgets.QLabel(
-                "Package the current scene plus Maya references, textures, image planes, audio, caches, and a manifest into one zip."
+                "Put the saved scene and its needed files into one zip to move or share."
             )
             intro.setWordWrap(True)
             layout.addWidget(intro)
@@ -683,7 +685,7 @@ if QtWidgets:
             package_layout.setContentsMargins(8, 8, 8, 8)
             package_layout.setSpacing(6)
 
-            output_row = QtWidgets.QHBoxLayout()
+            output_row = ResponsiveRow()
             output_row.addWidget(QtWidgets.QLabel("Output folder"))
             self.output_path = QtWidgets.QLineEdit(self.controller.default_output_dir() if MAYA_AVAILABLE else "")
             self.output_path.setToolTip("Folder where Reference Manager writes package folder plus zip.")
@@ -701,7 +703,7 @@ if QtWidgets:
             name_row.addWidget(self.package_name, 1)
             package_layout.addLayout(name_row)
 
-            options_row = QtWidgets.QHBoxLayout()
+            options_row = ResponsiveRow()
             self.save_scene_box = QtWidgets.QCheckBox("Save current scene first")
             self.save_scene_box.setChecked(False)
             self.save_scene_box.setToolTip(
@@ -721,7 +723,7 @@ if QtWidgets:
             options_row.addStretch(1)
             package_layout.addLayout(options_row)
 
-            action_row = QtWidgets.QHBoxLayout()
+            action_row = ResponsiveRow()
             self.refresh_button = QtWidgets.QPushButton("Refresh Needed Files")
             self.refresh_button.setToolTip("Scan current Maya scene for references plus external files before packaging.")
             self.package_button = QtWidgets.QPushButton("Package Scene To Zip")
@@ -739,7 +741,7 @@ if QtWidgets:
             cleanup_layout = QtWidgets.QVBoxLayout(cleanup_group)
             cleanup_layout.setContentsMargins(8, 8, 8, 8)
             cleanup_layout.setSpacing(6)
-            cleanup_row = QtWidgets.QHBoxLayout()
+            cleanup_row = ResponsiveRow()
             self.scan_unknown_button = QtWidgets.QPushButton("Scan Unknown Data")
             self.scan_unknown_button.setToolTip(
                 "Check for unknown Maya nodes or unknown plugin records that can block file format changes."

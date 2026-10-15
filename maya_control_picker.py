@@ -950,7 +950,7 @@ def _records_from_state(state):
 
 
 def _load_state():
-    root = _root_group(create=True)
+    root = _root_group(create=False)
     if not root:
         return {"version": CONTROL_PICKER_VERSION, "source_root": "", "geometry_root": "", "skeleton_root": "", "records": [], "custom_sets": []}
     state = _load_json_attr(root, CONTROL_PICKER_STATE_ATTR, default=None) or {}
@@ -1611,7 +1611,7 @@ class ControlPickerPanel(QtWidgets.QWidget):
         main_layout.setContentsMargins(4, 4, 4, 4)
         main_layout.setSpacing(6)
         intro = QtWidgets.QLabel(
-            "Choose one rig root. Aminate scans its controls, hierarchy, side, body area, and FK/IK mode, then builds selection groups and a live position map that also works for animals."
+            "Select the character's top group, then click Scan Selected Rig. Click a body part to select its controls."
         )
         intro.setWordWrap(True)
         main_layout.addWidget(intro)
@@ -1773,13 +1773,13 @@ class ControlPickerPanel(QtWidgets.QWidget):
         key_row = QtWidgets.QGridLayout()
         key_row.setHorizontalSpacing(6)
         key_row.setVerticalSpacing(6)
-        self.refresh_attrs_button = QtWidgets.QPushButton("Refresh Attrs")
+        self.refresh_attrs_button = QtWidgets.QPushButton("Refresh Values")
         self.refresh_attrs_button.clicked.connect(self.controller.refresh_attrs)
         key_row.addWidget(self.refresh_attrs_button, 0, 0)
-        self.key_selected_button = QtWidgets.QPushButton("Key Selected Attrs")
+        self.key_selected_button = QtWidgets.QPushButton("Key Selected Values")
         self.key_selected_button.clicked.connect(lambda: self.controller.key_attrs(all_attrs=False))
         key_row.addWidget(self.key_selected_button, 0, 1)
-        self.key_all_button = QtWidgets.QPushButton("Key All Attrs")
+        self.key_all_button = QtWidgets.QPushButton("Key All Values")
         self.key_all_button.clicked.connect(lambda: self.controller.key_attrs(all_attrs=True))
         key_row.addWidget(self.key_all_button, 1, 0, 1, 2)
         key_row.setColumnStretch(0, 1)
@@ -1848,7 +1848,12 @@ class ControlPickerPanel(QtWidgets.QWidget):
         if selected_root:
             self.controller.scan_scene(root=selected_root)
             return
-        self.controller.scan_scene(root=_current_source_root_from_state() or "")
+        saved_root = _current_source_root_from_state() or ""
+        if saved_root:
+            self.controller.scan_scene(root=saved_root)
+        else:
+            self.set_records([], custom_sets=state.get("custom_sets") or [])
+            self.set_status("Pick a controls root, then click Scan to build your picker.")
 
     def set_status(self, message):
         self.status_label.setText(message or "Ready.")

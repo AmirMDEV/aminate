@@ -1,6 +1,12 @@
 # Changelog
 
-## Version 0.3.8 - release candidate
+## Version 0.3.8 - 2026-10-15
+
+- Made the bottom Toolkit Bar compact by default, with a persistent collapse control and optional History/Layers rows. Hidden layer controls stop polling the scene.
+- Preserved retained UI during repeated launches and installer updates; a loaded session asks for a restart instead of hot-reloading Maya widgets.
+- Added Control Rig Builder, Multi-Performer Mocap and Root Motion from the private development line, plus its accumulated Pencil, History and docking reliability fixes.
+- Fixed a Retarget panel construction error and stopped History from changing Maya security preferences.
+- Restricted the offline tutorial export to public reader-facing content.
 
 - Simplified every tool page into task groups with secondary options behind disclosures. Added Quick Start task shortcuts, toolbar favourites and a More tools menu.
 - Kept both toolbar package buttons connected to ZIP creation. An unnamed scene or a scene missing on disk now shows a Save Scene First popup before packaging starts.
@@ -8,7 +14,7 @@
 - Added Onion Skin preview switching, Channel Box selection pinning, optional Graph Editor Outliner, and central window shortcuts/opacity in Customization.
 - Improved narrow panel layouts and added a shared UI module to both runtime and installer manifests.
 - Carried forward the toolbar fixes: empty selection does nothing, layer-aware keyed-control lookup, safe static-curve cleanup, undo handling and honest tool-opening errors.
-- Validation: 29 automated regressions and Qt construction of all 23 tool pages at five widths. Maya scene queries were mocked. Live Maya and release-package/install gates are still required before publication.
+- Validation: 31 automated check groups; all 26 panels constructed in Maya 2026.2; live selection/undo/static-curve checks; 100 repeated toolbar launches; actual collapse/details clicks; installer callback with retained UI. These checks do not guarantee every rig or third-party plug-in combination.
 
 ## Version 0.3.7 - 2026-08-01
 

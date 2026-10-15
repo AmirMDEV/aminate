@@ -1,0 +1,19 @@
+{
+  "library": "Untitled UI FREE",
+  "upstreamRevision": "c981a73bcd6b6c68d2a54070f20f020191212828",
+  "upstream": "https://github.com/untitleduico/react",
+  "license": "MIT",
+  "adapter": "canonical portable DOM adapter; not React Aria runtime",
+  "changes": [
+    "button and textField subset wrapped as offline classic script",
+    "dark selector mapped to tutorial theme attribute",
+    "system dark media fallback"
+  ],
+  "sourceFileHashes": {
+    "tokens.css": "ddf665c4a0856d398123cb7fc71a887a0df70467a7a4abd1fb3db0d18a09cb47",
+    "components.css": "69d37612ca7e7e4add2ff79190caa208b0f67a342dcc58e8c840581d39c86d0d",
+    "LICENSE.txt": "c4b824495f1d48ee0b257606dccdb9b0a442d565ce155fc1eb86f497172534e1",
+    "InterVariable.ttf": "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf",
+    "Inter-LICENSE.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
+  }
+}

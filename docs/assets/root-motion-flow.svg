@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img" aria-label="Root motion workflow: captured body motion stays independent while a root helper drives the root; bake combines them">
+<rect width="720" height="220" fill="#27282b"/>
+<g font-family="sans-serif" fill="#eee" font-size="18" text-anchor="middle">
+<rect x="20" y="25" width="210" height="65" rx="8" fill="#414449"/><text x="125" y="52">Capture body</text><text x="125" y="76">world movement</text>
+<rect x="20" y="130" width="210" height="65" rx="8" fill="#414449"/><text x="125" y="157">Animate root helper</text><text x="125" y="181">or follow a source</text>
+<rect x="280" y="77" width="180" height="65" rx="8" fill="#414449"/><text x="370" y="103">Preview with body</text><text x="370" y="127">compensation</text>
+<rect x="515" y="77" width="185" height="65" rx="8" fill="#535b65"/><text x="607" y="103">Bake and verify</text><text x="607" y="127">root + body keys</text>
+</g><g fill="none" stroke="#c9cdd2" stroke-width="2"><path d="M230 58H255V100H278M230 163H255V120H278M460 110H510"/><path d="m502 103 8 7-8 7"/></g></svg>

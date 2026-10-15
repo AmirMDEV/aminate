@@ -176,6 +176,8 @@ WINDOW_OBJECT_NAME = "mayaTimingToolsWindow"
 STUDENT_TIMELINE_BAR_OBJECT_NAME = "studentCoreTimelineButtonBarWindow"
 STUDENT_TIMELINE_BAR_WORKSPACE_CONTROL_NAME = STUDENT_TIMELINE_BAR_OBJECT_NAME + "WorkspaceControl"
 STUDENT_TIMELINE_BAR_FIXED_HOST_OBJECT_NAME = "aminateFixedBottomToolkitBarHost"
+TOOLKIT_BAR_COLLAPSED_OPTION = "AmirAminateToolkitBarCollapsed"
+TOOLKIT_BAR_DETAILS_OPTION = "AmirAminateToolkitBarDetails"
 AUTO_SNAP_OPTION = "AmirAminateAutoSnapToFrames"
 ANIMATION_LAYER_TINT_OPTION = "AmirAminateAnimationLayerTint"
 KEEP_TOOLBAR_EXTRAS_ON_HIDE_OPTION = "AmirAminateKeepToolbarExtrasOnHide"
@@ -2985,7 +2987,7 @@ def _maya_main_qt_window():
     if not pointer:
         return None
     try:
-        return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+        return shiboken.wrapInstance(int(pointer), QtWidgets.QMainWindow)
     except Exception:
         return None
 
@@ -3142,6 +3144,8 @@ def _remove_auto_key_warning_callback():
 
 
 if QtWidgets:
+    from maya_aminate_layout import ResponsiveRow
+
     class _AutoKeyWarningToast(QtWidgets.QFrame):
         def __init__(self, parent=None):
             super(_AutoKeyWarningToast, self).__init__(parent)
@@ -7745,9 +7749,7 @@ if QtWidgets:
             self.hotkey_parts = maya_floating_channel_box.hotkey_to_parts(self.hotkey_text)
             self.popup = None
             self._last_trigger_time = 0.0
-            app = QtWidgets.QApplication.instance()
-            if app:
-                app.installEventFilter(self)
+            self._focus_filter = maya_floating_channel_box._FocusedWidgetHotkeyFilter(self)
 
         def set_hotkey(self, hotkey_text):
             self.hotkey_text = maya_floating_channel_box.normalize_hotkey(
@@ -7758,12 +7760,7 @@ if QtWidgets:
 
         def shutdown(self):
             global _TWEEN_MACHINE_POPUP
-            app = QtWidgets.QApplication.instance()
-            if app:
-                try:
-                    app.removeEventFilter(self)
-                except Exception:
-                    pass
+            self._focus_filter.shutdown()
             if _qt_object_valid(self.popup):
                 try:
                     self.popup.hide()
@@ -7786,7 +7783,6 @@ if QtWidgets:
 
         def eventFilter(self, obj, event):
             try:
-                maya_floating_channel_box._track_text_entry_focus(obj, event)
                 if not self._event_matches(event):
                     return False
                 if maya_floating_channel_box._has_text_entry_focus():
@@ -7968,6 +7964,8 @@ if QtWidgets:
             self.start_history_watcher = bool(start_history_watcher)
             self.start_layer_tint_timer = bool(start_layer_tint_timer)
             self.max_history_markers = max(1, int(max_history_markers or 18))
+            self._bar_collapsed = _option_var_bool(TOOLKIT_BAR_COLLAPSED_OPTION, False)
+            self._bar_details = _option_var_bool(TOOLKIT_BAR_DETAILS_OPTION, False)
             self.history_controller = maya_history_timeline.MayaHistoryTimelineController(status_callback=status_callback)
             self.setObjectName("studentCoreTimelineButtonBarEmbeddedPanel" if self.embedded else STUDENT_TIMELINE_BAR_OBJECT_NAME)
             self.setWindowTitle("" if not self.embedded else "Toolkit Bar")
@@ -7977,11 +7975,9 @@ if QtWidgets:
                     self.setWindowFlags(_qt_flag("WindowType", "Widget", 0))
                 except Exception:
                     pass
-                self.setMinimumSize(0, 92)
-                self.setMaximumHeight(124)
+                self.setMinimumWidth(0)
             else:
-                self.setMinimumSize(360, 92)
-                self.setMaximumHeight(124)
+                self.setMinimumWidth(360)
             if hasattr(self, "setSizePolicy"):
                 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             self._layer_tint_timer = None
@@ -7990,6 +7986,7 @@ if QtWidgets:
             self._workflow_button_group = QtWidgets.QButtonGroup(self)
             self._workflow_button_group.setExclusive(True)
             self._build_ui()
+            self._apply_bar_layout()
             _register_timeline_bar_widget(self)
             self.select_workflow_tab(CURRENT_WORKFLOW_TAB_ALIAS)
             if self.start_history_watcher:
@@ -8007,6 +8004,7 @@ if QtWidgets:
 
             scroll = QtWidgets.QScrollArea(self)
             scroll.setObjectName(object_name)
+            scroll.setMinimumWidth(0)
             scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
             scroll.setWidgetResizable(True)
             scroll.setHorizontalScrollBarPolicy(_qt_flag("ScrollBarPolicy", "ScrollBarAsNeeded", QtCore.Qt.ScrollBarAsNeeded))
@@ -8076,10 +8074,30 @@ if QtWidgets:
             if not self.embedded:
                 root_layout.addWidget(self.drag_grip)
 
-            main_layout = QtWidgets.QVBoxLayout()
+            self.collapse_button = QtWidgets.QToolButton(self)
+            self.collapse_button.setObjectName("toolkitBarCollapseButton")
+            self.collapse_button.setText("Aminate")
+            self.collapse_button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+            self.collapse_button.setMinimumSize(28, 24)
+            self.collapse_button.setFocusPolicy(QtCore.Qt.StrongFocus)
+            self.collapse_button.clicked.connect(self._toggle_bar_collapsed)
+            root_layout.addWidget(self.collapse_button, 0, QtCore.Qt.AlignTop)
+
+            self.bar_content = QtWidgets.QWidget(self)
+            self.bar_content.setObjectName("toolkitBarContent")
+            self.bar_content.setMinimumWidth(0)
+            main_layout = QtWidgets.QVBoxLayout(self.bar_content)
             main_layout.setContentsMargins(0, 0, 0, 0)
             main_layout.setSpacing(2)
-            root_layout.addLayout(main_layout, 1)
+            root_layout.addWidget(self.bar_content, 1)
+
+            self.details_content = QtWidgets.QWidget(self.bar_content)
+            self.details_content.setObjectName("toolkitBarDetails")
+            self.details_content.setMinimumWidth(0)
+            details_layout = QtWidgets.QVBoxLayout(self.details_content)
+            details_layout.setContentsMargins(0, 0, 0, 0)
+            details_layout.setSpacing(2)
+            main_layout.addWidget(self.details_content)
 
             history_layout = QtWidgets.QHBoxLayout()
             history_layout.setContentsMargins(0, 0, 0, 0)
@@ -8095,7 +8113,7 @@ if QtWidgets:
             )
             self.history_strip.setMaximumHeight(22)
             history_layout.addWidget(self.history_strip)
-            main_layout.addLayout(history_layout)
+            details_layout.addLayout(history_layout)
 
             layer_layout = QtWidgets.QHBoxLayout()
             layer_layout.setContentsMargins(0, 0, 0, 0)
@@ -8203,7 +8221,7 @@ if QtWidgets:
                 31,
                 43,
             )
-            main_layout.addWidget(self.layer_scroll)
+            details_layout.addWidget(self.layer_scroll)
 
             self.add_animation_layer_button.clicked.connect(self._create_animation_layer_from_bar)
             self.delete_animation_layer_button.clicked.connect(self._delete_current_animation_layer_from_bar)
@@ -8351,8 +8369,64 @@ if QtWidgets:
                 36,
                 48,
             )
-            main_layout.addWidget(self.tool_scroll)
+            tool_row = QtWidgets.QHBoxLayout()
+            tool_row.setContentsMargins(0, 0, 0, 0)
+            tool_row.setSpacing(3)
+            self.details_button = QtWidgets.QToolButton(self.bar_content)
+            self.details_button.setObjectName("toolkitBarDetailsButton")
+            self.details_button.setText("History / Layers")
+            self.details_button.setIcon(_make_student_core_icon("#A8A8A8", "bars"))
+            self.details_button.setIconSize(QtCore.QSize(16, 16))
+            self.details_button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+            self.details_button.setMinimumSize(28, 28)
+            self.details_button.setCheckable(True)
+            self.details_button.setChecked(self._bar_details)
+            self.details_button.setToolTip("Show or hide History and animation layer controls.")
+            self.details_button.setAccessibleName("Show History and Layers")
+            self.details_button.setFocusPolicy(QtCore.Qt.StrongFocus)
+            self.details_button.toggled.connect(self._set_bar_details)
+            tool_row.addWidget(self.details_button)
+            tool_row.addWidget(self.tool_scroll, 1)
+            main_layout.addLayout(tool_row)
             self._apply_large_hover_help()
+
+        def _toggle_bar_collapsed(self, _checked=False):
+            self._bar_collapsed = not self._bar_collapsed
+            _save_option_var_bool(TOOLKIT_BAR_COLLAPSED_OPTION, self._bar_collapsed)
+            self._apply_bar_layout()
+
+        def _set_bar_details(self, visible):
+            self._bar_details = bool(visible)
+            _save_option_var_bool(TOOLKIT_BAR_DETAILS_OPTION, self._bar_details)
+            self._apply_bar_layout()
+
+        def _apply_bar_layout(self):
+            # Retain every widget/controller. Never recreate Maya workspaces to
+            # reclaim screen space, and never stop History's snapshot service.
+            self.bar_content.setVisible(not self._bar_collapsed)
+            self.details_content.setVisible(self._bar_details)
+            self.collapse_button.setArrowType(QtCore.Qt.UpArrow if self._bar_collapsed else QtCore.Qt.DownArrow)
+            self.collapse_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon if self._bar_collapsed else QtCore.Qt.ToolButtonIconOnly)
+            action = "Expand Toolkit Bar" if self._bar_collapsed else "Collapse Toolkit Bar"
+            self.collapse_button.setToolTip(action)
+            self.collapse_button.setAccessibleName(action)
+            details_action = "Hide History and Layers" if self._bar_details else "Show History and Layers"
+            self.details_button.setToolTip(details_action)
+            self.details_button.setAccessibleName(details_action)
+            self.layout().invalidate()
+            height = max(self.collapse_button.sizeHint().height() + 5, 30)
+            if not self._bar_collapsed:
+                height = max(height, self.tool_scroll.maximumHeight() + 5)
+                if self._bar_details:
+                    height += self.history_strip.maximumHeight() + self.layer_scroll.maximumHeight() + 4
+            self.setFixedHeight(height)
+            host = self.parentWidget()
+            if isinstance(host, QtWidgets.QToolBar) and host.objectName() == STUDENT_TIMELINE_BAR_FIXED_HOST_OBJECT_NAME:
+                host.setFixedHeight(height + 4)
+                host.updateGeometry()
+            self.updateGeometry()
+            if not self._bar_collapsed and self._bar_details:
+                self._refresh_animation_layer_tint()
 
         def _toggle_dock_float_from_grip(self):
             if not MAYA_AVAILABLE or not cmds:
@@ -8374,6 +8448,10 @@ if QtWidgets:
                     if bool(button.property("_aminateLargeTooltip")) and not force:
                         continue
                     object_name = button.objectName() or ""
+                    if object_name in ("toolkitBarCollapseButton", "toolkitBarDetailsButton"):
+                        # These are stateful disclosures, not workflow tools.
+                        # Keep their current action labels through theme refreshes.
+                        continue
                     command_or_name = button.property("_aminateIconCommand") or object_name
                     if object_name.startswith("studentTimelineBar_"):
                         command_or_name = button.property("_aminateIconCommand") or object_name.replace(
@@ -8434,6 +8512,8 @@ if QtWidgets:
 
         def _refresh_animation_layer_tint(self):
             if not getattr(self, "animation_layer_tint_label", None):
+                return
+            if self._bar_collapsed or not self._bar_details or self.isHidden():
                 return
             try:
                 info = self.controller.animation_layer_tint_info()
@@ -8791,7 +8871,7 @@ if QtWidgets:
             section_scroll.setWidget(section_content)
             main_layout.addWidget(section_scroll, 1)
 
-            action_row = QtWidgets.QHBoxLayout()
+            action_row = ResponsiveRow()
             action_row.setSpacing(8)
             self.auto_key_button = QtWidgets.QToolButton()
             self.auto_key_button.setCheckable(True)
@@ -8878,11 +8958,11 @@ if QtWidgets:
                 checkbox.setChecked(bool(action_settings.get(action_key, True)))
                 checkbox.setToolTip(action_tooltip)
                 self.game_mode_action_checks[action_key] = checkbox
-                game_mode_checks.addWidget(checkbox, index // 3, index % 3)
+                game_mode_checks.addWidget(checkbox, index, 0)
             game_mode_layout.addLayout(game_mode_checks)
             scene_setup_layout.addWidget(self.game_mode_group)
 
-            setup_row = QtWidgets.QHBoxLayout()
+            setup_row = ResponsiveRow()
             setup_row.setSpacing(8)
             self.render_env_button = QtWidgets.QPushButton("Set Up Render Environment")
             self.render_env_button.setProperty("aminateRole", "primary")
@@ -8925,7 +9005,7 @@ if QtWidgets:
                 "Plain-English list of edits made to the teacher-demo duplicate. If an edit is undone back to its original value, the bullet disappears."
             )
             teacher_log_layout.addWidget(self.teacher_demo_edit_log)
-            teacher_log_buttons = QtWidgets.QHBoxLayout()
+            teacher_log_buttons = ResponsiveRow()
             teacher_log_buttons.setSpacing(8)
             self.refresh_teacher_demo_log_button = QtWidgets.QPushButton("Refresh Edit Log")
             self.refresh_teacher_demo_log_button.setObjectName("sceneHelpersRefreshTeacherDemoLogButton")
@@ -8938,7 +9018,7 @@ if QtWidgets:
             teacher_log_layout.addLayout(teacher_log_buttons)
             scene_setup_layout.addWidget(teacher_log_group)
 
-            camera_row = QtWidgets.QHBoxLayout()
+            camera_row = ResponsiveRow()
             camera_row.setSpacing(8)
             camera_row.addWidget(QtWidgets.QLabel("Camera Preset"))
             self.render_preset_combo = QtWidgets.QComboBox()
@@ -8953,7 +9033,7 @@ if QtWidgets:
             camera_row.addWidget(self.render_preset_button)
             scene_setup_layout.addLayout(camera_row)
 
-            offset_row = QtWidgets.QHBoxLayout()
+            offset_row = ResponsiveRow()
             offset_row.setSpacing(8)
             offset_row.addWidget(QtWidgets.QLabel("Camera Height Offset"))
             self.camera_height_offset_spin = QtWidgets.QDoubleSpinBox()
@@ -8982,7 +9062,7 @@ if QtWidgets:
             offset_row.addWidget(self.teacher_rig_offset_spin)
             scene_setup_layout.addLayout(offset_row)
 
-            snap_row = QtWidgets.QHBoxLayout()
+            snap_row = ResponsiveRow()
             snap_row.setSpacing(8)
             self.snap_now_button = QtWidgets.QPushButton("Snap Selected Keys To Frames")
             self.snap_now_button.setProperty("aminateRole", "primary")
@@ -8998,7 +9078,7 @@ if QtWidgets:
                 "For selected controls, find every keyed frame on any selected control, then key selected channel groups on every selected control at those frames."
             )
             snap_row.addWidget(self.key_blocking_poses_button, 1)
-            retime_row = QtWidgets.QHBoxLayout()
+            retime_row = ResponsiveRow()
             retime_row.setSpacing(8)
             retime_row.addWidget(QtWidgets.QLabel("Retime Every"))
             self.retime_every_n_spin = QtWidgets.QSpinBox()
@@ -9034,7 +9114,7 @@ if QtWidgets:
             self.refresh_layer_tint_button.setToolTip("Refresh the docked timeline layer tint strip after changing animation layers.")
             blocking_layout.addLayout(snap_row)
 
-            layer_row = QtWidgets.QHBoxLayout()
+            layer_row = ResponsiveRow()
             layer_row.setSpacing(8)
             layer_row.addWidget(self.animation_layer_tint_button, 1)
             layer_row.addWidget(self.keep_toolbar_extras_on_hide_check, 1)
@@ -9043,32 +9123,31 @@ if QtWidgets:
 
             animation_layers_group = QtWidgets.QGroupBox("Animation Layers")
             animation_layers_group.setObjectName("sceneHelpersAnimationLayersGroup")
-            animation_layers_layout = QtWidgets.QGridLayout(animation_layers_group)
+            animation_layers_layout = QtWidgets.QVBoxLayout(animation_layers_group)
             animation_layers_layout.setContentsMargins(10, 8, 10, 10)
-            animation_layers_layout.setHorizontalSpacing(8)
-            animation_layers_layout.setVerticalSpacing(8)
+            animation_layers_layout.setSpacing(8)
             self.duplicate_current_layer_button = QtWidgets.QPushButton("Duplicate Current Layer")
             self.duplicate_current_layer_button.setProperty("aminateRole", "primary")
             self.duplicate_current_layer_button.setObjectName("sceneHelpersDuplicateCurrentLayerButton")
             self.duplicate_current_layer_button.setToolTip("Copy every attribute and animation curve from the selected animation layer into a new layer. The source layer stays unchanged.")
-            animation_layers_layout.addWidget(self.duplicate_current_layer_button, 0, 0)
+            animation_layers_layout.addWidget(self.duplicate_current_layer_button)
             self.consolidate_other_layers_button = QtWidgets.QPushButton("Consolidate Other Layers")
             self.consolidate_other_layers_button.setProperty("aminateRole", "primary")
             self.consolidate_other_layers_button.setObjectName("sceneHelpersConsolidateOtherLayersButton")
             self.consolidate_other_layers_button.setToolTip("Bake every non-current animation layer into one new muted layer. Original layers stay unchanged so the scene does not double the animation.")
-            animation_layers_layout.addWidget(self.consolidate_other_layers_button, 0, 1)
+            animation_layers_layout.addWidget(self.consolidate_other_layers_button)
             self.solo_current_layer_button = QtWidgets.QPushButton("Solo Current Layer")
             self.solo_current_layer_button.setObjectName("sceneHelpersSoloCurrentLayerButton")
             self.solo_current_layer_button.setCheckable(True)
             self.solo_current_layer_button.setToolTip("Solo the animation layer selected in the Animation Layer Tint control. Click again to remove solo.")
-            animation_layers_layout.addWidget(self.solo_current_layer_button, 1, 0)
+            animation_layers_layout.addWidget(self.solo_current_layer_button)
             self.clear_layer_solos_button = QtWidgets.QPushButton("Clear All Layer Solos")
             self.clear_layer_solos_button.setObjectName("sceneHelpersClearLayerSolosButton")
             self.clear_layer_solos_button.setToolTip("Turn Solo off for every non-base animation layer.")
-            animation_layers_layout.addWidget(self.clear_layer_solos_button, 1, 1)
+            animation_layers_layout.addWidget(self.clear_layer_solos_button)
             blocking_layout.addWidget(animation_layers_group)
 
-            blocking_options_row = QtWidgets.QHBoxLayout()
+            blocking_options_row = ResponsiveRow()
             blocking_options_row.setSpacing(8)
             blocking_options_row.addWidget(QtWidgets.QLabel("Blocking Pose Channels"))
             self.key_blocking_translation_check = QtWidgets.QCheckBox("Translation")
@@ -9089,7 +9168,7 @@ if QtWidgets:
             blocking_options_row.addStretch(1)
             blocking_layout.addLayout(blocking_options_row)
 
-            tween_machine_row = QtWidgets.QHBoxLayout()
+            tween_machine_row = ResponsiveRow()
             tween_machine_row.setSpacing(8)
             tween_machine_row.addWidget(QtWidgets.QLabel("Tween Machine Hotkey"))
             self.tween_machine_hotkey_edit = HotkeyCaptureLineEdit(DEFAULT_TWEEN_MACHINE_HOTKEY)
@@ -9117,7 +9196,7 @@ if QtWidgets:
             tween_machine_row.addWidget(self.open_tween_machine_button)
             blocking_layout.addLayout(tween_machine_row)
 
-            floating_channel_row = QtWidgets.QHBoxLayout()
+            floating_channel_row = ResponsiveRow()
             floating_channel_row.setSpacing(8)
             floating_channel_row.addWidget(QtWidgets.QLabel("Floating Channel Box Hotkey"))
             self.floating_channel_hotkey_edit = HotkeyCaptureLineEdit(maya_floating_channel_box.DEFAULT_HOTKEY)
@@ -9145,7 +9224,7 @@ if QtWidgets:
             floating_channel_row.addWidget(self.open_floating_channel_box_button)
             blocking_layout.addLayout(floating_channel_row)
 
-            floating_graph_row = QtWidgets.QHBoxLayout()
+            floating_graph_row = ResponsiveRow()
             floating_graph_row.setSpacing(8)
             floating_graph_row.addWidget(QtWidgets.QLabel("Floating Graph Editor Hotkey"))
             self.floating_graph_hotkey_edit = HotkeyCaptureLineEdit(maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY)
@@ -9203,7 +9282,7 @@ if QtWidgets:
             text_note_label.setStyleSheet("font-weight: 600;")
             notes_layout.addWidget(text_note_label)
 
-            text_note_row = QtWidgets.QHBoxLayout()
+            text_note_row = ResponsiveRow()
             text_note_row.setSpacing(8)
             self.scene_text_input = QtWidgets.QLineEdit()
             self.scene_text_input.setObjectName("sceneHelpersTextNoteInput")
@@ -9231,7 +9310,7 @@ if QtWidgets:
             text_note_row.addWidget(self.create_scene_text_note_button, 1)
             notes_layout.addLayout(text_note_row)
 
-            text_note_wrap_row = QtWidgets.QHBoxLayout()
+            text_note_wrap_row = ResponsiveRow()
             text_note_wrap_row.setSpacing(8)
             self.scene_text_wrap_check = QtWidgets.QCheckBox("Auto Wrap")
             self.scene_text_wrap_check.setObjectName("sceneHelpersTextNoteWrapCheck")
@@ -9266,7 +9345,7 @@ if QtWidgets:
             text_note_wrap_row.addWidget(self.select_text_note_box_button, 1)
             notes_layout.addLayout(text_note_wrap_row)
 
-            text_note_list_row = QtWidgets.QHBoxLayout()
+            text_note_list_row = ResponsiveRow()
             text_note_list_row.setSpacing(8)
             self.scene_text_note_list = QtWidgets.QListWidget()
             self.scene_text_note_list.setObjectName("sceneHelpersTextNoteList")
@@ -9877,21 +9956,6 @@ def _fixed_timeline_bar_host():
     if not QtWidgets:
         return None
     main_window = _maya_main_window()
-    if (
-        (not _qt_object_valid(main_window) or not hasattr(main_window, "addToolBar"))
-        and omui
-        and shiboken
-        and hasattr(QtWidgets, "QMainWindow")
-    ):
-        try:
-            pointer = omui.MQtUtil.mainWindow()
-            if pointer:
-                main_window = shiboken.wrapInstance(
-                    int(pointer),
-                    QtWidgets.QMainWindow,
-                )
-        except Exception:
-            main_window = None
     if not _qt_object_valid(main_window) or not hasattr(main_window, "addToolBar"):
         app = QtWidgets.QApplication.instance()
         main_window = None
@@ -9922,8 +9986,7 @@ def _fixed_timeline_bar_host():
     host.setOrientation(_qt_flag("Orientation", "Horizontal", QtCore.Qt.Horizontal))
     bottom_area = _qt_flag("ToolBarArea", "BottomToolBarArea", QtCore.Qt.BottomToolBarArea)
     host.setAllowedAreas(bottom_area)
-    host.setMinimumSize(0, 96)
-    host.setMaximumHeight(124)
+    host.setMinimumSize(0, 30)
     host.setContentsMargins(0, 0, 0, 0)
     host.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
     try:
@@ -9958,7 +10021,6 @@ def _show_timeline_bar_in_fixed_host(window):
         pass
     window.setObjectName("aminateFixedBottomToolkitBarPanel")
     window.setMinimumWidth(0)
-    window.setMaximumHeight(124)
     hosted = False
     for action in host.actions():
         try:
@@ -9971,6 +10033,7 @@ def _show_timeline_bar_in_fixed_host(window):
         window.setParent(host)
         host.addWidget(window)
     window.show()
+    window._apply_bar_layout()
     host.show()
     try:
         host.raise_()

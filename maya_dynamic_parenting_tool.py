@@ -125,7 +125,7 @@ def _maya_main_window():
     pointer = omui.MQtUtil.mainWindow()
     if not pointer:
         return None
-    return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+    return shiboken.wrapInstance(int(pointer), QtWidgets.QMainWindow)
 
 
 def _dedupe_preserve_order(items):

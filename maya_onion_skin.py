@@ -327,7 +327,7 @@ def _maya_main_window():
     main_window = omui.MQtUtil.mainWindow()
     if not main_window:
         return None
-    return shiboken.wrapInstance(int(main_window), QtWidgets.QWidget)
+    return shiboken.wrapInstance(int(main_window), QtWidgets.QMainWindow)
 
 
 def _dag_path(node_name):
@@ -597,7 +597,7 @@ class MayaOnionSkinController(object):
 
     def attachment_summary(self):
         if not self.attached_roots:
-            return "Pick one or more characters, then click Attach Selected."
+            return "Pick a character, then click Use Current Selection."
         if len(self.attached_roots) == 1:
             return "Attached to {0} with {1} mesh shapes.".format(self.attached_roots[0], len(self.source_meshes))
         return "Attached {0} roots with {1} mesh shapes.".format(len(self.attached_roots), len(self.source_meshes))
@@ -649,7 +649,7 @@ class MayaOnionSkinController(object):
     def manual_refresh(self):
         valid_roots = self._valid_attached_roots()
         if not valid_roots:
-            return False, "Nothing is attached. Use Attach Selected first."
+            return False, "Pick a character and click Use Current Selection first."
 
         self._set_attached_roots(valid_roots)
         self.source_meshes = self._discover_mesh_entries(valid_roots)
@@ -1814,6 +1814,8 @@ class MayaOnionSkinController(object):
 
 
 if QtWidgets:
+    from maya_aminate_layout import ResponsiveRow
+
     try:
         from maya.OpenMayaUI import MQtUtil
         from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
@@ -1860,6 +1862,7 @@ if QtWidgets:
             main_layout.addWidget(description)
 
             form_layout = QtWidgets.QFormLayout()
+            form_layout.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
             form_layout.setLabelAlignment(_qt_flag("AlignmentFlag", "AlignLeft", 0))
             form_layout.setFormAlignment(_qt_flag("AlignmentFlag", "AlignTop", 0))
 
@@ -1910,7 +1913,7 @@ if QtWidgets:
             self.auto_update_check.setToolTip("Update the ghost copies while you scrub the timeline.")
             form_layout.addRow("", self.auto_update_check)
 
-            self.full_fidelity_scrub_check = QtWidgets.QCheckBox("Show Every Ghost While Scrubbing (Slower)")
+            self.full_fidelity_scrub_check = QtWidgets.QCheckBox("All Ghosts When Scrubbing (Slower)")
             self.full_fidelity_scrub_check.setToolTip(
                 "Show the full onion skin while scrubbing. This looks better but can be slower."
             )
@@ -1918,7 +1921,7 @@ if QtWidgets:
 
             main_layout.addLayout(form_layout)
 
-            button_layout = QtWidgets.QHBoxLayout()
+            button_layout = ResponsiveRow()
             self.attach_button = QtWidgets.QPushButton("Use Current Selection")
             self.attach_button.setToolTip("Use the selected character or rig root.")
             self.add_button = QtWidgets.QPushButton("Add Selected")
@@ -1933,7 +1936,7 @@ if QtWidgets:
             button_layout.addWidget(self.clear_button)
             main_layout.addLayout(button_layout)
 
-            self.status_label = QtWidgets.QLabel("Pick one or more characters, then click Attach Selected.")
+            self.status_label = QtWidgets.QLabel("Pick a character, then click Use Current Selection.")
             self.status_label.setWordWrap(True)
             selectable_flag = _qt_flag("TextInteractionFlag", "TextSelectableByMouse", 0)
             self.status_label.setTextInteractionFlags(selectable_flag)

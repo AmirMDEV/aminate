@@ -5,49 +5,48 @@ window.AMINATE_DOCS = {
       "icon": "QS",
       "short": "Quick Start",
       "title": "Quick Start",
-      "media": "assets/quick_start.png",
-      "purpose": "The learner map for Aminate. Use it to decide which tab or button fits the animation problem in front of you.",
+      "media": "assets/panel-quick-start.png",
+      "purpose": "Find a tool for the job you want to do.",
       "when": "A student has opened Aminate and needs the fastest route to the right tool.",
       "steps": [
-        "Open the Quick Start tab in Aminate.",
-        "Look at the animation problem you have right now: timing, a sliding foot, a missing file, or a note for your teacher.",
-        "Pick the matching lesson in this guide and do one small test before changing a whole shot."
+        "Type a job, such as foot sliding or draw notes.",
+        "Pick a tool and read what it does.",
+        "Click Open Tool. Use Help inside any tool for its steps."
       ],
       "buttons": [
-        "Open Tutorials + FAQ",
-        "Tab arrows",
-        "Donate"
+        "Open Tool",
+        "How to use it",
+        "Open Tutorials + FAQ"
       ],
       "tips": [
         "Keep this page open beside Maya during lessons so students can self-correct before asking for help."
       ],
-      "before": "Have Maya open with Aminate visible. If this is your first time, start here before clicking lots of buttons.",
-      "see": "You should know which tab to open next. You should also see the Aminate window stay open while you move between lessons.",
-      "help": "If you feel lost, return here and choose only one problem. Do not press every button to see what happens.",
+      "before": "Open Maya and Aminate. Save your scene before testing tools.",
+      "see": "The tool you chose opens in Aminate.",
+      "help": "Clear the search and try one word, such as foot.",
       "number": "01",
       "tabTitle": "Quick Start",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/quick_start.png",
-          "title": "Quick Start screenshot"
+          "src": "assets/panel-quick-start.png",
+          "title": "Quick Start · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "help learn beginner start"
     },
     {
       "id": "toolkit-bar",
       "icon": "TB",
       "short": "Toolkit",
       "title": "Toolkit Bar",
-      "media": "assets/toolkit_bar.png",
-      "purpose": "A fixed row of quick animation controls at the bottom of Maya. It keeps your most-used keys, layers, exports, and Aminate tabs one click away.",
+      "media": "assets/panel-toolkit-bar.png",
+      "purpose": "Move keys, change timing, and open tools from Maya's bottom bar.",
       "when": "You want to work quickly without hunting through Maya menus or opening another floating window.",
       "steps": [
-        "Look at the little groups from left to right: History, Animation Layer, quick action icons, Aminate tab icons, then Game Animation Mode.",
-        "Hover a button if you forget it. Aminate shows its name and a short explanation.",
-        "Select the control or mesh that the button should work on.",
-        "Try the button on one pose or a short frame range first.",
-        "If Maya is narrow, scroll the Toolkit Bar sideways. The buttons stay large enough to click."
+        "Select the animated controls or keys.",
+        "Point at a button to see its name and steps.",
+        "Check the timeline before moving on."
       ],
       "buttons": [
         "History Auto",
@@ -80,7 +79,7 @@ window.AMINATE_DOCS = {
       "tips": [
         "The blue selected icon tells you which Aminate tab is open. That is a state cue, not a coloured border around the whole button."
       ],
-      "before": "Save the scene. Put the Time Slider on the frame you want and select only the controls or meshes you mean to change.",
+      "before": "Save your scene. Try changes on a short frame range first.",
       "see": "The button gives a short status message, the correct pose or file changes, and the Toolkit Bar stays fixed at Maya's bottom edge.",
       "help": "If nothing happens, check the selection and frame. If the bar looks cut off, scroll it sideways instead of shrinking Maya's buttons.",
       "subsections": [
@@ -88,39 +87,102 @@ window.AMINATE_DOCS = {
           "title": "History and animation layers",
           "intro": "These controls protect versions and organise animation without changing the character rig.",
           "items": [
-            ["History Auto", "When this is on, Aminate can make History Timeline checkpoints while you work. Turn it on only when you want automatic snapshots."],
-            ["History Timeline", "Open the list of saved checkpoints so you can compare or restore an earlier scene state."],
-            ["Animation Layer menu", "Choose which Maya animation layer you are editing."],
-            ["+ Layer / Delete", "Make a new animation layer, or delete the chosen layer. Delete affects the layer, so check its name first."],
-            ["+ Selection / - Selection", "Add selected controls to the layer, or remove them from it."],
-            ["Mute / Solo / Lock", "Mute hides a layer's effect. Solo shows only that layer. Lock stops accidental changes."],
-            ["Layer Weight", "Choose how strongly the layer changes the final pose. 0 means no effect; 1 means full effect."]
+            [
+              "History Auto",
+              "When this is on, Aminate can make History Timeline checkpoints while you work. Turn it on only when you want automatic snapshots."
+            ],
+            [
+              "History Timeline",
+              "Open the list of saved checkpoints so you can compare or restore an earlier scene state."
+            ],
+            [
+              "Animation Layer menu",
+              "Choose which Maya animation layer you are editing."
+            ],
+            [
+              "+ Layer / Delete",
+              "Make a new animation layer, or delete the chosen layer. Delete affects the layer, so check its name first."
+            ],
+            [
+              "+ Selection / - Selection",
+              "Add selected controls to the layer, or remove them from it."
+            ],
+            [
+              "Mute / Solo / Lock",
+              "Mute hides a layer's effect. Solo shows only that layer. Lock stops accidental changes."
+            ],
+            [
+              "Layer Weight",
+              "Choose how strongly the layer changes the final pose. 0 means no effect; 1 means full effect."
+            ]
           ]
         },
         {
           "title": "Quick action icons",
           "intro": "These buttons change keys, poses, meshes, packages, or exports.",
           "items": [
-            ["Nudge Left / Nudge Right", "Move selected keys exactly one frame earlier or later."],
-            ["Insert Inbetween", "Add a new key on the frame where the Time Slider is standing."],
-            ["Tween Machine", "Blend between the key before and the key after. 0% copies the first; 100% copies the next; 50% is halfway."],
-            ["Cut Current Key", "Remove keys only on the current frame for the selected controls."],
-            ["Reset Pose", "Set selected controls to translate 0, rotate 0, and scale 1. If Auto Key is on, the reset is keyed."],
-            ["Bake On Twos", "Bake selected controls over the visible playback range with a key every two frames."],
-            ["Select Animated", "Find and select transforms in the scene that already have animation curves."],
-            ["Clean Static Keys", "Remove animation curves whose keyed value never changes."],
-            ["Combine Freeze Pivot", "Join selected meshes, freeze transforms, and enter Maya's Edit Pivot mode."],
-            ["Package Scene", "Save the scene and collect references, textures, image planes, audio, and caches into a zip."],
-            ["Playblast 1080p AVI", "Make a 1920x1080 AVI of the visible playback range in your Documents folder."],
-            ["Export Selected Animation FBX", "Export only what you selected. It keeps the original source keyframe times by default, with an explicit optional whole-frame resampling checkbox, and leaves cameras and lights off by default."]
+            [
+              "Nudge Left / Nudge Right",
+              "Move selected keys exactly one frame earlier or later."
+            ],
+            [
+              "Insert Inbetween",
+              "Add a new key on the frame where the Time Slider is standing."
+            ],
+            [
+              "Tween Machine",
+              "Blend between the key before and the key after. 0% copies the first; 100% copies the next; 50% is halfway."
+            ],
+            [
+              "Cut Current Key",
+              "Remove keys only on the current frame for the selected controls."
+            ],
+            [
+              "Reset Pose",
+              "Set selected controls to translate 0, rotate 0, and scale 1. If Auto Key is on, the reset is keyed."
+            ],
+            [
+              "Bake On Twos",
+              "Bake selected controls over the visible playback range with a key every two frames."
+            ],
+            [
+              "Select Animated",
+              "Find and select transforms in the scene that already have animation curves."
+            ],
+            [
+              "Clean Static Keys",
+              "Remove animation curves whose keyed value never changes."
+            ],
+            [
+              "Combine Freeze Pivot",
+              "Join selected meshes, freeze transforms, and enter Maya's Edit Pivot mode."
+            ],
+            [
+              "Package Scene",
+              "Save the scene and collect references, textures, image planes, audio, and caches into a zip."
+            ],
+            [
+              "Playblast 1080p AVI",
+              "Make a 1920x1080 AVI of the visible playback range in your Documents folder."
+            ],
+            [
+              "Export Selected Animation FBX",
+              "Export only what you selected. It keeps the original source keyframe times by default, with an explicit optional whole-frame resampling checkbox, and leaves cameras and lights off by default."
+            ]
           ]
         },
         {
           "title": "Aminate tab buttons and Game Mode",
           "intro": "The small workflow icons jump to every Aminate tab. The separate Game button changes useful Maya scene settings for game animation.",
           "items": [
-            ["23 workflow icons", "Quick Start, Toolkit Bar, Scene Helpers, Reference Manager, Dynamic Parenting, Hand / Foot Hold, Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter, Control Picker, Animators Pencil, History Timeline, Onion Skin, Rotation Doctor, Character Skinning, Rig Scale, Video Reference, Timeline Notes, Smear Frames, Customization, and the other current Aminate workflow tabs."],
-            ["Game Animation Mode", "Turns on the game setup choices selected in Scene Helpers. Read the Game Animation Mode subsection below before using it."]
+            [
+              "23 workflow icons",
+              "Quick Start, Toolkit Bar, Scene Helpers, Reference Manager, Dynamic Parenting, Hand / Foot Hold, Surface Contact, Dynamic Pivot, Universal IK/FK, Controls Retargeter, Control Picker, Animators Pencil, History Timeline, Onion Skin, Rotation Doctor, Character Skinning, Rig Scale, Video Reference, Timeline Notes, Smear Frames, Customization, and the other current Aminate workflow tabs."
+            ],
+            [
+              "Game Animation Mode",
+              "Turns on the game setup choices selected in Scene Helpers. Read the Game Animation Mode subsection below before using it."
+            ]
           ]
         }
       ],
@@ -129,23 +191,29 @@ window.AMINATE_DOCS = {
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/toolkit_bar.png",
-          "title": "Toolkit Bar screenshot"
+          "src": "assets/panel-toolkit-bar.png",
+          "title": "Toolkit Bar · built panel preview"
         },
         {
           "type": "image",
           "src": "assets/tween_machine.gif",
           "title": "Tween Machine GIF"
         }
-      ]
+      ],
+      "searchTerms": "toolbar keys timing tween inbetween nudge reset pose bake twos layers game animation mode history zip"
     },
     {
       "id": "scene-helpers",
       "icon": "SH",
       "short": "Scene",
       "title": "Scene Helpers",
-      "media": "assets/scene_feedback_text.gif",
+      "media": "assets/panel-scene-helpers.png",
       "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/panel-scene-helpers.png",
+          "title": "Scene Helpers · built panel preview"
+        },
         {
           "type": "image",
           "src": "assets/scene_feedback_text.gif",
@@ -174,14 +242,12 @@ window.AMINATE_DOCS = {
           "title": "Game Animation Mode GIF"
         }
       ],
-      "purpose": "A set of small helpers for blocking, timing, game setup, render cameras, recovery, animation layers, floating editors, and notes that live inside the Maya scene.",
+      "purpose": "Set up cameras, textures, key snapping, and other scene helpers.",
       "when": "The scene needs safer setup, cleaner timing, a quick game-preview configuration, or feedback that should travel with the Maya file.",
       "steps": [
-        "Choose one subsection: Blocking & Timing, Scene Setup, Scene Notes, or Help.",
-        "Read the tick box beside a tool. A tick means that choice will be included when the main button runs.",
-        "Select the controls or rig if that helper needs a selection.",
-        "Run one helper, then look at Maya's status message and the visible result.",
-        "Undo or use the matching remove button when the result is not what you wanted."
+        "Find the job: keys, camera, textures, or rendering.",
+        "Select the objects or frames that job needs.",
+        "Click the helper. Read the result at the bottom."
       ],
       "buttons": [
         "Auto Key",
@@ -217,7 +283,7 @@ window.AMINATE_DOCS = {
       "tips": [
         "A tick box is a promise: when it is ticked, that setting is included; when it is empty, Aminate leaves that setting alone."
       ],
-      "before": "Save the scene. Select the control or object that your note or helper belongs to.",
+      "before": "Save your scene. Try changes on a short frame range first.",
       "see": "You get one clear result: keys snap, a camera setup appears, Game Mode turns on, a floating editor opens, or a text note appears beside the character.",
       "help": "If the wrong thing changes, undo once and check the selection and tick boxes. Empty tick boxes tell Aminate to leave that part alone.",
       "subsections": [
@@ -225,81 +291,201 @@ window.AMINATE_DOCS = {
           "title": "Game Animation Mode",
           "intro": "This is a setup button, not an animation style. It applies only the choices that are ticked.",
           "items": [
-            ["30 fps", "Changes Maya's time unit to 30 frames per second, which is common for games."],
-            ["Realtime", "Makes Maya try to play the animation at its real speed instead of racing through every frame."],
-            ["Update All Views", "Makes Maya refresh every viewport while the animation plays."],
-            ["Autosave", "Turns on Maya autosave and keeps five backup files."],
-            ["Activate Focused Viewport", "Makes the viewport you are working in the active viewport."],
-            ["Load Textures", "Refreshes and repaths texture files that already exist on the computer."],
-            ["Weighted Tangents", "Converts animation curves to weighted tangents so handles can have different lengths."],
-            ["Important: turning Game Mode off", "The button stops showing as active, but it does not undo the Maya settings it already changed. Change those settings manually if you want the old setup back."]
+            [
+              "30 fps",
+              "Changes Maya's time unit to 30 frames per second, which is common for games."
+            ],
+            [
+              "Realtime",
+              "Makes Maya try to play the animation at its real speed instead of racing through every frame."
+            ],
+            [
+              "Update All Views",
+              "Makes Maya refresh every viewport while the animation plays."
+            ],
+            [
+              "Autosave",
+              "Turns on Maya autosave and keeps five backup files."
+            ],
+            [
+              "Activate Focused Viewport",
+              "Makes the viewport you are working in the active viewport."
+            ],
+            [
+              "Load Textures",
+              "Refreshes and repaths texture files that already exist on the computer."
+            ],
+            [
+              "Weighted Tangents",
+              "Converts animation curves to weighted tangents so handles can have different lengths."
+            ],
+            [
+              "Important: turning Game Mode off",
+              "The button stops showing as active, but it does not undo the Maya settings it already changed. Change those settings manually if you want the old setup back."
+            ]
           ]
         },
         {
           "title": "Blocking and timing tick boxes",
           "intro": "These choices decide which animation channels the blocking helper keys.",
           "items": [
-            ["Translation", "Tick this to key move X, Y, and Z on every shared blocking frame."],
-            ["Rotation", "Tick this to key rotate X, Y, and Z on every shared blocking frame."],
-            ["Other keyable attributes", "Tick this only when you also want scale, visibility, and unlocked custom controls keyed."],
-            ["Auto Key", "When on, Maya adds keys when you change an already animated value."],
-            ["Auto Snap To Frames", "When on, Aminate keeps timing changes on whole-number frames."],
-            ["Animation Layer Tint", "Shows the active animation layer with a tint above Maya's Time Slider."],
-            ["Keep Toolbar Extras On Aminate Hide", "Keeps the Toolkit Bar, Tween Machine, Floating Channel Box, and Floating Graph Editor visible when Aminate is hidden. Leave it empty if hiding Aminate should clear those helpers."]
+            [
+              "Translation",
+              "Tick this to key move X, Y, and Z on every shared blocking frame."
+            ],
+            [
+              "Rotation",
+              "Tick this to key rotate X, Y, and Z on every shared blocking frame."
+            ],
+            [
+              "Other keyable attributes",
+              "Tick this only when you also want scale, visibility, and unlocked custom controls keyed."
+            ],
+            [
+              "Auto Key",
+              "When on, Maya adds keys when you change an already animated value."
+            ],
+            [
+              "Auto Snap To Frames",
+              "When on, Aminate keeps timing changes on whole-number frames."
+            ],
+            [
+              "Animation Layer Tint",
+              "Shows the active animation layer with a tint above Maya's Time Slider."
+            ],
+            [
+              "Keep Toolbar Extras On Aminate Hide",
+              "Keeps the Toolkit Bar, Tween Machine, Floating Channel Box, and Floating Graph Editor visible when Aminate is hidden. Leave it empty if hiding Aminate should clear those helpers."
+            ]
           ]
         },
         {
           "title": "Blocking and editor buttons",
           "intro": "Use these after selecting the controls that should change.",
           "items": [
-            ["Snap Selected Keys To Frames", "Moves selected keys from decimal times such as 12.4 to whole frames such as 12."],
-            ["Key Full Blocking Poses", "Adds keys on the shared blocking frames using the Translation, Rotation, and Other tick boxes above."],
-            ["Retime Every N Frames", "Spreads selected timing so each pose is the chosen number of frames apart."],
-            ["Duplicate / Consolidate / Solo layers", "Copy the current layer, combine other layers into a safe muted copy, solo the current layer, or clear all solos."],
-            ["Tween Machine", "Set its hotkey and transparency, then open the small inbetween slider near the cursor."],
-            ["Floating Channel Box", "Set its hotkey and transparency, then open a small floating channel editor for the selected control."],
-            ["Floating Graph Editor", "Set its hotkey and transparency, then open a floating Maya Graph Editor that avoids duplicates."]
+            [
+              "Snap Selected Keys To Frames",
+              "Moves selected keys from decimal times such as 12.4 to whole frames such as 12."
+            ],
+            [
+              "Key Full Blocking Poses",
+              "Adds keys on the shared blocking frames using the Translation, Rotation, and Other tick boxes above."
+            ],
+            [
+              "Retime Every N Frames",
+              "Spreads selected timing so each pose is the chosen number of frames apart."
+            ],
+            [
+              "Duplicate / Consolidate / Solo layers",
+              "Copy the current layer, combine other layers into a safe muted copy, solo the current layer, or clear all solos."
+            ],
+            [
+              "Tween Machine",
+              "Set its hotkey and transparency, then open the small inbetween slider near the cursor."
+            ],
+            [
+              "Floating Channel Box",
+              "Set its hotkey and transparency, then open a small floating channel editor for the selected control."
+            ],
+            [
+              "Floating Graph Editor",
+              "Set its hotkey and transparency, then open a floating Maya Graph Editor that avoids duplicates."
+            ]
           ]
         },
         {
           "title": "Scene setup and cameras",
           "intro": "These buttons build or remove scene helpers. They do not change the original character mesh.",
           "items": [
-            ["Load Textures", "Ask Maya to refresh and repath texture files that are already available."],
-            ["Open Last Autosave", "Open the newest Maya autosave after a crash or mistake."],
-            ["Disable Maya Security Popups", "Turn off Maya's repeated script-security questions for trusted local work. Use this only when you understand the scene source."],
-            ["Set Up / Delete Render Environment", "Build or remove Aminate's cyclorama, cameras, sky light, and bookmarks."],
-            ["Duplicate / Delete Teacher Demo", "Make a separate demonstration copy of a rig, or remove every teacher-demo copy and its display layer."],
-            ["Teacher Demo Edit Log", "See which teacher-demo edits were recorded."],
-            ["Camera Preset / Switch View", "Choose Front, Side, or Three Quarter and look through that helper camera."],
-            ["Height, Dolly, and Rig Copy offsets", "Move all helper cameras up/down, closer/farther, or offset the demo rig copy together."]
+            [
+              "Load Textures",
+              "Ask Maya to refresh and repath texture files that are already available."
+            ],
+            [
+              "Open Last Autosave",
+              "Open the newest Maya autosave after a crash or mistake."
+            ],
+            [
+              "Disable Maya Security Popups",
+              "Turn off Maya's repeated script-security questions for trusted local work. Use this only when you understand the scene source."
+            ],
+            [
+              "Set Up / Delete Render Environment",
+              "Build or remove Aminate's cyclorama, cameras, sky light, and bookmarks."
+            ],
+            [
+              "Duplicate / Delete Teacher Demo",
+              "Make a separate demonstration copy of a rig, or remove every teacher-demo copy and its display layer."
+            ],
+            [
+              "Teacher Demo Edit Log",
+              "See which teacher-demo edits were recorded."
+            ],
+            [
+              "Camera Preset / Switch View",
+              "Choose Front, Side, or Three Quarter and look through that helper camera."
+            ],
+            [
+              "Height, Dolly, and Rig Copy offsets",
+              "Move all helper cameras up/down, closer/farther, or offset the demo rig copy together."
+            ]
           ]
         },
         {
           "title": "Scene Notes and Auto Wrap",
           "intro": "Scene notes are real Maya text curves, so they save with the scene.",
           "items": [
-            ["Text, colour, and size", "Type the note, choose a readable colour, and set how large it should appear."],
-            ["Auto Wrap", "Tick this to split long text into several lines inside the width and height box."],
-            ["Box W / Box H / Apply Box", "Choose the note's world-space box size and apply it."],
-            ["Resize In Viewport", "Select the note's resize box so you can scale it directly in Maya."],
-            ["Create Text Note", "Make the note beside the currently selected control or body part."],
-            ["Key On / Key Off", "Make the note appear or disappear on the current frame."],
-            ["Move To Selected", "Move an existing note beside a newly selected control."],
-            ["Apply Style / Delete / Refresh", "Update the selected note's look, remove it, or rebuild the list of notes in the scene."]
+            [
+              "Text, colour, and size",
+              "Type the note, choose a readable colour, and set how large it should appear."
+            ],
+            [
+              "Auto Wrap",
+              "Tick this to split long text into several lines inside the width and height box."
+            ],
+            [
+              "Box W / Box H / Apply Box",
+              "Choose the note's world-space box size and apply it."
+            ],
+            [
+              "Resize In Viewport",
+              "Select the note's resize box so you can scale it directly in Maya."
+            ],
+            [
+              "Create Text Note",
+              "Make the note beside the currently selected control or body part."
+            ],
+            [
+              "Key On / Key Off",
+              "Make the note appear or disappear on the current frame."
+            ],
+            [
+              "Move To Selected",
+              "Move an existing note beside a newly selected control."
+            ],
+            [
+              "Apply Style / Delete / Refresh",
+              "Update the selected note's look, remove it, or rebuild the list of notes in the scene."
+            ]
           ]
         }
       ],
       "number": "03",
-      "tabTitle": "Scene Helpers"
+      "tabTitle": "Scene Helpers",
+      "searchTerms": "auto key snap frames layer tint game animation mode load textures autosave render environment camera offset preset cleanup"
     },
     {
       "id": "reference-manager",
       "icon": "PK",
       "short": "Package",
       "title": "Reference Manager",
-      "media": "assets/reference_manager.png",
+      "media": "assets/panel-reference-manager.png",
       "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/panel-reference-manager.png",
+          "title": "Reference Manager · built panel preview"
+        },
         {
           "type": "video",
           "src": "assets/auto_package_zip.mp4",
@@ -317,14 +503,12 @@ window.AMINATE_DOCS = {
           "title": "Reference Manager screenshot"
         }
       ],
-      "purpose": "Collect a scene and every referenced file into one zip for hand-in, review, or transfer.",
+      "purpose": "Put your saved scene and its needed files in one zip.",
       "when": "A shot relies on references, textures, image planes, audio, or caches that must travel with the scene.",
       "steps": [
-        "Open Reference Manager and click Refresh Needed Files.",
-        "Read the list. A green or complete row means Aminate found that file; a missing row needs fixing first.",
-        "Leave the file groups you need checked, such as references, textures, audio, or caches.",
-        "Click Package Scene To Zip and wait for the small manifest to finish.",
-        "Open the zip in a temporary folder and check that the scene and its files travel together."
+        "Save the Maya scene.",
+        "Click Refresh Needed Files. Check for missing files.",
+        "Choose a folder, then click Package Scene To Zip."
       ],
       "buttons": [
         "Refresh Needed Files",
@@ -333,19 +517,25 @@ window.AMINATE_DOCS = {
       "tips": [
         "The manifest inside the zip tells you what was copied and what Maya could not find."
       ],
-      "before": "Save the Maya scene once. Make sure you know where the new zip file may be written.",
+      "before": "Save the Maya scene once.",
       "see": "A new zip appears with the scene, copied files, and a manifest that tells you what was found or missing.",
       "help": "If the zip is tiny or a file is missing, refresh again and fix the path before packaging. Packaging copies files; it does not repair a broken scene path.",
       "number": "04",
-      "tabTitle": "Reference Manager"
+      "tabTitle": "Reference Manager",
+      "searchTerms": "package zip collect share send missing files textures images audio caches references cleanup unknown data"
     },
     {
       "id": "dynamic-parenting",
       "icon": "DP",
       "short": "Parent",
       "title": "Dynamic Parenting",
-      "media": "assets/dynamic_parenting.png",
+      "media": "assets/panel-dynamic-parenting.png",
       "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/panel-dynamic-parenting.png",
+          "title": "Dynamic Parenting · built panel preview"
+        },
         {
           "type": "video",
           "src": "assets/dynamic_parenting.mp4",
@@ -363,14 +553,12 @@ window.AMINATE_DOCS = {
           "title": "Dynamic Parenting screenshot"
         }
       ],
-      "purpose": "Switch props or controls between parents without visible pops.",
+      "purpose": "Make an object follow a hand, then let go without a jump.",
       "when": "A magazine, sword, phone, hand, or prop needs to follow different controls during a shot.",
       "steps": [
-        "Click Add Object and choose the prop.",
-        "Choose a hand, world, or other control, then click Pick Parent.",
-        "Use Snap To Parent only if you want the prop to line up to that parent.",
-        "Turn on Maintain Current Offset when the prop must not jump at the switch frame.",
-        "At the right frame, click Switch to this Parent. Use World when the prop should let go."
+        "Select the moving object. Click Add Object.",
+        "Select the hand or other target. Click Pick Parent.",
+        "Choose a frame and target. Click Switch to this Parent."
       ],
       "buttons": [
         "Add Object",
@@ -385,19 +573,25 @@ window.AMINATE_DOCS = {
         "Leave Maintain Current Offset on when you want the object to keep its visible pose at the switch frame.",
         "Bake to Rig uses the original source keyframe times by default; choose Bake Frames only when dense whole-frame sampling is intentional."
       ],
-      "before": "Pick the prop that changes hands, such as a phone, sword, or magazine. Have the possible parent controls ready.",
-      "see": "The prop follows the new parent without a sudden jump. The switch is saved on the timeline so it plays the same way again.",
+      "before": "Pick the prop that changes hands, such as a phone, sword, or magazine.",
+      "see": "The prop follows the new parent without a sudden jump.",
       "help": "A jump usually means the wrong parent or offset was saved. Undo, keep the current offset, and try the switch on a clean test frame.",
       "number": "05",
-      "tabTitle": "Dynamic Parenting"
+      "tabTitle": "Dynamic Parenting",
+      "searchTerms": "attach detach follow pickup pick up let go drop pass hand prop gun magazine world parent blend offset"
     },
     {
       "id": "hand-foot-hold",
       "icon": "HF",
       "short": "Hold",
       "title": "Hand / Foot Hold",
-      "media": "assets/hand_foot_hold.png",
+      "media": "assets/panel-hand-foot-hold.png",
       "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/panel-hand-foot-hold.png",
+          "title": "Hand / Foot Hold · built panel preview"
+        },
         {
           "type": "video",
           "src": "assets/foot_hold.mp4",
@@ -415,14 +609,12 @@ window.AMINATE_DOCS = {
           "title": "Hand / Foot Hold screenshot"
         }
       ],
-      "purpose": "Keep planted hands or feet locked on chosen world axes while the body keeps moving.",
+      "purpose": "Keep a hand or foot still while the character moves.",
       "when": "Foot sliding, hand contact, or one-axis travel needs a quick non-destructive hold.",
       "steps": [
-        "Click Suggest Range, or enter the contact and lift frames yourself.",
-        "Choose only the world axes that should stay still.",
-        "Click Create / Update Hold and read the row that appears.",
-        "Scrub through the hold. Use Use Hold to test it and Use Original Motion to compare.",
-        "Update or delete the hold when the contact range changes."
+        "Select a hand or foot. Click Use Selected Control.",
+        "Set the first and last frames. Choose which directions stay still.",
+        "Click Save New Hold. Play the range to check it."
       ],
       "buttons": [
         "Suggest Range",
@@ -437,25 +629,24 @@ window.AMINATE_DOCS = {
         "Use fewer locked axes when the contact should still rotate or slide naturally in one direction."
       ],
       "before": "Pick the hand or foot control and find the first touch frame and the lift-off frame.",
-      "see": "The foot or hand stays planted while the rest of the body moves. The hold row shows exactly which frames and axes are locked.",
+      "see": "The foot or hand stays planted while the rest of the body moves.",
       "help": "If the contact looks stiff, unlock an axis so it can slide or rotate naturally. A hold is a helper, not a promise that every footstep should be frozen.",
       "number": "06",
-      "tabTitle": "Hand / Foot Hold"
+      "tabTitle": "Hand / Foot Hold",
+      "searchTerms": "foot feet hand sliding slide slipping plant planted pin lock still hold original motion"
     },
     {
       "id": "surface-contact",
       "icon": "SC",
       "short": "Surface",
       "title": "Surface Contact",
-      "media": "assets/surface_contact.png",
-      "purpose": "Clamp a selected control to a mesh surface and optionally follow the surface normal.",
+      "media": "assets/panel-surface-contact.png",
+      "purpose": "Keep hands, feet, or objects from passing through a surface.",
       "when": "A hand, foot, wheel, or prop should stay on a moving or uneven surface.",
       "steps": [
-        "Click Check Setup and read the short message before creating anything.",
-        "Choose the closest-point or surface-normal options that fit the contact.",
-        "Click Create / Update Contact.",
-        "Turn the contact on or off at the frames where the hand, foot, or wheel touches.",
-        "Click Key State to save the on/off change, then use Refresh Now only when you mean to solve the current frame again."
+        "Select the controls and floor meshes. Click Use Controls + Meshes.",
+        "Set the frame range and gap above the surface.",
+        "Click Check Setup, then Create / Update Collision."
       ],
       "buttons": [
         "Check Setup",
@@ -469,33 +660,31 @@ window.AMINATE_DOCS = {
         "Use Refresh Now only when you intentionally want the current frame solved again."
       ],
       "before": "Pick the control that should touch something, then pick the mesh surface underneath it.",
-      "see": "The selected control sits on the mesh instead of floating above or sinking through it. A keyed state lets contact start and stop.",
+      "see": "The selected control sits on the mesh instead of floating above or sinking through it.",
       "help": "If the control snaps to a strange place, check that you selected the mesh, not a group or locator. Fix the selection and run Check Setup again.",
       "number": "07",
       "tabTitle": "Surface Contact",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/surface_contact.png",
-          "title": "Surface Contact screenshot"
+          "src": "assets/panel-surface-contact.png",
+          "title": "Surface Contact · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "collision floor ground feet foot hand slope steps surface contact penetrate through"
     },
     {
       "id": "dynamic-pivot",
       "icon": "PV",
       "short": "Pivot",
       "title": "Dynamic Pivot",
-      "media": "assets/dynamic_pivot.png",
-      "purpose": "Turn objects around a temporary pivot without changing the real Maya pivot.",
+      "media": "assets/panel-dynamic-pivot.png",
+      "purpose": "Turn controls around a temporary point, such as a heel.",
       "when": "A prop needs to rotate from a hinge, edge, hand point, or temporary contact point.",
       "steps": [
-        "Click Create & Move Pivot to make one temporary marker for the selected controls.",
-        "Click Move Pivot and place the marker on the hinge, edge, or hand point.",
-        "Rotate the marker to choose the turn direction.",
-        "Highlight a Time Slider range to turn every whole frame in it; with no highlight, only the current frame is used.",
-        "Click Turn From Pivot, then move the same marker and apply again for a later range.",
-        "Click Clear Pivot when the temporary turn is finished."
+        "Pick controls. Create a pivot marker and move it to the turning point.",
+        "Highlight frames to change. No highlight means only the current frame.",
+        "Rotate the marker, then use the turn button. Check the movement."
       ],
       "buttons": [
         "Create & Move Pivot",
@@ -507,16 +696,16 @@ window.AMINATE_DOCS = {
         "Aminate adds unchanged guard keys one frame before and after the range so the rest of the animation stays put.",
         "Earlier baked ranges stay unchanged when a later disjoint range uses a moved marker. Clear the pivot after the move so later animation does not inherit stale helper objects."
       ],
-      "before": "Pick the controls you want to turn. Save a History Timeline step before changing a long range.",
-      "see": "Every whole frame in the highlighted range turns around the helper point. Frames outside that range and the real Maya pivot stay unchanged.",
+      "before": "Pick the controls you want to turn.",
+      "see": "Every whole frame in the highlighted range turns around the helper point.",
       "help": "If the turn is backwards, undo, rotate or move the marker, and try again. To use a new pivot later, move the same marker, highlight the later frames, and click Turn From Pivot again.",
       "number": "08",
       "tabTitle": "Dynamic Pivot",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/dynamic_pivot.png",
-          "title": "Real Amanda rig: bright temporary pivot at Range A"
+          "src": "assets/panel-dynamic-pivot.png",
+          "title": "Dynamic Pivot · built panel preview"
         },
         {
           "type": "image",
@@ -528,22 +717,21 @@ window.AMINATE_DOCS = {
           "src": "assets/dynamic_pivot_range_b.png",
           "title": "Real Amanda rig: the same pivot moved for Range B"
         }
-      ]
+      ],
+      "searchTerms": "rotate turn heel toe pivot point marker roll"
     },
     {
       "id": "universal-ikfk",
       "icon": "IK",
       "short": "IK/FK",
       "title": "Universal IK/FK",
-      "media": "assets/universal_ikfk.png",
-      "purpose": "Find and save limb controls, then switch IK to FK or FK to IK without a pop.",
+      "media": "assets/panel-universal-ikfk.png",
+      "purpose": "Switch an arm or leg between IK and FK without changing its pose.",
       "when": "An arm or leg changes mode mid-shot and needs clean keys around the switch.",
       "steps": [
-        "Click Find From What You Picked and check the boxes Aminate fills in.",
-        "Fix any FK or IK control that is wrong, then click Save Switch.",
-        "Move to the frame where the animation should change mode.",
-        "Click Switch FK -> IK or Switch IK -> FK.",
-        "Scrub over the switch and compare the pose before and after it."
+        "Pick one arm or leg. Click Set Up From Selection.",
+        "Check its controls: IK moves the end; FK turns each joint.",
+        "Save the setup. Switch to IK or FK and check the pose."
       ],
       "buttons": [
         "Find From What You Picked",
@@ -562,28 +750,104 @@ window.AMINATE_DOCS = {
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/universal_ikfk.png",
-          "title": "Universal IK/FK screenshot"
+          "src": "assets/panel-universal-ikfk.png",
+          "title": "Universal IK/FK · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "arm leg chain switch match ik fk inverse forward kinematics"
+    },
+    {
+      "id": "control-rig-builder",
+      "icon": "RB",
+      "short": "Control Rig Builder",
+      "title": "Control Rig Builder",
+      "tabTitle": "Control Rig Builder",
+      "purpose": "Turn an imported skeleton into an editable control rig while keeping its existing skin.",
+      "when": "Use this when preparing an imported character or creature for editable animation in Maya.",
+      "steps": [
+        "Select the skeleton at its reference pose and click Scan selected skeleton / Auto-map.",
+        "Review each role, assign uncertain joints, and add extra three-joint limb groups.",
+        "Build the rig, then use Match and switch to IK or FK to animate. Add optional features after returning to the reference pose."
+      ],
+      "buttons": [
+        "Scan selected skeleton / Auto-map",
+        "Build control rig",
+        "Match and switch to IK",
+        "Apply rig feature",
+        "Save pose"
+      ],
+      "tips": [
+        "Use assigned endpoints to suggest unnamed joints between them. Geometry suggestions still need review.",
+        "Stretch, Soft IK and foot pivots are optional modules. Add them in that order.",
+        "Current imported rigs must have editable local joint channels. Existing constraint rigs and animation layers require an export skeleton first.",
+        "Every joint receives FK controls. Primary limb IK requires a contiguous three-joint chain; intermediary twist chains remain FK."
+      ],
+      "before": "Save your scene and choose a clear reference pose before creating or transferring animation.",
+      "see": "Editable controls or a baked animation layer appear on the chosen target rig.",
+      "help": "Check role assignments, reference poses, frame ranges and the status message if the operation stops.",
+      "media": "assets/control-rig-builder.svg",
+      "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/control-rig-builder.svg",
+          "title": "Control Rig Builder workflow diagram"
+        }
+      ],
+      "searchTerms": "skeleton rig builder mocap creature extra arms mapping fbx animation bake",
+      "number": "10"
+    },
+    {
+      "id": "multi-performer-mocap",
+      "icon": "MC",
+      "short": "Multi-Performer Mocap",
+      "title": "Multi-Performer Mocap",
+      "tabTitle": "Multi-Performer Mocap",
+      "purpose": "Route several performers onto separate creature limbs and bake their combined movement onto one rig.",
+      "when": "Use this when preparing an imported character or creature for editable animation in Maya.",
+      "steps": [
+        "Import each performer FBX and choose the generated creature rig.",
+        "Select source joints and assign them to a target limb group. Set a matching reference-pose frame and clip timing for each route.",
+        "Create a baked preview, inspect the movement, then keep or discard the layer."
+      ],
+      "buttons": [
+        "Import performer FBX",
+        "Add selected source chain → target group",
+        "Create baked preview",
+        "Keep preview",
+        "Bake composed mocap"
+      ],
+      "tips": [
+        "Four performers can each drive a separate pair of arms. Reuse a source on several groups if useful, but assign each target only once.",
+        "Give the root and body their own route when you want locomotion. Arm routes use local rotation by default.",
+        "Every-frame baking captures the requested samples. Sparse baking uses selected Graph Editor key times and can differ between those times.",
+        "Match anatomical reference poses and inspect shoulders and contacts; composition does not automatically solve hand contact or collisions."
+      ],
+      "before": "Save your scene and choose a clear reference pose before creating or transferring animation.",
+      "see": "Editable controls or a baked animation layer appear on the chosen target rig.",
+      "help": "Check role assignments, reference poses, frame ranges and the status message if the operation stops.",
+      "media": "assets/multi-performer-mocap.svg",
+      "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/multi-performer-mocap.svg",
+          "title": "Multi-Performer Mocap workflow diagram"
+        }
+      ],
+      "searchTerms": "skeleton rig builder mocap creature extra arms mapping fbx animation bake",
+      "number": "11"
     },
     {
       "id": "retargeter",
       "icon": "RT",
       "short": "Retarget",
       "title": "Controls Retargeter (Face and Body)",
-      "media": "assets/face_retarget.png",
-      "purpose": "Copy source control animation onto target controls while matching the source's real first pose and keeping only the animator's original key times.",
+      "media": "assets/panel-retargeter.png",
+      "purpose": "Copy movement from one character's controls to another character's controls.",
       "when": "Two rigs use different control names but the motion should transfer by order or loose names.",
       "steps": [
-        "Load Selected Source for the controls that already move.",
-        "Load Selected Target for the controls that should receive the motion.",
-        "Click Pair By Order for matching lists, or Auto Map By Name when names are clear.",
-        "Read a few pair rows and fix any left/right mix-up before copying.",
-        "Check that Match Source Starting Pose and Source Keyframes Only are shown.",
-        "Retarget Selected Controls or Retarget All Controls, then scrub the target rig.",
-        "At the first source key, check that a target which began in a T-pose now matches the source's ready pose.",
-        "Open the Time Slider or Graph Editor and check that the target has keys only where the source had keys."
+        "Load the controls to copy from on the left.",
+        "Load the controls to copy to on the right. Check each pair.",
+        "Click Check Setup, then Retarget All Controls. Play the result."
       ],
       "buttons": [
         "Load Selected Source",
@@ -598,16 +862,16 @@ window.AMINATE_DOCS = {
         "The target's old T-pose is not used as the animation starting point.",
         "Aminate does not bake a key on every frame, so the transferred animation stays easy to edit."
       ],
-      "before": "Have a source rig and a target rig in the scene. Select controls in a simple, known order.",
-      "see": "The target matches the source pose on the first animated key, follows the source motion, and has no extra keys between the source keys. A pair list shows exactly which source drives each target.",
+      "before": "Have a source rig and a target rig in the scene.",
+      "see": "The target matches the source pose on the first animated key, follows the source motion, and has no extra keys between the source keys.",
       "help": "If the target begins in its old T-pose, undo and make sure you used the repaired Match Source Starting Pose workflow. If it bends the wrong way, fix the pair row; Aminate cannot guess a missing or incorrectly paired control.",
-      "number": "10",
+      "number": "12",
       "tabTitle": "Controls Retargeter (Face and Body)",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/face_retarget.png",
-          "title": "Controls Retargeter paired-control screenshot"
+          "src": "assets/panel-retargeter.png",
+          "title": "Controls Retargeter (Face and Body) · built panel preview"
         },
         {
           "type": "image",
@@ -619,15 +883,21 @@ window.AMINATE_DOCS = {
           "src": "assets/controls_retargeter.gif",
           "title": "Real copied-rig retarget motion at the three exact source key times"
         }
-      ]
+      ],
+      "searchTerms": "retarget copy animation movement motion face body source target pair map controls"
     },
     {
       "id": "control-picker",
       "icon": "CP",
       "short": "Picker",
       "title": "Control Picker",
-      "media": "assets/control_picker.png",
+      "media": "assets/panel-control-picker.png",
       "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/panel-control-picker.png",
+          "title": "Control Picker · built panel preview"
+        },
         {
           "type": "image",
           "src": "assets/control_picker.gif",
@@ -655,18 +925,12 @@ window.AMINATE_DOCS = {
           "title": "Nested FK and IK groups with clear multi-selection feedback"
         }
       ],
-      "purpose": "Automatically turn almost any character or animal rig into clear selection groups.",
+      "purpose": "Find and select a character's controls from a list or picture.",
       "when": "You need to select a whole tail, one arm, only its FK controls, only its IK controls, or your own saved mixture without hunting through the viewport.",
       "steps": [
-        "In Maya, click the highest group of the rig you want to use. This is normally the character's main control group.",
-        "Click Scan Selected Rig. Aminate finds curve controls below that group and sorts them by hierarchy, body area, left or right side, and FK or IK mode.",
-        "Open a group such as Body, Left Arm, or Tail. Click its name to select everything inside it. Hold Ctrl or Shift and click another group to add that group too.",
-        "Open the FK or IK subgroup when a limb has both systems. Pick only the mode you are animating. Aminate stops Key All Attrs if one limb contains both FK and IK controls.",
-        "Watch the selection summary. It tells you how many controls are selected, which groups were used, and whether FK and IK are mixed.",
-        "To make your own set, select controls or whole groups, type a name such as Tail + Left Arm FK, then click Create / Update From Selection.",
-        "To fix an unusual rig, select several controls, choose a destination in the group menu, and click Move Selected To Group.",
-        "Open Visual and click Refresh Live Rig Map. Front uses the rig's real X/Y positions; Side uses Z/Y, so animals and unusual proportions are not forced onto a fixed human picture.",
-        "Click or marquee the live-map buttons. Blue buttons with a white outline are selected, and Maya shows the same selection."
+        "Select the character's top group. Click Scan Selected Rig.",
+        "Click a body part to select its controls.",
+        "Hold Ctrl or Shift to add more groups to your selection."
       ],
       "buttons": [
         "Scan Selected Rig",
@@ -686,27 +950,25 @@ window.AMINATE_DOCS = {
         "If an unusual control lands in the wrong place, move it manually once and save the layout.",
         "The live map uses real control positions instead of assuming every rig is a human."
       ],
-      "before": "Save a copy of the scene, then select the rig's highest control group. You do not need to build every picker button by hand.",
-      "see": "A nested picker appears. Arms, legs, tail, wings, face, and core are grouped; FK and IK sit below their limb; selected groups remain visibly highlighted; and the live map follows the rig's real shape.",
+      "before": "Save a copy of the scene, then select the rig's highest control group.",
+      "see": "A nested picker appears.",
       "help": "If Aminate misses a control, select that control in Maya and click Add Selected. If it is in the wrong group, select it, choose the right group, and click Move Selected To Group. If a saved set points at deleted controls, rescan and update that custom set.",
-      "number": "11",
-      "tabTitle": "Control Picker"
+      "number": "13",
+      "tabTitle": "Control Picker",
+      "searchTerms": "select selection character animal controls rig body hands fingers limbs tail map custom sets attributes"
     },
     {
       "id": "animators-pencil",
       "icon": "PN",
       "short": "Pencil",
       "title": "Animators Pencil",
-      "media": "assets/animators_pencil.png",
-      "purpose": "Draw arcs, contact notes, frame markers, and planning marks as scene objects.",
+      "media": "assets/panel-animators-pencil.png",
+      "purpose": "Draw on the view to plan poses or leave notes.",
       "when": "You need visible animation notes that survive without the script installed.",
       "steps": [
-        "Choose Pencil, Brush, Line, Arrow, Rectangle, or Ellipse, then click Start Drawing once.",
-        "Draw a small mark and watch the radius cursor so you know the brush size.",
-        "Use RGB + Swatches to choose a colour. Keep Current frame only on for a one-frame mark.",
-        "Rename the layer and lock it when the notes should not be erased by accident.",
-        "Use E for Partial Stroke or Whole Stroke erasing, then save the view when the angle is useful.",
-        "Move to another camera angle and start again; Saved Drawing Views lets you return to either angle."
+        "Choose a drawing tool and colour.",
+        "Click Start Drawing, then drag in the view.",
+        "Use layers to separate drawings. Press E to erase on the current layer."
       ],
       "buttons": [
         "Start Drawing",
@@ -721,33 +983,32 @@ window.AMINATE_DOCS = {
       "tips": [
         "Each Pencil View has a separate camera layer. Current-frame drawing is the default. Locked layers cannot be erased. Camera Notes remains available for the older keyed review-camera workflow."
       ],
-      "before": "Save the scene. Pick a normal camera angle and make one Pencil View before drawing a long note.",
-      "see": "Your marks are scene objects in a camera-specific layer. They remain visible when you scrub and can be opened on another computer with the scene.",
+      "before": "Open the view you want to draw on. Choose a drawing layer.",
+      "see": "Your marks are scene objects in a camera-specific layer.",
       "help": "If a mark is missing, switch back to its Saved Drawing View and layer. A locked layer cannot be erased until you unlock it.",
-      "number": "12",
+      "number": "14",
       "tabTitle": "Animators Pencil",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/animators_pencil.png",
-          "title": "Animators Pencil screenshot"
+          "src": "assets/panel-animators-pencil.png",
+          "title": "Animators Pencil · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "draw drawing notes pencil blue pencil erase eraser strokes marks shapes camera video layers ghosts retime"
     },
     {
       "id": "animation-assistant",
       "icon": "AA",
       "short": "Assist",
       "title": "Animation Assistant",
-      "media": "assets/animation_assistant.png",
-      "purpose": "Pose balance helpers for centre of gravity, floor plane, and contact points.",
+      "media": "assets/panel-animation-assistant.png",
+      "purpose": "Check whether a pose balances over the hands or feet touching the floor.",
       "when": "A pose feels unstable and needs a fast visual balance check.",
       "steps": [
-        "Use Selected for the floor or centre-of-gravity control.",
-        "Click Add Selected for each foot, hand, or other contact point.",
-        "Click Refresh and watch the support area and balance badge.",
-        "Move the pose a little and refresh again to compare.",
-        "Clear the points when you start a different pose."
+        "Load the floor and the control at the character's centre of weight.",
+        "Add the hands or feet that can touch the floor.",
+        "Click Refresh. Adjust the pose and check the balance guide."
       ],
       "buttons": [
         "Use Selected",
@@ -759,33 +1020,32 @@ window.AMINATE_DOCS = {
       "tips": [
         "The badge is a guide, not a replacement for silhouette and acting decisions."
       ],
-      "before": "Pick the floor or ground control and the controls that touch it. This is a balance hint, not a final acting decision.",
+      "before": "Pick the floor or ground control and the controls that touch it.",
       "see": "The viewport shows a support area and a simple balanced or unbalanced badge.",
       "help": "If the badge says unbalanced, check the silhouette and acting too. The helper only measures the points you gave it.",
-      "number": "13",
+      "number": "15",
       "tabTitle": "Animation Assistant",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/animation_assistant.png",
-          "title": "Animation Assistant screenshot"
+          "src": "assets/panel-animation-assistant.png",
+          "title": "Animation Assistant · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "balance weight gravity floor contact support pose"
     },
     {
       "id": "animation-styling",
       "icon": "ST",
       "short": "Style",
       "title": "Animation Styling",
-      "media": "assets/animation_styling.png",
-      "purpose": "Apply held-key or stepped animation styling quickly.",
+      "media": "assets/panel-animation-styling.png",
+      "purpose": "Hold poses for several frames to make stepped, stop-motion-style movement.",
       "when": "A shot needs Spider-Verse-style stepped timing or clean held poses.",
       "steps": [
-        "Choose how many frames a key should hold.",
-        "Preview the warning list for overlaps before changing curves.",
-        "Click Apply Hold to copy the values forward.",
-        "Use Set all curves to stepped curves only when the whole shot wants stepped timing.",
-        "Scrub the result and undo if the hold hides an important breakdown."
+        "Select controls and set how many frames each pose lasts.",
+        "Click Scan Overlaps to check for keys that are too close.",
+        "Click Hold Current Key or Hold Selected Existing Keys. Play the result."
       ],
       "buttons": [
         "Apply Hold",
@@ -797,30 +1057,29 @@ window.AMINATE_DOCS = {
       "before": "Save a History Timeline step and select a small range of keys to test.",
       "see": "Keys hold for the chosen number of frames and the warning area points out collisions before they surprise you.",
       "help": "A hold can cover a key you meant to keep. Start with a small range and use the warning list as your map.",
-      "number": "14",
+      "number": "16",
       "tabTitle": "Animation Styling",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/animation_styling.png",
-          "title": "Animation Styling screenshot"
+          "src": "assets/panel-animation-styling.png",
+          "title": "Animation Styling · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "spider verse stop motion stepped hold poses keys overlap"
     },
     {
       "id": "history-timeline",
       "icon": "HT",
       "short": "History",
       "title": "History Timeline",
-      "media": "assets/history_timeline.png",
-      "purpose": "Scene restore points that are safer than relying on a long Maya undo chain.",
+      "media": "assets/panel-history-timeline.png",
+      "purpose": "Save scene copies you can return to. Restoring replaces the whole open scene.",
       "when": "Students need a return point before risky edits or a milestone before feedback changes.",
       "steps": [
-        "Click Save Step for a quick checkpoint or Save Milestone for an important pose.",
-        "Give the row a plain name such as blocking pass or before polish.",
-        "Select the row or coloured history block you want to visit.",
-        "Click Restore and read the safety message before confirming.",
-        "Keep working; if you branch from an older step, the new work gets its own branch."
+        "Save the scene first.",
+        "Click Save Step. Use Save Milestone for a copy you want to keep.",
+        "Save current work before restoring a snapshot; it replaces the whole scene."
       ],
       "buttons": [
         "Save Step",
@@ -830,33 +1089,32 @@ window.AMINATE_DOCS = {
       "tips": [
         "Restoring creates a safety snapshot first so the current state is not lost immediately."
       ],
-      "before": "Save the scene. Use a new step before risky edits, not after the mistake.",
+      "before": "Save your scene. Try changes on a short frame range first.",
       "see": "A coloured history row appears and Restore returns the scene to that saved moment without deleting your current work first.",
       "help": "If a restore looks wrong, use the safety snapshot that Aminate made just before restoring. History is a safety net, not a replacement for saving the Maya file.",
-      "number": "15",
+      "number": "17",
       "tabTitle": "History Timeline",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/history_timeline.png",
-          "title": "History Timeline screenshot"
+          "src": "assets/panel-history-timeline.png",
+          "title": "History Timeline · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "undo restore recover backup snapshot save milestone branch autosave history"
     },
     {
       "id": "onion-skin",
       "icon": "OS",
       "short": "Onion",
       "title": "Onion Skin",
-      "media": "assets/onion_skin.png",
-      "purpose": "Show past and future poses as see-through ghosts.",
+      "media": "assets/panel-onion-skin.png",
+      "purpose": "See faint copies of earlier and later poses beside the current pose.",
       "when": "Arcs, spacing, contacts, and rhythm are hard to judge from the current frame alone.",
       "steps": [
-        "Open Onion Skin and choose how many past and future poses to show.",
-        "Keep the mode on 3D Ghost for the dependable Maya path.",
-        "Click Attach Selected, then scrub the timeline.",
-        "Change Frame Step if the ghosts are too busy or the rig feels slow.",
-        "Click Clear when you no longer need the ghosts."
+        "Select the animated mesh. Click Use Current Selection.",
+        "Choose how far apart the earlier and later poses should be.",
+        "Move through frames to compare poses. Clear the preview when finished."
       ],
       "buttons": [
         "Attach Selected",
@@ -869,34 +1127,34 @@ window.AMINATE_DOCS = {
       "before": "Pick the rig or object you want to watch and save the scene if the rig is heavy.",
       "see": "See-through copies of past and future poses sit around the current pose, making spacing and arcs easier to compare.",
       "help": "Too many ghosts can slow a heavy rig. Use fewer ghosts or a larger frame step before doing more work.",
-      "number": "16",
+      "number": "18",
       "tabTitle": "Onion Skin",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/onion_skin.png",
-          "title": "Onion Skin screenshot"
+          "src": "assets/panel-onion-skin.png",
+          "title": "Onion Skin · built panel preview"
         },
         {
           "type": "image",
           "src": "assets/maya_onion_skin_demo.gif",
           "title": "Onion Skin GIF"
         }
-      ]
+      ],
+      "searchTerms": "ghost ghosts previous next past future poses spacing arc timing onion skin"
     },
     {
       "id": "rotation-doctor",
       "icon": "RD",
       "short": "Rotate",
       "title": "Rotation Doctor",
-      "media": "assets/rotation_doctor.png",
-      "purpose": "Analyze and repair rotation flips, gimbal problems, and Euler key issues.",
+      "media": "assets/panel-rotation-doctor.png",
+      "purpose": "Find and fix unwanted twists or flips in animated controls.",
       "when": "Rotations jump, spin the long way, or become hard to edit cleanly.",
       "steps": [
-        "Click Analyze Selected and read each warning.",
-        "Choose Use Best Fix for a safe broad repair, or choose Flip Current Key for one key.",
-        "Scrub the repaired range and check the Graph Editor if the motion still looks odd.",
-        "Undo and try a smaller selection when the report names a different control."
+        "Select the controls that twist or flip.",
+        "Click Analyze Selected. Read the suggested fix.",
+        "Click Use Best Fix. Play the changed frames to check them."
       ],
       "buttons": [
         "Analyze Selected",
@@ -906,33 +1164,32 @@ window.AMINATE_DOCS = {
       "tips": [
         "Save a History Timeline step before large curve repairs."
       ],
-      "before": "Select only the animated controls with the rotation problem. Save a history step first.",
+      "before": "Select only the animated controls with the rotation problem.",
       "see": "The rotation curve no longer makes a surprise flip, and the report tells you what was checked.",
       "help": "Rotation fixes change keys. A History Timeline step makes it easy to go back if the artistic result is not right.",
-      "number": "17",
+      "number": "19",
       "tabTitle": "Rotation Doctor",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/rotation_doctor.png",
-          "title": "Rotation Doctor screenshot"
+          "src": "assets/panel-rotation-doctor.png",
+          "title": "Rotation Doctor · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "rotation flip twist gimbal euler quaternion spins smooth cleanup"
     },
     {
       "id": "character-skinning",
       "icon": "SK",
       "short": "Skin",
       "title": "Character Skinning",
-      "media": "assets/character_skinning.png",
-      "purpose": "Clean skinned mesh transforms and copy exact skinning for matching topology.",
+      "media": "assets/panel-character-skinning.png",
+      "purpose": "Fix a character's transforms or copy how its skin follows the bones.",
       "when": "A skinned mesh has bad transform values or a duplicate mesh needs the same weights.",
       "steps": [
-        "Click Check Selected Mesh and read the weights, influences, UVs, materials, and normals.",
-        "Click Make Frozen Copy to create a clean backup candidate.",
-        "Inspect the copy in the viewport and read its report.",
-        "Click Replace Original only after the checks pass.",
-        "Keep the hidden backup until you are sure the animation and materials still look right."
+        "Choose Fix Skinning or Skin Transfer.",
+        "For a whole rig, select its top group and click Copy Whole Character.",
+        "For weight transfer, load source meshes and target meshes, then click Transfer Skin."
       ],
       "buttons": [
         "Check Selected Mesh",
@@ -945,38 +1202,101 @@ window.AMINATE_DOCS = {
         "The original mesh stays hidden as a backup after replacement, so students can recover if they picked the wrong mesh.",
         "Animated copies use the source's exact keyframe times, including fractional frames, rather than adding keys on every whole frame."
       ],
-      "before": "Pick one skinned mesh. Do not replace the original until the green checks are clear.",
-      "see": "The mesh keeps its skin and animation but has clean transform values. A hidden backup gives you a safe way back.",
+      "before": "Pick one skinned mesh.",
+      "see": "The mesh keeps its skin and animation but has clean transform values.",
       "help": "If a check is red, stop and fix that problem first. Replace Original is the one action in this lesson that should never be rushed.",
-      "number": "18",
+      "number": "20",
       "tabTitle": "Character Skinning",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/character_skinning.png",
-          "title": "Character Skinning screenshot"
+          "src": "assets/panel-character-skinning.png",
+          "title": "Character Skinning · built panel preview"
         },
         {
           "type": "image",
           "src": "assets/character_skinning_rig_scale_fix.gif",
           "title": "Character Skinning frozen-transform GIF"
         }
-      ]
+      ],
+      "searchTerms": "skinning skin weights bones joints mesh transforms freeze scale clothing topology transfer copy"
+    },
+    {
+      "id": "root-motion",
+      "icon": "RM",
+      "short": "Root Motion",
+      "title": "Root Motion",
+      "tabTitle": "Root Motion",
+      "media": "assets/root-motion-flow.svg",
+      "purpose": "Add root motion after animating the body while keeping its world-space performance.",
+      "when": "Your character moves away from a stationary root, or you want to replace the root path independently.",
+      "before": "Use a saved scene with an editable root and editable direct child joints or transforms. Move to the offset reference frame inside the range.",
+      "steps": [
+        "Pick the root bone or control and set Start and End. All its direct child transform branches will be preserved.",
+        "Leave Follow source empty for freeform editing, or pick a bone or COG and tick Translation, Rotation and/or Scale. Maintain offset uses the current frame.",
+        "Click Prepare independent root. Animate the selected root helper, then choose Authored keyframes only or Every frame and click Bake and finish."
+      ],
+      "buttons": [
+        "Prepare independent root",
+        "Select root animation control",
+        "Refresh sessions",
+        "Bake and finish",
+        "Cancel and restore original"
+      ],
+      "see": "The root helper changes the root path while the body follows its captured motion. Bake verifies the resulting world matrices at the selected sample times and removes its helpers.",
+      "help": "Locked, constrained, driven-key or animation-layer channels on the root or direct children require an editable controller or baked export skeleton. Zero scale is rejected. If matrix verification fails, the bake is undone and the preview remains available.",
+      "searchTerms": "root motion independent hips cog follow offset bake keyframes translate rotate scale",
+      "mediaItems": [
+        {
+          "type": "image",
+          "src": "assets/root-motion-flow.svg",
+          "title": "Root-motion workflow diagram, not a Maya screenshot"
+        }
+      ],
+      "tips": [
+        "The follow source is captured at setup to avoid a cycle when it is a descendant. Cancel and prepare again to capture changed body/source animation or change follow settings.",
+        "Preview is intended for the chosen frame range. Caches sample whole frames, exact source keys and the reference frame; subframe interpolation may differ.",
+        "Authored keyframes only uses original target/source/ancestor keys plus helper keys, preserving fractional times. It can differ between keys. Dense mode also includes whole frames and range boundaries.",
+        "Baking preserves outside-range key values; interpolation at the range edges can change. Undo Bake restores the active preview.",
+        "Sessions survive scene save/reopen. Refresh sessions to resume. Do not reparent targets during preview."
+      ],
+      "subsections": [
+        {
+          "title": "Follow and offset",
+          "items": [
+            [
+              "Translation",
+              "Copy the captured source position. With Maintain offset, retain the position difference at the reference frame."
+            ],
+            [
+              "Rotation",
+              "Copy the captured source orientation, optionally retaining the reference orientation offset."
+            ],
+            [
+              "Scale",
+              "Copy source scale through a scale constraint, optionally retaining the reference scale ratio. Matrices must stay invertible."
+            ],
+            [
+              "Freeform",
+              "Leave Follow source empty and key the temporary root helper. The body cache remains independent."
+            ]
+          ]
+        }
+      ],
+      "number": "21"
     },
     {
       "id": "rig-scale",
       "icon": "RS",
       "short": "Scale",
       "title": "Rig Scale",
-      "media": "assets/rig_scale.png",
-      "purpose": "Make an export-safe scaled copy for Unreal or another game engine.",
+      "media": "assets/panel-rig-scale.png",
+      "purpose": "Make a bigger or smaller export copy. Keep the original rig unchanged.",
       "when": "The original rig must stay untouched but the exported copy needs a different scale.",
       "steps": [
-        "Click Use Selected Character and confirm the character name.",
-        "Click Use Selected Skeleton and confirm the joint root.",
-        "Enter the size multiplier your game engine needs.",
-        "Click Check Setup and fix any missing selection.",
-        "Click Make Export Copy, then export the new group instead of the original."
+        "Load the rig control and top skeleton joint.",
+        "Set the size. 150% means one and a half times the original.",
+        "Click Check Setup, then Make Copy. Export the copy when it looks right."
       ],
       "buttons": [
         "Use Selected Character",
@@ -988,33 +1308,32 @@ window.AMINATE_DOCS = {
         "Export the copied group, not the original rig.",
         "When the source has animation, the copy keeps only the unique original keyframe times, including fractional frames; it does not add a key on every frame."
       ],
-      "before": "Choose the character and skeleton you want to export. Keep the original rig untouched.",
+      "before": "Choose the character and skeleton you want to export.",
       "see": "A separate scaled group appears in the scene and the source rig stays as it was.",
       "help": "If the copy is the wrong size, delete the copy and make it again with a corrected multiplier. Never scale the original just to test an export.",
-      "number": "19",
+      "number": "22",
       "tabTitle": "Rig Scale",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/rig_scale.png",
-          "title": "Rig Scale screenshot"
+          "src": "assets/panel-rig-scale.png",
+          "title": "Rig Scale · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "resize size bigger smaller scale character skeleton export unreal fbx"
     },
     {
       "id": "video-reference",
       "icon": "VR",
       "short": "Video",
       "title": "Video Reference",
-      "media": "assets/video_reference.png",
-      "purpose": "Place video or image-sequence reference in the scene for timing, tracing, or review.",
+      "media": "assets/panel-video-reference.png",
+      "purpose": "Put a video or picture in the view to follow or trace.",
       "when": "A shot needs visual reference aligned with the Maya timeline.",
       "steps": [
-        "Click Use Active View so the card opens in the camera you are looking through.",
-        "Choose the video or image sequence and set the start frame.",
-        "Choose whether the card should use an audio track.",
-        "Click Make Tracing Card and scrub the timeline.",
-        "Use Open Drawing Manager or Start Drawing when you want to draw over the reference."
+        "Click Use Active View, then Pick Video / Images.",
+        "Set where it goes, its size, and its first frame.",
+        "Click Make Tracing Card. Move through frames to check the timing."
       ],
       "buttons": [
         "Use Active View",
@@ -1029,30 +1348,29 @@ window.AMINATE_DOCS = {
       "before": "Have a video or image sequence and know the frame where it should start.",
       "see": "The reference lines up with the Maya timeline, and the tracing card stays in the chosen view while you animate.",
       "help": "If the timing is off, change Start Frame on the existing card instead of making a second card.",
-      "number": "20",
+      "number": "23",
       "tabTitle": "Video Reference",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/video_reference.png",
-          "title": "Video Reference screenshot"
+          "src": "assets/panel-video-reference.png",
+          "title": "Video Reference · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "video image picture reference trace tracing card audio follow overlay sequence"
     },
     {
       "id": "timeline-notes",
       "icon": "TN",
       "short": "Notes",
       "title": "Timeline Notes",
-      "media": "assets/timeline_notes.png",
-      "purpose": "Attach readable notes to frame ranges and see them while scrubbing.",
+      "media": "assets/panel-timeline-notes.png",
+      "purpose": "Add coloured notes to frames so you can find them later.",
       "when": "Feedback, planning notes, or shot tasks need to live on the timeline.",
       "steps": [
-        "Select the range in Maya's time slider.",
-        "Type a short title and the full feedback note.",
-        "Pick a colour that is easy to read.",
-        "Click Add Note, then scrub through the range.",
-        "Read or export the notes when you review the shot."
+        "Set the first and last frames for the note.",
+        "Write a short title and note. Choose a colour.",
+        "Click Add Note. Move into those frames to see it."
       ],
       "buttons": [
         "Add Note",
@@ -1064,27 +1382,28 @@ window.AMINATE_DOCS = {
       "before": "Highlight the frame range that the note belongs to and write the note in plain words.",
       "see": "A coloured range appears over the timeline and the note reader shows it at the matching frame.",
       "help": "Use a short title so the strip stays readable. The full note is still available when you hover or open the reader.",
-      "number": "21",
+      "number": "24",
       "tabTitle": "Timeline Notes",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/timeline_notes.png",
-          "title": "Timeline Notes screenshot"
+          "src": "assets/panel-timeline-notes.png",
+          "title": "Timeline Notes · built panel preview"
         }
-      ]
+      ],
+      "searchTerms": "notes note comment reminder title colour color frames bookmarks timeline"
     },
     {
       "id": "smear-frames",
       "icon": "SM",
       "short": "Smear",
       "title": "Smear Frames",
-      "media": "assets/smear_frames.png",
+      "media": "assets/panel-smear-frames.png",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/smear_frames.png",
-          "title": "Smear Frames tab screenshot"
+          "src": "assets/panel-smear-frames.png",
+          "title": "Smear Frames · built panel preview"
         },
         {
           "type": "image",
@@ -1097,7 +1416,7 @@ window.AMINATE_DOCS = {
           "title": "The normal rig, the sculpted smear, then the normal rig again"
         }
       ],
-      "purpose": "Take a snapshot of a moving mesh, stretch it into a smear, sculpt the exact vertices you want, save several smears in the Maya scene, choose when each appears, and export Unreal morph overlays.",
+      "purpose": "Make a stretchy motion shape. Edit it and choose when it appears.",
       "when": "A sword swing, fast punch, spinning limb, or other quick move needs a readable stretched drawing for one frame or a short frame range.",
       "buttons": [
         "Refresh Mesh And Saved Smears",
@@ -1114,63 +1433,93 @@ window.AMINATE_DOCS = {
         "Use Unreal Morph Overlay for most smears. Maya Static Mesh is useful inside Maya, but it does not carry dependable on/off animation into Unreal."
       ],
       "steps": [
-        "Move to the frame where the fast action needs a smear.",
-        "Select the whole animated mesh, or select only the vertices you want to stretch.",
-        "Type a clear Smear Name, such as Sword Swing Smear.",
-        "Set Previous and Next Frame Offset to tell Aminate how far around the current frame it should look for motion.",
-        "Start with a small Smear Strength such as 0.5.",
-        "Set Visible From Frame and Visible Through Frame. Use the same number for a one-frame smear.",
-        "Choose Unreal Morph Overlay and click Create And Save Smear.",
-        "Choose the new item in Saved Smear Frames, then click Sculpt / Edit Vertices In Viewport.",
-        "Move the selected vertices until the silhouette looks right from the game camera. Do not add or delete vertices because Unreal morph targets need the same topology.",
-        "Click Finish Editing, then scrub before, inside, and after the saved range.",
-        "Use Save Name And Frame Range whenever you rename the smear or change its timing.",
-        "Click Export All Unreal Smears and choose a new folder. Aminate writes one FBX per smear, aminate_smears.json, an Unreal Python import helper, and simple import instructions."
+        "Select the animated mesh on the frame you want to stretch.",
+        "Set the stretch amount. Click Create Smear.",
+        "Edit the shape and its visible frames. Click Save Name And Frames."
       ],
-      "before": "Save the scene and select one animated mesh. Do not change the mesh's vertex count while sculpting. The original rig and original mesh are never replaced.",
-      "see": "The saved smear list remembers the name and frame range after saving and reopening Maya. The overlay shrinks too small to see when its morph weight is 0 and shows the sculpted smear when the curve becomes 1.",
+      "before": "Save the scene and select one animated mesh.",
+      "see": "The saved smear list remembers the name and frame range after saving and reopening Maya.",
       "help": "If the smear is too wild, undo and use smaller offsets or strength. If Unreal shows no morph, import the FBX as Skeletal Mesh with Import Animations and Import Morph Targets turned on.",
       "subsections": [
         {
           "title": "What Aminate saves",
           "intro": "Each saved item keeps enough information to return after the Maya scene is reopened.",
           "items": [
-            ["Name and unique ID", "A human name for the list plus an internal ID so two smears can have similar names safely."],
-            ["Source and sample frames", "The mesh Aminate sampled and the previous/current/next frames used to calculate motion."],
-            ["Visible range", "The first and last frame where the smear should be on."],
-            ["Editable target", "A topology-matching mesh whose vertices you can move with Maya's normal modelling tools."],
-            ["Unreal carrier", "A one-joint skeletal overlay with blend shapes. Aminate remembers the source rig's scale, so a vertex you move by 3.5 cm stays a 3.5 cm edit. The joint shrinks the overlay almost to zero outside your chosen frames, then returns to the captured scale during the smear."]
+            [
+              "Name and unique ID",
+              "A human name for the list plus an internal ID so two smears can have similar names safely."
+            ],
+            [
+              "Source and sample frames",
+              "The mesh Aminate sampled and the previous/current/next frames used to calculate motion."
+            ],
+            [
+              "Visible range",
+              "The first and last frame where the smear should be on."
+            ],
+            [
+              "Editable target",
+              "A topology-matching mesh whose vertices you can move with Maya's normal modelling tools."
+            ],
+            [
+              "Unreal carrier",
+              "A one-joint skeletal overlay with blend shapes. Aminate remembers the source rig's scale, so a vertex you move by 3.5 cm stays a 3.5 cm edit. The joint shrinks the overlay almost to zero outside your chosen frames, then returns to the captured scale during the smear."
+            ],
+            [
+              "Visible From Frame",
+              "The first frame where the saved smear shape appears."
+            ],
+            [
+              "Visible Through Frame",
+              "The last frame where the saved smear shape appears."
+            ]
           ]
         },
         {
           "title": "Why the Unreal export works",
           "intro": "FBX visibility animation is not a dependable way to turn a mesh on and off in Unreal, so Aminate uses morph curves instead.",
           "items": [
-            ["Before the range", "Morph weight is 0, so the overlay shrinks too small for the player to see."],
-            ["Inside the range", "Morph weight is 1, so the sculpted smear appears."],
-            ["After the range", "Morph weight returns to 0 and the overlay disappears again."],
-            ["FBX bundle", "The FBX contains geometry, one root joint, skinning, blend shapes, and baked animation. The JSON records FPS, units, axis, names, and ranges."],
-            ["Unreal import", "Import as Skeletal Mesh with animations and morph targets. Play the smear overlay animation at the same time as the character animation."]
+            [
+              "Before the range",
+              "Morph weight is 0, so the overlay shrinks too small for the player to see."
+            ],
+            [
+              "Inside the range",
+              "Morph weight is 1, so the sculpted smear appears."
+            ],
+            [
+              "After the range",
+              "Morph weight returns to 0 and the overlay disappears again."
+            ],
+            [
+              "FBX bundle",
+              "The FBX contains geometry, one root joint, skinning, blend shapes, and baked animation. The JSON records FPS, units, axis, names, and ranges."
+            ],
+            [
+              "Unreal import",
+              "Import as Skeletal Mesh with animations and morph targets. Play the smear overlay animation at the same time as the character animation."
+            ]
           ]
         }
       ],
-      "number": "22",
-      "tabTitle": "Smear Frames"
+      "number": "25",
+      "tabTitle": "Smear Frames",
+      "searchTerms": "smear stretch speed motion shape vertices sculpt frame unreal morph export"
     },
     {
       "id": "customization",
       "icon": "CU",
       "short": "Custom",
       "title": "Customization",
-      "media": "assets/customization.png",
+      "media": "assets/panel-customization.png",
       "mediaItems": [
         {
           "type": "image",
-          "src": "assets/customization.png",
-          "title": "Customization tab screenshot"
+          "src": "assets/panel-customization.png",
+          "title": "Customization · built panel preview"
         }
       ],
-      "purpose": "Tune Aminate's colours, labels, and small interface choices so the tool feels comfortable to use.",
+      "purpose": "Choose Aminate's theme, animation colours, and toolbar tooltip size.",
       "when": "The tools work but the interface needs clearer contrast or a calmer personal setup.",
       "buttons": [
         "Apply Style",
@@ -1180,17 +1529,16 @@ window.AMINATE_DOCS = {
         "Change one setting at a time and keep the most readable result."
       ],
       "steps": [
-        "Choose Material Dark for the familiar blue hierarchy or Toolkit Spectrum for tool-coloured accents.",
-        "Change one animation colour, icon size, opacity, or tooltip wording at a time.",
-        "Click Apply Colors or Apply Tooltip Style.",
-        "Open two or three Aminate tabs and check that the text, focus, and main action are still easy to see.",
-        "Click Reset when the change makes the interface harder to read."
+        "Choose a theme to change Aminate's look.",
+        "Pick animation colours, then click Apply Colors.",
+        "Use Reset Colors to return to the default animation colours."
       ],
-      "before": "Take a screenshot of the current look or remember the Reset button. Do not change every colour at once.",
-      "see": "The selected Aminate accents update while neutral panels stay dark and readable. Reset returns the default choices.",
+      "before": "Take a screenshot of the current look or remember the Reset button.",
+      "see": "The selected Aminate accents update while neutral panels stay dark and readable.",
       "help": "If a colour hides text or makes a normal button look dangerous, reset it and choose a calmer colour with more contrast.",
-      "number": "23",
-      "tabTitle": "Customization"
+      "number": "26",
+      "tabTitle": "Customization",
+      "searchTerms": "theme appearance graphite studio contrast toolkit spectrum colours colors tooltip text size"
     }
   ],
   "buttons": [

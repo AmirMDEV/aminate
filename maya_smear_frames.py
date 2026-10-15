@@ -1283,9 +1283,7 @@ if QtWidgets is not None:
             layout = QtWidgets.QVBoxLayout(content_widget)
             layout.setContentsMargins(10, 10, 10, 10)
             help_label = QtWidgets.QLabel(
-                "Make a smear from the selected animated mesh on any frame. "
-                "You can move its vertices, save several smears in the Maya scene, "
-                "choose exactly when each one appears, and export Unreal morph overlays."
+                "Select an animated mesh. Make a smear, edit its shape, then choose which frames show it."
             )
             help_label.setWordWrap(True)
             layout.addWidget(help_label)
@@ -1352,19 +1350,19 @@ if QtWidgets is not None:
             row = QtWidgets.QVBoxLayout()
             self.refresh_button = QtWidgets.QPushButton("Refresh Mesh And Saved Smears")
             self.refresh_button.setObjectName("aminateSmearRefreshSelectionButton")
-            self.create_button = QtWidgets.QPushButton("Create And Save Smear")
+            self.create_button = QtWidgets.QPushButton("Create Smear")
             self.create_button.setObjectName("aminateSmearCreateButton")
             self.select_button = QtWidgets.QPushButton("Select Saved Smear")
             self.select_button.setObjectName("aminateSmearSelectLastButton")
-            self.edit_button = QtWidgets.QPushButton("Sculpt / Edit Vertices In Viewport")
+            self.edit_button = QtWidgets.QPushButton("Edit Smear Shape")
             self.edit_button.setObjectName("aminateSmearEditTargetButton")
             self.finish_edit_button = QtWidgets.QPushButton("Finish Editing")
             self.finish_edit_button.setObjectName("aminateSmearFinishEditButton")
-            self.apply_range_button = QtWidgets.QPushButton("Save Name And Frame Range")
+            self.apply_range_button = QtWidgets.QPushButton("Save Name And Frames")
             self.apply_range_button.setObjectName("aminateSmearApplyRangeButton")
             self.export_button = QtWidgets.QPushButton("Export All Unreal Smears")
             self.export_button.setObjectName("aminateSmearExportUnrealButton")
-            self.delete_button = QtWidgets.QPushButton("Delete Selected Generated Smear")
+            self.delete_button = QtWidgets.QPushButton("Delete Selected Smear")
             self.delete_button.setObjectName("aminateSmearDeleteButton")
             row.addWidget(self.refresh_button)
             row.addWidget(self.create_button)
@@ -1548,7 +1546,7 @@ if QtWidgets is not None:
             # Reuse the wrapper on the next shelf click; avoid repeated Qt
             # construction while Maya is processing callbacks.
             self.hide()
-            event.accept()
+            event.ignore()
 else:
     SmearFrameWindow = None
 

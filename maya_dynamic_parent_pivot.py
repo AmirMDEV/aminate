@@ -30,6 +30,7 @@ import maya_rotation_doctor
 import maya_skin_transfer
 import maya_skinning_cleanup
 import maya_rig_scale_export
+import maya_root_motion
 import maya_timeline_notes
 import maya_video_reference_tool
 import maya_aminate_customization
@@ -40,7 +41,6 @@ try:
     import maya.cmds as cmds
     import maya.mel as mel
     import maya.api.OpenMaya as om
-    import maya.OpenMayaUI as omui
 
     MAYA_AVAILABLE = True
 except Exception:
@@ -106,6 +106,8 @@ TAB_CONTACT_HOLD = "Hand / Foot Hold"
 TAB_SURFACE_CONTACT = "Surface Contact"
 TAB_PIVOT = "Dynamic Pivot"
 TAB_IKFK = "Universal IK/FK"
+TAB_RIG_BUILDER = "Control Rig Builder"
+TAB_MULTI_MOCAP = "Multi-Performer Mocap"
 TAB_FACE_RETARGET = "Controls Retargeter (Face and Body)"
 TAB_CONTROL_PICKER = "Control Picker"
 TAB_ANIMATORS_PENCIL = "Animators Pencil"
@@ -115,6 +117,7 @@ TAB_HISTORY_TIMELINE = "History Timeline"
 TAB_ONION = "Onion Skin"
 TAB_ROTATION = "Rotation Doctor"
 TAB_SKIN = "Character Skinning"
+TAB_ROOT_MOTION = "Root Motion"
 TAB_RIG_SCALE = "Rig Scale"
 TAB_VIDEO = "Video Reference"
 TAB_TIMELINE = "Timeline Notes"
@@ -314,6 +317,8 @@ QLabel[aminateRole="error"] {{
 # Stable category mapping for new tab intros.  Unlisted names intentionally
 # fall back to the blue primary role in _build_tab_intro().
 AMINATE_TAB_CATEGORY = {
+    TAB_RIG_BUILDER: "rigging",
+    TAB_MULTI_MOCAP: "rigging",
     TAB_GUIDE: "primary",
     TAB_STUDENT_CORE: "primary",
     TAB_TIMING: "primary",
@@ -332,6 +337,7 @@ AMINATE_TAB_CATEGORY = {
     TAB_ONION: "creative",
     TAB_ROTATION: "primary",
     TAB_SKIN: "rigging",
+    TAB_ROOT_MOTION: "rigging",
     TAB_RIG_SCALE: "rigging",
     TAB_VIDEO: "review",
     TAB_TIMELINE: "review",
@@ -660,148 +666,204 @@ QScrollBar::sub-line {
 }
 """
 TAB_HELP_TEXT = {
-    TAB_GUIDE: "Start here if you want the plain-English version of what each tab does and when to use it.",
-    TAB_STUDENT_CORE: "Use this when you want the same Toolkit Bar that docks above Maya's timeline inside a tab: History Timeline strip, Animation Layer controls, timing helpers, workflow icons, package zip, and Game Animation Mode.",
-    TAB_TIMING: "Use this when you want the Scene Helpers quick buttons for Auto Key, Auto Snap To Frames, Animation Layer Tint, Game Animation Mode, Load Textures, Open Last Autosave, Set Up Render Environment, Delete Render Environment, Camera Offset controls, and Camera Preset plus whole-frame timing cleanup.",
-    TAB_REFERENCE_MANAGER: "Use this when you want one zip containing the saved Maya scene plus referenced scenes, textures, image planes, audio, caches, and a manifest so the shot can move to another machine.",
-    TAB_PARENTING: "Use this when one prop or control needs to switch between hand, gun, world, or mixed parents without popping. Best for reloads, pickups, passes, and drops.",
-    TAB_CONTACT_HOLD: "Use this to manage several planted hand or foot ranges while the root keeps moving. Turn saved holds on for the held/on-the-spot result, or off to restore the original forward-moving animation.",
-    TAB_SURFACE_CONTACT: "Use this when hand, foot, or object controls must stay on or outside one or more live mesh surfaces, including slopes, uneven ground, steps, and curved props.",
-    TAB_PIVOT: "Use this when selected controls must turn around a temporary point for one frame or a highlighted Time Slider range, without changing the real rig pivot.",
-    TAB_IKFK: "Use this when you need to switch an arm or leg cleanly between IK and FK and keep the pose matched.",
-    TAB_FACE_RETARGET: "Use this when you want face or body controls from one rig copied onto another rig. Put a source control on the left and its target control on the right. Empty rows are ignored. Auto Map By Name matches controls quickly from names, and Retarget All Controls bakes onto the target controls. Reduce Keys keeps only the original source keyframes.",
-    TAB_CONTROL_PICKER: "Choose any character or animal rig root and Aminate builds selection sets from its controls, hierarchy, body area, side, and FK/IK mode. Parent groups select every child, Ctrl/Shift combines groups, custom sets can mix any controls, and the live Front/Side map places buttons from the rig's real control positions.",
-    TAB_ANIMATORS_PENCIL: "Use this when you want expanded Blue Pencil-style drawing stored as real Maya curves and text in the scene. Pencil marks stay visible without this tool installed. Use it for 2D animation notes, layers, frame markers, ghosting, retiming, camera-based drawings, and quick annotation shapes.",
-    TAB_ANIMATION_ASSISTANT: "Use this when you want Aminate to check pose balance. Pick a floor plane, add the controls that can touch the floor, pick a center of gravity control, and get a tiny balanced or unbalanced viewport light plus support area drawing.",
-    TAB_ANIMATION_STYLING: "Use this when you want Into the Spider-Verse-style held keys. Set a hold length, auto-copy new key values into the future, and mark timeline ranges where nearby keys block that hold.",
-    TAB_HISTORY_TIMELINE: "Use this when you want ZBrush-style restore points for animation work. It saves full Maya scene snapshots beside the scene, tracks branches, notes, file size, custom auto-save rules, and protected milestones.",
-    TAB_ONION: "Use this when you want to see ghosted past and future poses to judge spacing, arcs, and timing.",
-    TAB_ROTATION: "Use this when rotations are flipping, gimbaling, or reading strangely and you want the safest fix suggestion.",
-    TAB_SKIN: "Use this for skinning fixes: freeze bad character mesh transforms safely, or copy exact skin weights from one same-topology mesh to another.",
-    TAB_RIG_SCALE: "Use this when you need a safely scaled export copy of a character for game-engine export.",
-    TAB_VIDEO: "Use this when you want video or image reference in the scene for tracing, timing, and annotation.",
-    TAB_TIMELINE: "Use this when you want readable colored notes directly on the timeline so you can scrub and review shot notes.",
-    TAB_SMEAR_FRAMES: "Use this when you want a quick static smear mesh for a fast motion accent. The first slice creates clean Unreal-friendly mesh geometry on the current frame without touching the rig.",
-    TAB_CUSTOMIZATION: "Use this when you want one place for animation-data colours such as timeline highlights, note ranges, keyframe emphasis, and Graph Editor curves. These colours describe your scene; they do not change Aminate's product palette.",
+    TAB_RIG_BUILDER: "Map an imported skeleton and generate editable FK/IK controls, including extra limbs.",
+    TAB_MULTI_MOCAP: "Combine separate performers onto named creature limbs and bake an editable animation layer.",
+    TAB_GUIDE: "Find a tool for the job you want to do.",
+    TAB_STUDENT_CORE: "Move keys, change timing, and open tools from Maya's bottom bar.",
+    TAB_TIMING: "Set up cameras, textures, key snapping, and other scene helpers.",
+    TAB_REFERENCE_MANAGER: "Put your saved scene and its needed files in one zip.",
+    TAB_PARENTING: "Make an object follow a hand, then let go without a jump.",
+    TAB_CONTACT_HOLD: "Keep a hand or foot still while the character moves.",
+    TAB_SURFACE_CONTACT: "Keep hands, feet, or objects from passing through a surface.",
+    TAB_PIVOT: "Turn controls around a temporary point, such as a heel.",
+    TAB_IKFK: "Switch an arm or leg between IK and FK without changing its pose.",
+    TAB_FACE_RETARGET: "Copy movement from one character's controls to another character's controls.",
+    TAB_CONTROL_PICKER: "Find and select a character's controls from a list or picture.",
+    TAB_ANIMATORS_PENCIL: "Draw on the view to plan poses or leave notes.",
+    TAB_ANIMATION_ASSISTANT: "Check whether a pose balances over the hands or feet touching the floor.",
+    TAB_ANIMATION_STYLING: "Hold poses for several frames to make stepped, stop-motion-style movement.",
+    TAB_HISTORY_TIMELINE: "Save scene copies you can return to. Restoring replaces the whole open scene.",
+    TAB_ONION: "See faint copies of earlier and later poses beside the current pose.",
+    TAB_ROTATION: "Find and fix unwanted twists or flips in animated controls.",
+    TAB_SKIN: "Fix a character's transforms or copy how its skin follows the bones.",
+    TAB_ROOT_MOTION: "Animate the root independently while preserving the body, then bake root motion.",
+    TAB_RIG_SCALE: "Make a bigger or smaller export copy. Keep the original rig unchanged.",
+    TAB_VIDEO: "Put a video or picture in the view to follow or trace.",
+    TAB_TIMELINE: "Add coloured notes to frames so you can find them later.",
+    TAB_SMEAR_FRAMES: "Make a stretchy motion shape. Edit it and choose when it appears.",
+    TAB_CUSTOMIZATION: "Choose Aminate's theme, animation colours, and toolbar tooltip size.",
 }
 TAB_WORKFLOW_STEPS = {
+    TAB_RIG_BUILDER: ("Select the skeleton at its reference pose and scan it.", "Review the map and add any extra limb groups.", "Build the rig, animate, and match FK/IK poses."),
+    TAB_MULTI_MOCAP: ("Import performers and choose the creature rig.", "Route source chains to limb groups and align reference poses and timing.", "Preview the bake, then keep or discard its animation layer."),
     TAB_GUIDE: (
-        "Type the job you are trying to do.",
-        "Pick the tool whose description matches.",
-        "Open it, or use the picture tutorial for more help.",
+        "Type a job, such as foot sliding or draw notes.",
+        "Pick a tool and read what it does.",
+        "Click Open Tool. Use Help inside any tool for its steps.",
     ),
     TAB_STUDENT_CORE: (
         "Select the animated controls or keys.",
-        "Choose one timing or workflow button.",
+        "Point at a button to see its name and steps.",
         "Check the timeline before moving on.",
     ),
     TAB_TIMING: (
-        "Choose the scene job you need.",
-        "Check the selected objects and timeline range.",
-        "Run one helper and read its status message.",
+        "Find the job: keys, camera, textures, or rendering.",
+        "Select the objects or frames that job needs.",
+        "Click the helper. Read the result at the bottom.",
     ),
     TAB_REFERENCE_MANAGER: (
         "Save the Maya scene.",
-        "Refresh and check the needed-file list.",
-        "Package the scene and its files into one zip.",
+        "Click Refresh Needed Files. Check for missing files.",
+        "Choose a folder, then click Package Scene To Zip.",
     ),
     TAB_PARENTING: (
-        "Add the prop that will change parents.",
-        "Pick and save each hand, hip, or world target.",
-        "Switch on the needed frame and check that it does not pop.",
+        "Select the moving object. Click Add Object.",
+        "Select the hand or other target. Click Pick Parent.",
+        "Choose a frame and target. Click Switch to this Parent.",
     ),
     TAB_CONTACT_HOLD: (
-        "Pick the hand or foot control.",
-        "Choose the frames and axes that must stay still.",
-        "Create the hold, then switch between held and original motion.",
+        "Select a hand or foot. Click Use Selected Control.",
+        "Set the first and last frames. Choose which directions stay still.",
+        "Click Save New Hold. Play the range to check it.",
     ),
     TAB_SURFACE_CONTACT: (
-        "Pick the hand, foot, or object controls.",
-        "Pick the floor, slope, or prop meshes.",
-        "Check the setup, then create the collision.",
+        "Select the controls and floor meshes. Click Use Controls + Meshes.",
+        "Set the frame range and gap above the surface.",
+        "Click Check Setup, then Create / Update Collision.",
     ),
     TAB_PIVOT: (
-        "Pick the controls, then create and move the temporary pivot marker.",
-        "Highlight the frames to change, or leave the Time Slider unhighlighted for only the current frame.",
-        "Rotate the marker and turn from it. Move the same marker and repeat for the next range.",
+        "Pick controls. Create a pivot marker and move it to the turning point.",
+        "Highlight frames to change. No highlight means only the current frame.",
+        "Rotate the marker, then use the turn button. Check the movement.",
     ),
     TAB_IKFK: (
-        "Pick one arm, leg, or chain.",
-        "Find or fill in its FK, IK, and switch controls.",
-        "Save the setup, then switch and check for a pop.",
+        "Pick one arm or leg. Click Set Up From Selection.",
+        "Check its controls: IK moves the end; FK turns each joint.",
+        "Save the setup. Switch to IK or FK and check the pose.",
     ),
     TAB_FACE_RETARGET: (
-        "Load the source controls.",
-        "Load the matching target controls and check the pairs.",
-        "Retarget, then scrub the result before saving.",
+        "Load the controls to copy from on the left.",
+        "Load the controls to copy to on the right. Check each pair.",
+        "Click Check Setup, then Retarget All Controls. Play the result.",
     ),
     TAB_CONTROL_PICKER: (
-        "Select the character or animal rig root, then click Scan Selected Rig.",
-        "Open a limb or tail group and choose only FK or IK before keying.",
-        "Ctrl/Shift-click groups, save useful mixes as Custom Sets, and check the live map.",
+        "Select the character's top group. Click Scan Selected Rig.",
+        "Click a body part to select its controls.",
+        "Hold Ctrl or Shift to add more groups to your selection.",
     ),
     TAB_ANIMATORS_PENCIL: (
-        "Choose a saved view, drawing tool, colour, and layer.",
-        "Start drawing and make the planning marks.",
-        "Switch frames or views and check that each drawing stays where it belongs.",
+        "Choose a drawing tool and colour.",
+        "Click Start Drawing, then drag in the view.",
+        "Use layers to separate drawings. Press E to erase on the current layer.",
     ),
     TAB_ANIMATION_ASSISTANT: (
-        "Pick the floor and centre-of-gravity control.",
-        "Add the hands, feet, or contact controls.",
-        "Refresh and adjust the pose until the balance guide makes sense.",
+        "Load the floor and the control at the character's centre of weight.",
+        "Add the hands or feet that can touch the floor.",
+        "Click Refresh. Adjust the pose and check the balance guide.",
     ),
     TAB_ANIMATION_STYLING: (
-        "Select the controls and choose a hold length.",
-        "Check the overlap warning.",
-        "Apply the hold or stepped curves, then scrub the timing.",
+        "Select controls and set how many frames each pose lasts.",
+        "Click Scan Overlaps to check for keys that are too close.",
+        "Click Hold Current Key or Hold Selected Existing Keys. Play the result.",
     ),
     TAB_HISTORY_TIMELINE: (
         "Save the scene first.",
-        "Make a step or protected milestone.",
-        "Pick a restore point and restore only when you need it.",
+        "Click Save Step. Use Save Milestone for a copy you want to keep.",
+        "Save current work before restoring a snapshot; it replaces the whole scene.",
     ),
     TAB_ONION: (
-        "Select the animated character or mesh.",
-        "Attach it and choose the past/future frame spacing.",
-        "Judge the arc, then clear the ghosts when finished.",
+        "Select the animated mesh. Click Use Current Selection.",
+        "Choose how far apart the earlier and later poses should be.",
+        "Move through frames to compare poses. Clear the preview when finished.",
     ),
     TAB_ROTATION: (
-        "Select the controls with strange rotation.",
-        "Analyze before changing anything.",
-        "Use the suggested fix, then scrub through the repaired keys.",
+        "Select the controls that twist or flip.",
+        "Click Analyze Selected. Read the suggested fix.",
+        "Click Use Best Fix. Play the changed frames to check them.",
     ),
     TAB_SKIN: (
-        "Choose whether you are fixing transforms or copying weights.",
-        "Load the source and target meshes carefully.",
-        "Run the safe copy, read the report, and inspect the duplicate before replacing anything.",
+        "Choose Fix Skinning or Skin Transfer.",
+        "For a whole rig, select its top group and click Copy Whole Character.",
+        "For weight transfer, load source meshes and target meshes, then click Transfer Skin.",
+    ),
+    TAB_ROOT_MOTION: (
+        "Pick the root and set the frame range. Move to the offset reference frame.",
+        "Prepare, then key the root helper or follow a picked bone or controller.",
+        "Bake every frame or authored keyframes, or cancel to restore the original.",
     ),
     TAB_RIG_SCALE: (
-        "Pick the rig control and top skeleton joint.",
-        "Choose the exact size or percentage.",
-        "Check the setup, make the copy, and export only the copy.",
+        "Load the rig control and top skeleton joint.",
+        "Set the size. 150% means one and a half times the original.",
+        "Click Check Setup, then Make Copy. Export the copy when it looks right.",
     ),
     TAB_VIDEO: (
-        "Choose the active view and video or image sequence.",
-        "Set the placement, size, and start frame.",
-        "Make the tracing card and scrub to check timing.",
+        "Click Use Active View, then Pick Video / Images.",
+        "Set where it goes, its size, and its first frame.",
+        "Click Make Tracing Card. Move through frames to check the timing.",
     ),
     TAB_TIMELINE: (
-        "Highlight the frame range.",
-        "Write a short title and clear note.",
-        "Add the note, then scrub into its range to check it.",
+        "Set the first and last frames for the note.",
+        "Write a short title and note. Choose a colour.",
+        "Click Add Note. Move into those frames to see it.",
     ),
     TAB_SMEAR_FRAMES: (
-        "Select the animated mesh on the smear frame.",
-        "Choose the frame offsets and strength.",
-        "Create the smear and check that only the intended frame shows it.",
+        "Select the animated mesh on the frame you want to stretch.",
+        "Set the stretch amount. Click Create Smear.",
+        "Edit the shape and its visible frames. Click Save Name And Frames.",
     ),
     TAB_CUSTOMIZATION: (
-        "Choose Maya Graphite or Studio Contrast.",
-        "Pick only the colours you want to change.",
-        "Apply, inspect the UI, and reset if the result is unclear.",
+        "Choose a theme to change Aminate's look.",
+        "Pick animation colours, then click Apply Colors.",
+        "Use Reset Colors to return to the default animation colours.",
     ),
 }
+# Search vocabulary is separate from visible copy: short instructions must not
+# make a tool harder to find by its old name or by the user's everyday words.
+TAB_SEARCH_TERMS = {
+    TAB_RIG_BUILDER: "skeleton autorig auto map mapping blender fbx control rig builder fk ik extra arms creature",
+    TAB_MULTI_MOCAP: "mocap motion capture multi performer actor monster arms creature fbx bake retarget",
+    TAB_GUIDE: "help learn beginner start",
+    TAB_STUDENT_CORE: "toolbar keys timing tween inbetween nudge reset pose bake twos layers game animation mode history zip",
+    TAB_TIMING: "auto key snap frames layer tint game animation mode load textures autosave render environment camera offset preset cleanup",
+    TAB_REFERENCE_MANAGER: "package zip collect share send missing files textures images audio caches references cleanup unknown data",
+    TAB_PARENTING: "attach detach follow pickup pick up let go drop pass hand prop gun magazine world parent blend offset",
+    TAB_CONTACT_HOLD: "foot feet hand sliding slide slipping plant planted pin lock still hold original motion",
+    TAB_SURFACE_CONTACT: "collision floor ground feet foot hand slope steps surface contact penetrate through",
+    TAB_PIVOT: "rotate turn heel toe pivot point marker roll",
+    TAB_IKFK: "arm leg chain switch match ik fk inverse forward kinematics",
+    TAB_FACE_RETARGET: "retarget copy animation movement motion face body source target pair map controls",
+    TAB_CONTROL_PICKER: "select selection character animal controls rig body hands fingers limbs tail map custom sets attributes",
+    TAB_ANIMATORS_PENCIL: "draw drawing notes pencil blue pencil erase eraser strokes marks shapes camera video layers ghosts retime",
+    TAB_ANIMATION_ASSISTANT: "balance weight gravity floor contact support pose",
+    TAB_ANIMATION_STYLING: "spider verse stop motion stepped hold poses keys overlap",
+    TAB_HISTORY_TIMELINE: "undo restore recover backup snapshot save milestone branch autosave history",
+    TAB_ONION: "ghost ghosts previous next past future poses spacing arc timing onion skin",
+    TAB_ROTATION: "rotation flip twist gimbal euler quaternion spins smooth cleanup",
+    TAB_SKIN: "skinning skin weights bones joints mesh transforms freeze scale clothing topology transfer copy",
+    TAB_ROOT_MOTION: "root motion independent hips cog follow offset bake keyframes translate rotate scale",
+    TAB_RIG_SCALE: "resize size bigger smaller scale character skeleton export unreal fbx",
+    TAB_VIDEO: "video image picture reference trace tracing card audio follow overlay sequence",
+    TAB_TIMELINE: "notes note comment reminder title colour color frames bookmarks timeline",
+    TAB_SMEAR_FRAMES: "smear stretch speed motion shape vertices sculpt frame unreal morph export",
+    TAB_CUSTOMIZATION: "theme appearance graphite studio contrast toolkit spectrum colours colors tooltip text size",
+}
+
+
+def quick_start_tool_matches(tab_name, query):
+    """Match all task words, in any order, without changing tool identities."""
+    words = str(query or "").casefold().replace("-", " ").replace("/", " ").split()
+    haystack = " ".join((
+        tab_name,
+        TAB_HELP_TEXT.get(tab_name, ""),
+        TAB_SEARCH_TERMS.get(tab_name, ""),
+        " ".join(TAB_WORKFLOW_STEPS.get(tab_name, ())),
+    )).casefold().replace("-", " ").replace("/", " ")
+    return all(word in haystack for word in words)
+
+
 TAB_TUTORIAL_SECTION_IDS = {
+    TAB_RIG_BUILDER: "control-rig-builder",
+    TAB_MULTI_MOCAP: "multi-performer-mocap",
     TAB_GUIDE: "quick-start",
     TAB_STUDENT_CORE: "toolkit-bar",
     TAB_TIMING: "scene-helpers",
@@ -820,6 +882,7 @@ TAB_TUTORIAL_SECTION_IDS = {
     TAB_ONION: "onion-skin",
     TAB_ROTATION: "rotation-doctor",
     TAB_SKIN: "character-skinning",
+    TAB_ROOT_MOTION: "root-motion",
     TAB_RIG_SCALE: "rig-scale",
     TAB_VIDEO: "video-reference",
     TAB_TIMELINE: "timeline-notes",
@@ -946,12 +1009,12 @@ AMINATE_PRIMARY_ACTION_LABELS = {
     "Save Step",
     "Attach Selected",
     "Use Best Fix",
-    "Track A: Copy Whole Character (Safe)",
-    "Transfer Skin (Auto)",
+    "Copy Whole Character",
+    "Transfer Skin",
     "Make Copy",
     "Make Tracing Card",
     "Add Note",
-    "Create Smear Frame",
+    "Create Smear",
     "Apply Colors",
 }
 AMINATE_DANGER_ACTION_LABELS = {
@@ -1008,6 +1071,8 @@ SIDE_TOKEN_SETS = {
 }
 
 GLOBAL_CONTROLLER = None
+_MAYA_EXIT_HOOK_CONNECTED = False
+_MAYA_EXIT_STARTED = False
 GLOBAL_WINDOW = None
 GLOBAL_DOCK_HOST = None
 
@@ -1308,12 +1373,7 @@ def _all_transforms_and_joints():
 
 
 def _maya_main_window():
-    if not (MAYA_AVAILABLE and QtWidgets and shiboken and omui):
-        return None
-    pointer = omui.MQtUtil.mainWindow()
-    if not pointer:
-        return None
-    return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+    return maya_skinning_cleanup._maya_main_window()
 
 
 def _qt_object_valid(widget):
@@ -2876,6 +2936,16 @@ class AminateController(object):
             _warning(message)
 
     def shutdown(self):
+        if getattr(self, "_shutdown_complete", False):
+            return
+        self._shutdown_complete = True
+        self.status_callback = None
+        for controller in (self.animators_pencil_controller, self.timing_controller):
+            if controller:
+                try:
+                    controller.shutdown()
+                except Exception:
+                    pass
         if self.dynamic_parenting_controller:
             try:
                 self.dynamic_parenting_controller.shutdown()
@@ -4274,6 +4344,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.surface_contact_page, self.surface_contact_tab = self._make_scroll_tab()
             self.pivot_page, self.pivot_tab = self._make_scroll_tab()
             self.ikfk_page, self.ikfk_tab = self._make_scroll_tab()
+            self.rig_builder_page, self.rig_builder_tab = self._make_scroll_tab()
+            self.multi_mocap_page, self.multi_mocap_tab = self._make_scroll_tab()
             self.face_retarget_page, self.face_retarget_tab = self._make_scroll_tab()
             self.control_picker_page, self.control_picker_tab = self._make_scroll_tab()
             self.animators_pencil_page, self.animators_pencil_tab = self._make_scroll_tab()
@@ -4283,6 +4355,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.onion_page, self.onion_tab = self._make_scroll_tab()
             self.rotation_page, self.rotation_tab = self._make_scroll_tab()
             self.skin_page, self.skin_tab = self._make_scroll_tab()
+            self.root_motion_page, self.root_motion_tab = self._make_scroll_tab()
             self.rig_scale_page, self.rig_scale_tab = self._make_scroll_tab()
             self.video_page, self.video_tab = self._make_scroll_tab()
             self.timeline_page, self.timeline_tab = self._make_scroll_tab()
@@ -4301,6 +4374,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.tab_widget.addTab(self.surface_contact_tab, TAB_SURFACE_CONTACT)
             self.tab_widget.addTab(self.pivot_tab, TAB_PIVOT)
             self.tab_widget.addTab(self.ikfk_tab, TAB_IKFK)
+            self.tab_widget.addTab(self.rig_builder_tab, TAB_RIG_BUILDER)
+            self.tab_widget.addTab(self.multi_mocap_tab, TAB_MULTI_MOCAP)
             self.tab_widget.addTab(self.face_retarget_tab, TAB_FACE_RETARGET)
             self.tab_widget.addTab(self.control_picker_tab, TAB_CONTROL_PICKER)
             self.tab_widget.addTab(self.animators_pencil_tab, TAB_ANIMATORS_PENCIL)
@@ -4310,6 +4385,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.tab_widget.addTab(self.onion_tab, TAB_ONION)
             self.tab_widget.addTab(self.rotation_tab, TAB_ROTATION)
             self.tab_widget.addTab(self.skin_tab, TAB_SKIN)
+            self.tab_widget.addTab(self.root_motion_tab, TAB_ROOT_MOTION)
             self.tab_widget.addTab(self.rig_scale_tab, TAB_RIG_SCALE)
             self.tab_widget.addTab(self.video_tab, TAB_VIDEO)
             self.tab_widget.addTab(self.timeline_tab, TAB_TIMELINE)
@@ -4339,6 +4415,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 TAB_SURFACE_CONTACT: self._build_surface_contact_tab,
                 TAB_PIVOT: self._build_pivot_tab,
                 TAB_IKFK: self._build_ikfk_tab,
+                TAB_RIG_BUILDER: self._build_rig_builder_tab,
+                TAB_MULTI_MOCAP: self._build_multi_mocap_tab,
                 TAB_FACE_RETARGET: self._build_face_retarget_tab,
                 TAB_CONTROL_PICKER: self._build_control_picker_tab,
                 TAB_ANIMATORS_PENCIL: self._build_animators_pencil_tab,
@@ -4348,6 +4426,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 TAB_ONION: self._build_onion_tab,
                 TAB_ROTATION: self._build_rotation_tab,
                 TAB_SKIN: self._build_skin_tab,
+                TAB_ROOT_MOTION: self._build_root_motion_tab,
                 TAB_RIG_SCALE: self._build_rig_scale_tab,
                 TAB_VIDEO: self._build_video_tab,
                 TAB_TIMELINE: self._build_timeline_tab,
@@ -4539,6 +4618,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 TAB_ONION: "onion_skin",
                 TAB_ROTATION: "rotation_doctor",
                 TAB_SKIN: "skinning_cleanup",
+                TAB_ROOT_MOTION: "root_motion",
                 TAB_RIG_SCALE: "rig_scale",
                 TAB_VIDEO: "video_reference",
                 TAB_TIMELINE: "timeline_notes",
@@ -4562,6 +4642,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             title_row.setSpacing(6)
             title = QtWidgets.QLabel(tab_name)
             title.setObjectName("aminateIntroTitle")
+            title.setWordWrap(True)
             if tool_id:
                 title.setProperty("aminateToolId", tool_id)
             category = AMINATE_TAB_CATEGORY.get(tab_name, "primary")
@@ -4576,7 +4657,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             toggle.setArrowType(_qt_flag("ArrowType", "RightArrow", QtCore.Qt.RightArrow))
             toggle.setToolButtonStyle(_qt_flag("ToolButtonStyle", "ToolButtonTextBesideIcon", QtCore.Qt.ToolButtonTextBesideIcon))
             toggle.setAccessibleName("Show or hide help for {0}".format(tab_name))
-            toggle.setToolTip("Show a short explanation and the three-step workflow.")
+            toggle.setToolTip("Show what to select, what to click, and what happens next.")
             title_row.addWidget(title, 1)
             title_row.addWidget(toggle)
             inner.addLayout(title_row)
@@ -4598,7 +4679,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             coach_layout = QtWidgets.QVBoxLayout(coach)
             coach_layout.setContentsMargins(0, 2, 0, 0)
             coach_layout.setSpacing(3)
-            coach_title = QtWidgets.QLabel("Do this in three small steps")
+            coach_title = QtWidgets.QLabel("How to use it")
             coach_title.setObjectName("aminateCoachTitle")
             coach_layout.addWidget(coach_title)
             for step_number, step_text in enumerate(TAB_WORKFLOW_STEPS.get(tab_name, ()), 1):
@@ -4958,14 +5039,26 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             import maya_aminate_ui
             maya_aminate_ui.apply(self, 'ikfk', locals())
 
+        def _build_rig_builder_tab(self):
+            import maya_control_rig_ui
+            layout = QtWidgets.QVBoxLayout(self.rig_builder_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_RIG_BUILDER))
+            self.rig_builder_panel = maya_control_rig_ui.RigPanel(self.rig_builder_page)
+            layout.addWidget(self.rig_builder_panel)
+
+        def _build_multi_mocap_tab(self):
+            import maya_control_rig_ui
+            layout = QtWidgets.QVBoxLayout(self.multi_mocap_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_MULTI_MOCAP))
+            self.multi_mocap_panel = maya_control_rig_ui.MocapPanel(self.multi_mocap_page)
+            layout.addWidget(self.multi_mocap_panel)
+
         def _build_face_retarget_tab(self):
             layout = QtWidgets.QVBoxLayout(self.face_retarget_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_FACE_RETARGET))
-            face_hint = QtWidgets.QLabel("Fill paired rows: source control on the left, target control on the right. A new empty row appears automatically and empty rows are ignored. Auto Map By Name pairs matching names quickly. Retarget All Controls matches the source starting pose and copies only the source's original key times.")
-            face_hint.setWordWrap(True)
-            face_hint.hide()
-            layout.addWidget(face_hint)
             self.face_retarget_panel = self._embed_tool_panel(
                 maya_face_retarget.MayaFaceRetargetWindow(self.controller.face_retarget_controller, parent=self.face_retarget_page),
                 self.face_retarget_page,
@@ -5052,7 +5145,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_SKIN))
 
-            freeze_heading = QtWidgets.QLabel("Freeze Bad Mesh Transforms")
+            freeze_heading = QtWidgets.QLabel("Fix Skinning")
             freeze_heading.setStyleSheet("font-size: 15px; font-weight: 800; color: #F2F2F2;")
             layout.addWidget(freeze_heading)
             self.skin_panel = self._embed_tool_panel(
@@ -5061,7 +5154,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             )
             layout.addWidget(self.skin_panel, 1)
 
-            transfer_heading = QtWidgets.QLabel("Copy Exact Skinning")
+            transfer_heading = QtWidgets.QLabel("Skin Transfer")
             transfer_heading.setStyleSheet("font-size: 15px; font-weight: 800; color: #F2F2F2;")
             layout.addWidget(transfer_heading)
             self.skin_transfer_panel = self._embed_tool_panel(
@@ -5071,6 +5164,13 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             layout.addWidget(self.skin_transfer_panel, 0)
             import maya_aminate_ui
             maya_aminate_ui.apply_extra(self, 'skin_tasks', locals())
+
+        def _build_root_motion_tab(self):
+            layout = QtWidgets.QVBoxLayout(self.root_motion_page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(self._build_tab_intro(TAB_ROOT_MOTION))
+            self.root_motion_panel = maya_root_motion.RootMotionPanel(parent=self.root_motion_page)
+            layout.addWidget(self.root_motion_panel, 1)
 
         def _build_rig_scale_tab(self):
             layout = QtWidgets.QVBoxLayout(self.rig_scale_page)
@@ -5138,7 +5238,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             layout.addWidget(self._build_tab_intro(TAB_GUIDE))
             self.quick_start_search = QtWidgets.QLineEdit()
             self.quick_start_search.setClearButtonEnabled(True)
-            self.quick_start_search.setPlaceholderText("What do you want to do? Try: draw, skin, switch, notes")
+            self.quick_start_search.setPlaceholderText("Find a tool: foot sliding, draw notes...")
             self.quick_start_search.setAccessibleName("Search Aminate tools")
             layout.addWidget(self.quick_start_search)
 
@@ -5167,14 +5267,13 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.quick_start_description = QtWidgets.QLabel()
             self.quick_start_description.setObjectName("aminateQuickStartDescription")
             self.quick_start_description.setWordWrap(True)
-            self.quick_start_description.setMinimumHeight(64)
             self.quick_start_description.setAlignment(
                 _qt_flag("AlignmentFlag", "AlignTop", QtCore.Qt.AlignTop)
                 | _qt_flag("AlignmentFlag", "AlignLeft", QtCore.Qt.AlignLeft)
             )
             layout.addWidget(self.quick_start_description)
 
-            self.quick_start_open_button = QtWidgets.QPushButton("Open Selected Tool")
+            self.quick_start_open_button = QtWidgets.QPushButton("Open Tool")
             self.quick_start_open_button.setProperty("aminateRole", "primary")
             self.quick_start_open_button.setToolTip("Jump straight to the selected Aminate tool.")
             layout.addWidget(self.quick_start_open_button)
@@ -5203,8 +5302,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                     tab_index = int(item.data(role))
                 except (TypeError, ValueError):
                     tab_index = -1
-                description = TAB_HELP_TEXT.get(self.tab_widget.tabText(tab_index), "") if tab_index >= 0 else ""
-                visible = not query or query in item.text().lower() or query in description.lower()
+                tab_name = self.tab_widget.tabText(tab_index) if 0 <= tab_index < self.tab_widget.count() else item.text()
+                visible = quick_start_tool_matches(tab_name, query)
                 item.setHidden(not visible)
                 if visible and first_visible is None:
                     first_visible = item
@@ -5239,7 +5338,7 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             if not hasattr(self, "quick_start_tool_list"):
                 return
             current = item if isinstance(item, QtWidgets.QListWidgetItem) else self.quick_start_tool_list.currentItem()
-            if current is None:
+            if current is None or current.isHidden():
                 self._set_status("Choose a tool first.", False)
                 return
             role = _qt_flag("ItemDataRole", "UserRole", 32)
@@ -5267,16 +5366,9 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 self.student_core_page,
             )
             layout.addWidget(self.student_core_panel)
-            help_box = QtWidgets.QPlainTextEdit()
-            help_box.setReadOnly(True)
-            help_box.setPlainText(
-                "This tab mirrors the fixed Toolkit Bar at the bottom of Maya.\n\n"
-                "- The History strip, Animation Layer controls, timing buttons, workflow icons, package zip, and Game Animation Mode button are all shown here.\n"
-                "- Changes made from this tab use the same controller as the fixed bar, so Game Animation Mode and animation layer state stay synced.\n"
-                "- The bottom bar is pinned to Maya, cannot float or drag, and scrolls horizontally on narrow screens."
-            )
-            help_box.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-            layout.addWidget(help_box, 1)
+            help_box = QtWidgets.QLabel("Point at a button for its name and steps. Scroll sideways to see more tools.")
+            help_box.setWordWrap(True)
+            layout.addWidget(help_box)
             open_button = QtWidgets.QPushButton("Show Fixed Bottom Toolkit Bar")
             open_button.setToolTip("Show the non-draggable Toolkit Bar at the bottom of Maya.")
             open_button.clicked.connect(self._open_student_core_toolbar)
@@ -5405,6 +5497,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 "character_freeze": "character_skinning",
                 "character_skinning": "character_skinning",
                 "transform_cleanup": "character_skinning",
+                "root": "root_motion",
+                "root_motion": "root_motion",
                 "rig_scale": "rig_scale",
                 "scale": "rig_scale",
                 "video": "video_reference",
@@ -5728,38 +5822,15 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             timing_controller = getattr(self.controller, "timing_controller", None)
             return bool(getattr(timing_controller, "keep_toolbar_extras_on_hide", False))
 
-        def _hide_extra_qt_widgets_by_name(self):
-            app = QtWidgets.QApplication.instance()
-            if not app:
-                return 0
-            extra_names = {
-                "studentCoreTimelineButtonBarWindow",
-                "toolkitBarTweenMachinePopup",
-                "aminateFloatingChannelBoxWindow",
-                "aminateFloatingGraphEditorWindow",
-            }
-            hidden = 0
-            for widget in list(app.allWidgets()):
-                try:
-                    if widget is self or self._is_widget_inside_window(widget):
-                        continue
-                    if widget.objectName() not in extra_names:
-                        continue
-                    if widget.isVisible():
-                        hidden += 1
-                    widget.hide()
-                except Exception:
-                    pass
-            return hidden
-
         def _hide_toolbar_extras_if_needed(self):
             if self._toolbar_extras_hidden_for_close:
                 return
             self._toolbar_extras_hidden_for_close = True
             if self._keep_toolbar_extras_on_hide():
                 return
+            # This helper owns the bar registry, Tween reference and floating
+            # tool manager. A native-widget scan would bypass its safety rules.
             hidden_count = maya_timing_tools.hide_aminate_toolbar_extras()
-            hidden_count += self._hide_extra_qt_widgets_by_name()
             if hidden_count:
                 self._set_status("Aminate hidden. Cleared toolbar extras.", True)
 
@@ -5930,6 +6001,33 @@ def install_maya_dynamic_parent_pivot_shelf_button(shelf_name=DEFAULT_SHELF_NAME
     return metadata["button"]
 
 
+def _shutdown_for_maya_exit():
+    """Stop our callbacks while Maya and Qt are alive; leave native docks alone."""
+    global _MAYA_EXIT_STARTED
+    if _MAYA_EXIT_STARTED:
+        return
+    _MAYA_EXIT_STARTED = True
+    if _qt_object_valid(GLOBAL_WINDOW):
+        panel = getattr(GLOBAL_WINDOW, "animators_pencil_panel", None)
+        if _qt_object_valid(panel):
+            try:
+                panel._deactivate_runtime_input()
+            except Exception as exc:
+                _warning("Pencil exit cleanup: {0}".format(exc))
+    if GLOBAL_CONTROLLER is not None:
+        GLOBAL_CONTROLLER.shutdown()
+
+
+def _install_maya_exit_hook():
+    global _MAYA_EXIT_HOOK_CONNECTED
+    if _MAYA_EXIT_HOOK_CONNECTED:
+        return
+    app = QtWidgets.QApplication.instance() if QtWidgets else None
+    if app is not None:
+        app.aboutToQuit.connect(_shutdown_for_maya_exit)
+        _MAYA_EXIT_HOOK_CONNECTED = True
+
+
 def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
     global GLOBAL_CONTROLLER
     global GLOBAL_WINDOW
@@ -5938,6 +6036,9 @@ def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
         raise RuntimeError("maya_dynamic_parent_pivot.launch_maya_dynamic_parent_pivot() must run inside Autodesk Maya.")
     if not QtWidgets:
         raise RuntimeError("PySide is not available in this Maya session.")
+    if _MAYA_EXIT_STARTED:
+        raise RuntimeError("Maya is closing. Open Aminate after Maya restarts.")
+    _install_maya_exit_hook()
     # Old saved shelf buttons and old verifiers passed dock=False. Keep the
     # argument for compatibility, but permanently normalize the main panel to
     # the required docked mode.
@@ -5987,7 +6088,7 @@ def launch_maya_dynamic_parent_pivot(dock=True, initial_tab="quick_start"):
     if success and auto_open_toolkit_bar:
         def _open_default_toolkit_bar():
             try:
-                if not _qt_object_valid(GLOBAL_WINDOW):
+                if _MAYA_EXIT_STARTED or not _qt_object_valid(GLOBAL_WINDOW):
                     return
                 timing_controller = GLOBAL_CONTROLLER.get_timing_controller()
                 try:

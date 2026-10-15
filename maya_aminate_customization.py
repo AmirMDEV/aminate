@@ -239,6 +239,8 @@ class AminateCustomizationController(object):
 
 
 if QtWidgets is not None:
+    from maya_aminate_layout import ResponsiveRow
+
     class ColorButton(QtWidgets.QPushButton):
         colorChanged = QtCore.Signal(str) if hasattr(QtCore, "Signal") else QtCore.pyqtSignal(str)
 
@@ -299,7 +301,7 @@ if QtWidgets is not None:
             layout = QtWidgets.QVBoxLayout(content)
             layout.setContentsMargins(10, 10, 10, 10)
             layout.setSpacing(8)
-            intro = QtWidgets.QLabel("Pick the animation colors once, then apply them to Aminate overlays and any native Maya timeline or Graph Editor color slots Maya exposes.")
+            intro = QtWidgets.QLabel("Choose animation colours, then click Apply Colors.")
             intro.setWordWrap(True)
             layout.addWidget(intro)
             self._build_theme_selector(layout)
@@ -311,7 +313,6 @@ if QtWidgets is not None:
             form.addWidget(QtWidgets.QLabel("Area"), 0, 0)
             form.addWidget(QtWidgets.QLabel("Color"), 0, 1)
             form.addWidget(QtWidgets.QLabel("Hex"), 0, 2)
-            form.addWidget(QtWidgets.QLabel("What It Changes"), 0, 3)
             for row, field in enumerate(COLOR_FIELDS, start=1):
                 label = QtWidgets.QLabel(field["label"])
                 label.setToolTip(field["help"])
@@ -320,12 +321,11 @@ if QtWidgets is not None:
                 edit = QtWidgets.QLineEdit(field["default"])
                 edit.setObjectName("aminateCustomizationHexEdit_{0}".format(field["key"]))
                 edit.setMaximumWidth(92)
-                help_label = QtWidgets.QLabel(field["help"])
-                help_label.setWordWrap(True)
+                button.setToolTip(field["help"])
+                edit.setToolTip("Hex colour code. " + field["help"])
                 form.addWidget(label, row, 0)
                 form.addWidget(button, row, 1)
                 form.addWidget(edit, row, 2)
-                form.addWidget(help_label, row, 3)
                 self.color_buttons[field["key"]] = button
                 self.hex_edits[field["key"]] = edit
                 button.colorChanged.connect(lambda color, key=field["key"]: self._sync_edit_from_button(key, color))
@@ -335,7 +335,7 @@ if QtWidgets is not None:
             self.apply_button = QtWidgets.QPushButton("Apply Colors")
             self.apply_button.setObjectName("aminateCustomizationApplyButton")
             self.apply_button.setToolTip("Save these colors and apply every supported Maya/Aminate color slot.")
-            self.reset_button = QtWidgets.QPushButton("Reset")
+            self.reset_button = QtWidgets.QPushButton("Reset Colors")
             self.reset_button.setObjectName("aminateCustomizationResetButton")
             self.reset_button.setToolTip("Restore Aminate's default animation colors.")
             button_row.addWidget(self.apply_button)
@@ -384,7 +384,7 @@ if QtWidgets is not None:
             row.addWidget(self.theme_combo, 1)
             group_layout.addLayout(row)
             helper = QtWidgets.QLabel(
-                "Maya Graphite stays close to the host UI. Studio Contrast deepens the surfaces without per-tool colours or accent borders."
+                "Maya Graphite matches Maya. Studio Contrast makes panels darker."
             )
             helper.setObjectName("aminateCustomizationThemeHelper")
             helper.setWordWrap(True)
@@ -482,6 +482,7 @@ if QtWidgets is not None:
             text_layout.setSpacing(3)
             self.tooltip_preview_title = QtWidgets.QLabel("Combine Freeze Pivot")
             self.tooltip_preview_title.setObjectName("aminateCustomizationTooltipPreviewTitle")
+            self.tooltip_preview_title.setWordWrap(True)
             self.tooltip_preview_description = QtWidgets.QLabel("")
             self.tooltip_preview_description.setObjectName("aminateCustomizationTooltipPreviewDescription")
             self.tooltip_preview_description.setWordWrap(True)
@@ -490,7 +491,7 @@ if QtWidgets is not None:
             preview_layout.addLayout(text_layout, 1)
             group_layout.addWidget(self.tooltip_preview_card)
 
-            action_row = QtWidgets.QHBoxLayout()
+            action_row = ResponsiveRow()
             self.apply_tooltip_button = QtWidgets.QPushButton("Apply Tooltip Style")
             self.apply_tooltip_button.setObjectName("aminateCustomizationApplyTooltipStyleButton")
             self.apply_tooltip_button.setToolTip("Save these hover-card settings and refresh any open Toolkit Bar.")

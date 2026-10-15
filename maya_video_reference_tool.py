@@ -1470,6 +1470,8 @@ class _WindowBase(QtWidgets.QDialog if QtWidgets else object):
 
 
 if QtWidgets:
+    from maya_aminate_layout import ResponsiveRow
+
     class MayaVideoAnnotationManagerWindow(_WindowBase):
         def __init__(self, controller, parent=None):
             super(MayaVideoAnnotationManagerWindow, self).__init__(parent or _maya_main_window())
@@ -1673,7 +1675,7 @@ if QtWidgets:
             content.setMinimumWidth(0)
             main_layout = QtWidgets.QVBoxLayout(content)
             intro = QtWidgets.QLabel(
-                "Turn a video into a tracing card Maya can scrub cleanly. You can place it behind the character, make it follow a picked object, or use a full-screen camera overlay if you really want that."
+                "Choose a video or picture, then make a tracing card in the view."
             )
             intro.setWordWrap(True)
             main_layout.addWidget(intro)
@@ -1682,7 +1684,7 @@ if QtWidgets:
             source_layout = QtWidgets.QVBoxLayout(source_group)
             source_layout.setContentsMargins(8, 8, 8, 8)
             source_layout.setSpacing(6)
-            camera_row = QtWidgets.QHBoxLayout()
+            camera_row = ResponsiveRow()
             self.camera_line = QtWidgets.QLineEdit()
             self.camera_line.setReadOnly(True)
             self.use_camera_button = QtWidgets.QPushButton("Use Active View")
@@ -1691,7 +1693,7 @@ if QtWidgets:
             camera_row.addWidget(self.use_camera_button)
             source_layout.addLayout(camera_row)
 
-            media_row = QtWidgets.QHBoxLayout()
+            media_row = ResponsiveRow()
             self.media_line = QtWidgets.QLineEdit()
             self.pick_media_button = QtWidgets.QPushButton("Pick Video / Images")
             media_row.addWidget(QtWidgets.QLabel("Video File"))
@@ -1699,7 +1701,7 @@ if QtWidgets:
             media_row.addWidget(self.pick_media_button)
             source_layout.addLayout(media_row)
 
-            audio_row = QtWidgets.QHBoxLayout()
+            audio_row = ResponsiveRow()
             self.audio_line = QtWidgets.QLineEdit()
             self.pick_audio_button = QtWidgets.QPushButton("Pick Audio")
             audio_row.addWidget(QtWidgets.QLabel("Audio File"))
@@ -1707,7 +1709,7 @@ if QtWidgets:
             audio_row.addWidget(self.pick_audio_button)
             source_layout.addLayout(audio_row)
 
-            target_row = QtWidgets.QHBoxLayout()
+            target_row = ResponsiveRow()
             self.target_line = QtWidgets.QLineEdit()
             self.target_line.setReadOnly(True)
             self.use_target_button = QtWidgets.QPushButton("Use Selected Object")
@@ -1721,32 +1723,33 @@ if QtWidgets:
             placement_layout = QtWidgets.QVBoxLayout(placement_group)
             placement_layout.setContentsMargins(8, 8, 8, 8)
             placement_layout.setSpacing(6)
-            placement_row = QtWidgets.QHBoxLayout()
+            placement_row = ResponsiveRow()
             self.placement_combo = QtWidgets.QComboBox()
             for mode_key, mode_label in PLACEMENT_MODE_ITEMS:
                 self.placement_combo.addItem(mode_label, mode_key)
             placement_row.addWidget(QtWidgets.QLabel("Placement"))
             placement_row.addWidget(self.placement_combo, 1)
-            placement_row.addSpacing(8)
-            placement_row.addWidget(QtWidgets.QLabel("Card Width"))
+            placement_layout.addLayout(placement_row)
+            size_row = ResponsiveRow()
+            size_row.addWidget(QtWidgets.QLabel("Card Width"))
             self.card_width_spin = QtWidgets.QDoubleSpinBox()
             self.card_width_spin.setRange(0.1, 10000.0)
             self.card_width_spin.setDecimals(2)
             self.card_width_spin.setSingleStep(0.25)
-            placement_row.addWidget(self.card_width_spin)
-            placement_row.addWidget(QtWidgets.QLabel("Back Distance"))
+            size_row.addWidget(self.card_width_spin)
+            size_row.addWidget(QtWidgets.QLabel("Back Distance"))
             self.depth_offset_spin = QtWidgets.QDoubleSpinBox()
             self.depth_offset_spin.setRange(0.0, 10000.0)
             self.depth_offset_spin.setDecimals(2)
             self.depth_offset_spin.setSingleStep(0.25)
-            placement_row.addWidget(self.depth_offset_spin)
-            placement_row.addWidget(QtWidgets.QLabel("Opacity"))
+            size_row.addWidget(self.depth_offset_spin)
+            size_row.addWidget(QtWidgets.QLabel("Opacity"))
             self.opacity_spin = QtWidgets.QDoubleSpinBox()
             self.opacity_spin.setRange(0.05, 1.0)
             self.opacity_spin.setDecimals(2)
             self.opacity_spin.setSingleStep(0.05)
-            placement_row.addWidget(self.opacity_spin)
-            placement_layout.addLayout(placement_row)
+            size_row.addWidget(self.opacity_spin)
+            placement_layout.addLayout(size_row)
 
             axis_row = QtWidgets.QHBoxLayout()
             axis_row.addWidget(QtWidgets.QLabel("Follow Axes"))
@@ -1759,7 +1762,7 @@ if QtWidgets:
             axis_row.addStretch(1)
             placement_layout.addLayout(axis_row)
 
-            options_row = QtWidgets.QHBoxLayout()
+            options_row = ResponsiveRow()
             self.start_spin = QtWidgets.QSpinBox()
             self.start_spin.setRange(-100000, 100000)
             self.import_audio_check = QtWidgets.QCheckBox("Import Audio Too")
@@ -1774,7 +1777,7 @@ if QtWidgets:
 
             draw_group = QtWidgets.QGroupBox("Draw")
             draw_layout = QtWidgets.QHBoxLayout(draw_group)
-            button_row = QtWidgets.QHBoxLayout()
+            button_row = ResponsiveRow()
             self.import_button = QtWidgets.QPushButton("Make Tracing Card")
             self.open_layers_button = QtWidgets.QPushButton("Open Drawing Manager")
             self.draw_button = QtWidgets.QPushButton("Start Drawing")

@@ -129,10 +129,19 @@ def _open_external_url(url):
 def _maya_main_window():
     if not (MAYA_AVAILABLE and omui and shiboken and QtWidgets):
         return None
+    # Reuse Maya's native wrapper. Never wrap this pointer as QWidget and
+    # then recast it to QMainWindow: that can split Shiboken's ownership graph.
+    app = QtWidgets.QApplication.instance()
+    for candidate in app.topLevelWidgets() if app else []:
+        try:
+            if shiboken.isValid(candidate) and isinstance(candidate, QtWidgets.QMainWindow) and candidate.objectName() == "MayaWindow":
+                return candidate
+        except RuntimeError:
+            continue
     pointer = omui.MQtUtil.mainWindow()
     if pointer is None:
         return None
-    return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget)
+    return shiboken.wrapInstance(int(pointer), QtWidgets.QMainWindow)
 
 
 def _dedupe_preserve_order(items):
@@ -2403,7 +2412,7 @@ def _verify_cleanup(report, clean_transform, clean_shape, new_skin_cluster):
 
 def _format_report(report):
     if not report:
-        return "Pick one skinned mesh, then click Replace Mesh With Frozen Transform Mesh."
+        return "Pick a skinned mesh, then click Fix And Replace Mesh. This replaces the selected mesh."
 
     lines = [
         "Mesh: {0}".format(_short_name(report["source_transform"])),
@@ -2702,13 +2711,13 @@ if QtWidgets:
             main_layout.setSpacing(10)
 
             description = QtWidgets.QLabel(
-                "Track A: select one character root to make a separate corrected copy with joint scales set to 1,1,1. Track B: use the adjacent Skin Transfer action for body-to-clothing or different-topology weights."
+                "Select a mesh to fix its transforms, or a character's top group to copy the whole character."
             )
             description.setWordWrap(True)
             main_layout.addWidget(description)
 
             note = QtWidgets.QLabel(
-                "Track A never edits the source. It preserves world joint transforms, mesh placement and pivots, skin data, and animation where supported. Unsupported drivers are reported and rolled back."
+                "Copy Whole Character keeps the original. If a setup is unsupported, the copy is cancelled and reported."
             )
             note.setWordWrap(True)
             note.setStyleSheet("color: #B8D7FF;")
@@ -2716,12 +2725,12 @@ if QtWidgets:
 
             self.analyze_button = QtWidgets.QPushButton("Check Selected Mesh")
             self.analyze_button.setToolTip("Check the selected skinned mesh and show red, yellow, or green notes.")
-            self.create_button = QtWidgets.QPushButton("Replace Mesh With Frozen Transform Mesh")
+            self.create_button = QtWidgets.QPushButton("Fix And Replace Mesh")
             self.create_button.setMinimumHeight(42)
             self.create_button.setMinimumWidth(0)
             self.create_button.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
             self.create_button.setToolTip("One-click fix: make a verified frozen copy, replace the selected mesh, and keep the old mesh hidden as a backup.")
-            self.character_copy_button = QtWidgets.QPushButton("Track A: Copy Whole Character (Safe)")
+            self.character_copy_button = QtWidgets.QPushButton("Copy Whole Character")
             self.character_copy_button.setMinimumHeight(42)
             self.character_copy_button.setMinimumWidth(0)
             self.character_copy_button.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
@@ -2764,7 +2773,7 @@ if QtWidgets:
             self.report_text.setToolTip("Red means stop. Yellow means check carefully. Green means ready.")
             main_layout.addWidget(self.report_text, 1)
 
-            self.status_label = QtWidgets.QLabel("Pick one character root for Track A, or one skinned mesh for the legacy single-mesh cleanup.")
+            self.status_label = QtWidgets.QLabel("Pick a character's top group to copy it, or one mesh to fix it.")
             self.status_label.setWordWrap(True)
             selectable_flag = _qt_flag("TextInteractionFlag", "TextSelectableByMouse", 0)
             self.status_label.setTextInteractionFlags(selectable_flag)

@@ -1219,6 +1219,12 @@ class AnimationAssistantPanel(_QtWidgetBase):
             "6. Aminate drops the center of gravity straight down onto the floor plane.\n"
             "7. If that projection lands on the support line or inside the support area, the pose is balanced."
         )
+        guide_toggle = QtWidgets.QToolButton()
+        guide_toggle.setText("How it works")
+        guide_toggle.setCheckable(True)
+        guide_toggle.toggled.connect(self.help_box.setVisible)
+        self.help_box.setVisible(False)
+        layout.addWidget(guide_toggle)
         layout.addWidget(self.help_box)
 
         self.status_label = QtWidgets.QLabel("Pick a floor plane, a center of gravity control, and contact points.")

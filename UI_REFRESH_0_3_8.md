@@ -39,6 +39,6 @@ This is the next-version source candidate, including the earlier toolbar hotfixe
 - Qt uses PySide6 with mocked Maya scene queries. These checks do not exercise Maya constraints, native editor pane rendering, actual scene evaluation, callback lifetime in Maya, or drag-and-drop updates.
 - Version metadata, runtime module inclusion and both installer manifest loaders were checked. This is source-level validation, not packaged/installed parity.
 
-## Remaining release gate
+## Integrated release verification, 15 October 2026
 
-`AMINATE_RELEASE_PROCESS.md` requires the canonical reliability/build/package/install checks and same-session Maya GUI update test before any tag or GitHub Release. The public checkout does not contain the canonical build/gate scripts and this environment has no Maya session. Complete those existing gates on the authorised canonical workstation before merging/publishing the v0.3.8 assets. Do not treat mocked Qt evidence as live Maya proof.
+The candidate above was integrated with the private development line. The resulting build has 26 main panels. All panel constructors passed in one Maya 2026.2 session. Actual background accessibility clicks verified the compact, collapsed and expanded History/Layers states at 57, 34 and 126 pixels respectively, with retained widget identity. Selected-only key nudging, undo and safe static-curve cleanup passed on temporary scene fixtures. The versioned installer callback preserved the live UI and requested a restart; it did not hot-reload retained widgets. Package/installed runtime hashes and both manifests matched. The offline tutorial export excludes internal documentation. This evidence supplements the earlier mocked checks; it does not claim exhaustive production-rig coverage.

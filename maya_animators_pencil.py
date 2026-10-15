@@ -277,7 +277,7 @@ def _maya_main_qt_window():
         return None
     try:
         pointer = omui.MQtUtil.mainWindow()
-        return shiboken.wrapInstance(int(pointer), QtWidgets.QWidget) if pointer else None
+        return shiboken.wrapInstance(int(pointer), QtWidgets.QMainWindow) if pointer else None
     except Exception:
         return None
 
@@ -1053,6 +1053,18 @@ def _active_model_panel(include_reference_viewer=False):
             return focused
     except Exception:
         pass
+    if os.name == "nt":
+        visible = []
+        for panel in panels:
+            geometry = _native_viewport_geometry(_model_panel_native_window(panel))
+            if geometry is None:
+                continue
+            visible.append((panel, geometry))
+            if geometry["cursor_inside"]:
+                return panel
+        if visible:
+            return max(visible, key=lambda item: item[1]["width"] * item[1]["height"])[0]
+        return panels[0] if panels else ""
     visible = []
     if QtGui and QtWidgets:
         try:
@@ -1089,6 +1101,9 @@ def _active_model_panel_size():
 def _active_model_viewport_size():
     """Return the logical QmayaGLWidget size for the active model panel."""
     panel = _active_model_panel()
+    if os.name == "nt":
+        geometry = _native_viewport_geometry(_model_panel_native_window(panel))
+        return geometry["logical_size"] if geometry else _active_model_panel_size()
     widget = _model_panel_viewport_widget(panel)
     if widget:
         try:
@@ -1515,6 +1530,8 @@ def _active_m3dview_widget(include_reference_viewer=False):
             omui.M3dView.getM3dViewFromModelPanel(panel, view)
         else:
             view = omui.M3dView.active3dView()
+        if os.name == "nt":
+            return view, None
         pointer = view.widget()
         widget = shiboken.wrapInstance(int(pointer), QtWidgets.QWidget) if pointer else None
         return view, widget if _qt_object_valid(widget) else None
@@ -1533,6 +1550,17 @@ def _active_m3dview_cursor_point(view=None, widget=None):
     if not (MAYA_AVAILABLE and omui and QtCore and QtGui and QtWidgets and shiboken):
         return None, None
     try:
+        if os.name == "nt":
+            if view is None:
+                view, _widget = _active_m3dview_widget(include_reference_viewer=True)
+            geometry = _native_viewport_geometry(int(view.window())) if view else None
+            if not geometry or not geometry["cursor_inside"]:
+                return view, None
+            local_x, local_y = geometry["cursor_local"]
+            port_width, port_height = max(int(view.portWidth()), 1), max(int(view.portHeight()), 1)
+            x = int(round(local_x * port_width / geometry["width"]))
+            y = int(round((geometry["height"] - local_y) * port_height / geometry["height"]))
+            return view, (max(0, min(x, port_width - 1)), max(0, min(y, port_height - 1)))
         view, widget = (view, widget) if view and _qt_object_valid(widget) else _active_m3dview_widget(include_reference_viewer=True)
         if not _qt_object_valid(widget):
             return view, None
@@ -1562,6 +1590,15 @@ def _active_m3dview_logical_cursor_point(view=None, widget=None):
     if not (MAYA_AVAILABLE and QtCore and QtGui and QtWidgets and shiboken):
         return None
     try:
+        if os.name == "nt":
+            if view is None:
+                view, _widget = _active_m3dview_widget(include_reference_viewer=True)
+            geometry = _native_viewport_geometry(int(view.window())) if view else None
+            if not geometry or not geometry["cursor_inside"]:
+                return None
+            x, y = geometry["cursor_local"]
+            scale = geometry["scale"]
+            return int(round(x / scale)), int(round((geometry["height"] - y) / scale)), 0.0
         view, widget = (view, widget) if view and _qt_object_valid(widget) else _active_m3dview_widget(include_reference_viewer=True)
         if not _qt_object_valid(widget):
             return None
@@ -1597,8 +1634,9 @@ def _screen_to_layer_point(layer_node, screen_point, mapping_cache=None):
                 # with an unrelated focused panel after a dock click.
                 x = int(round(float(screen_point[0])))
                 y = int(round(float(screen_point[1])))
-                logical_width = (mapping_cache.get("logical_width") if mapping_cache else None) or (max(float(widget.width()), 1.0) if _qt_object_valid(widget) else _active_model_viewport_size()[0])
-                logical_height = (mapping_cache.get("logical_height") if mapping_cache else None) or (max(float(widget.height()), 1.0) if _qt_object_valid(widget) else _active_model_viewport_size()[1])
+                logical_size = _m3dview_logical_size(view, widget)
+                logical_width = (mapping_cache.get("logical_width") if mapping_cache else None) or logical_size[0]
+                logical_height = (mapping_cache.get("logical_height") if mapping_cache else None) or logical_size[1]
                 port_width = (mapping_cache.get("port_width") if mapping_cache else None) or (max(float(view.portWidth()), 1.0) if view else logical_width)
                 port_height = (mapping_cache.get("port_height") if mapping_cache else None) or (max(float(view.portHeight()), 1.0) if view else logical_height)
                 x = int(round(float(x) * port_width / logical_width))
@@ -2213,7 +2251,9 @@ class AnimatorsPencilController(object):
         except Exception:
             return False
 
-    def active_layer(self):
+    def active_layer(self, create=True):
+        if not create and not cmds.objExists(ROOT_GROUP_NAME):
+            return ""
         state = _get_json_attr(self.root(), ROOT_STATE_ATTR, {}) or {}
         layer = state.get("active_layer")
         if layer and cmds.objExists(layer):
@@ -2221,7 +2261,7 @@ class AnimatorsPencilController(object):
         layers = self.layers(include_count=False)
         if layers:
             return layers[0]["node"]
-        return self.create_layer("Pencil Layer")
+        return self.create_layer("Pencil Layer") if create else ""
 
     def active_layer_for_camera(self, preferred_layer=None, create=True, camera=None, layer_data=None):
         camera = camera or _current_camera()
@@ -2411,8 +2451,8 @@ class AnimatorsPencilController(object):
 
     def shape_library(self):
         library = {name: dict(data) for name, data in SHAPE_LIBRARY.items()}
-        if MAYA_AVAILABLE:
-            custom = _get_json_attr(self.root(), SHAPE_PRESETS_ATTR, {}) or {}
+        if MAYA_AVAILABLE and cmds.objExists(ROOT_GROUP_NAME):
+            custom = _get_json_attr(ROOT_GROUP_NAME, SHAPE_PRESETS_ATTR, {}) or {}
             for name, data in custom.items():
                 if isinstance(data, dict) and data.get("points"):
                     entry = dict(data)
@@ -2421,9 +2461,9 @@ class AnimatorsPencilController(object):
         return library
 
     def shape_presets(self):
-        if not MAYA_AVAILABLE:
+        if not MAYA_AVAILABLE or not cmds.objExists(ROOT_GROUP_NAME):
             return {}
-        return _get_json_attr(self.root(), SHAPE_PRESETS_ATTR, {}) or {}
+        return _get_json_attr(ROOT_GROUP_NAME, SHAPE_PRESETS_ATTR, {}) or {}
 
     def save_shape_preset(self, name, mark=None):
         name = (name or "").strip()
@@ -2473,12 +2513,11 @@ class AnimatorsPencilController(object):
         )
 
     def swatches(self):
-        if not MAYA_AVAILABLE:
+        if not MAYA_AVAILABLE or not cmds.objExists(ROOT_GROUP_NAME):
             return [list(color) for color in DEFAULT_COLORS.values()]
-        values = _get_json_attr(self.root(), SWATCHES_ATTR, None)
+        values = _get_json_attr(ROOT_GROUP_NAME, SWATCHES_ATTR, None)
         if not isinstance(values, list) or not values:
             values = [list(color) for color in DEFAULT_COLORS.values()]
-            _set_json_attr(self.root(), SWATCHES_ATTR, values)
         return [list(value) for value in values if isinstance(value, (list, tuple)) and len(value) == 3]
 
     def save_swatch(self, color):
@@ -3080,6 +3119,11 @@ class AnimatorsPencilController(object):
     def _capture_drag_cursor_tail(self, layer=None):
         """Sample the actual cursor in the cached draw widget after a hitch."""
         if not getattr(self, "_drag_capture_active", False):
+            return False
+        # Posted dragger events can move independently of the physical pointer.
+        # Only supplement Windows callbacks while the real mouse is held;
+        # release still appends Maya's own dragPoint through the normal path.
+        if os.name == "nt" and not _native_pointer_left_button_down():
             return False
         layer = layer or self._drag_options.get("layer_node") or self.active_layer()
         if not layer or not cmds.objExists(layer):
@@ -4205,8 +4249,7 @@ class AnimatorsPencilController(object):
             view, widget = _active_m3dview_widget(include_reference_viewer=True)
             if view is None:
                 return None
-            logical_width = max(float(widget.width()), 1.0) if _qt_object_valid(widget) else _active_model_viewport_size()[0]
-            logical_height = max(float(widget.height()), 1.0) if _qt_object_valid(widget) else _active_model_viewport_size()[1]
+            logical_width, logical_height = _m3dview_logical_size(view, widget)
             port_width = max(float(view.portWidth()), 1.0)
             port_height = max(float(view.portHeight()), 1.0)
             layer_matrix = om.MMatrix()
@@ -4823,11 +4866,26 @@ class AnimatorsPencilController(object):
         self._status("Live Onion Skin enabled.")
         return self._onion_job
 
+    def shutdown(self):
+        """Disconnect runtime observers without editing drawing or ghost nodes."""
+        self._stop_drag_cursor_capture()
+        self._remove_marquee_selection_monitor()
+        job = int(self._onion_job or 0)
+        self._onion_job = 0
+        self._onion_options = {}
+        if job and MAYA_AVAILABLE:
+            try:
+                if cmds.scriptJob(exists=job):
+                    cmds.scriptJob(kill=job, force=True)
+            except Exception:
+                pass
+        self.status_callback = None
+
     def disable_onion_skin(self):
         if self._onion_job:
             try:
                 if cmds.scriptJob(exists=self._onion_job):
-                    cmds.scriptJob(kill=self._onion_job)
+                    cmds.scriptJob(kill=self._onion_job, force=True)
             except Exception:
                 pass
         self._onion_job = 0
@@ -4966,6 +5024,165 @@ class AnimatorsPencilShapeLibraryWindow(QtWidgets.QDialog):
             self._build_buttons()
 
 
+def _native_pointer_left_button_down():
+    """Check physical mouse state without borrowing native Qt objects."""
+    try:
+        import ctypes
+        get_state = getattr(_native_pointer_left_button_down, "_get_state", None)
+        if get_state is None:
+            get_state = ctypes.WinDLL("user32", use_last_error=True).GetAsyncKeyState
+            get_state.argtypes = [ctypes.c_int]
+            get_state.restype = ctypes.c_short
+            _native_pointer_left_button_down._get_state = get_state
+        return bool(get_state(0x01) & 0x8000)
+    except Exception:
+        return False
+
+
+def _native_viewport_geometry(handle):
+    """Read an existing visible HWND in physical pixels, without Qt wrappers."""
+    if not handle:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = getattr(_native_viewport_geometry, "_user32", None)
+        if user32 is None:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            for name in ("IsWindow", "IsWindowVisible", "GetDpiForWindow"):
+                function = getattr(user32, name)
+                function.argtypes = [wintypes.HWND]
+                function.restype = wintypes.UINT
+            user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+            user32.GetWindowRect.restype = wintypes.BOOL
+            user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+            user32.GetCursorPos.restype = wintypes.BOOL
+            _native_viewport_geometry._user32 = user32
+        if not (user32.IsWindow(handle) and user32.IsWindowVisible(handle)):
+            return None
+        bounds, cursor = wintypes.RECT(), wintypes.POINT()
+        if not user32.GetWindowRect(handle, ctypes.byref(bounds)):
+            return None
+        width, height = bounds.right - bounds.left, bounds.bottom - bounds.top
+        if width <= 0 or height <= 0:
+            return None
+        has_cursor = bool(user32.GetCursorPos(ctypes.byref(cursor)))
+        x, y = cursor.x - bounds.left, cursor.y - bounds.top
+        scale = float(user32.GetDpiForWindow(handle) or 96) / 96.0
+        return {"width": float(width), "height": float(height), "scale": scale,
+                "logical_size": (width / scale, height / scale),
+                "cursor_local": (float(x), float(y)),
+                "cursor_inside": has_cursor and 0 <= x < width and 0 <= y < height}
+    except Exception:
+        return None
+
+
+def _m3dview_logical_size(view, widget=None):
+    if os.name == "nt":
+        geometry = _native_viewport_geometry(int(view.window())) if view else None
+        if geometry:
+            return geometry["logical_size"]
+    elif _qt_object_valid(widget):
+        return max(float(widget.width()), 1.0), max(float(widget.height()), 1.0)
+    return _active_model_viewport_size()
+
+
+def _model_panel_native_window(panel_name):
+    """Read Maya's existing viewport HWND without borrowing any Qt wrappers."""
+    if not (MAYA_AVAILABLE and omui and panel_name):
+        return 0
+    try:
+        view = omui.M3dView()
+        omui.M3dView.getM3dViewFromModelPanel(panel_name, view)
+        return int(view.window() or 0)
+    except Exception:
+        return 0
+
+
+class _PencilWindowsNavigationFilter(QtCore.QAbstractNativeEventFilter):
+    """Read mouse MSGs without converting native viewport QObjects to Python."""
+
+    def __init__(self, panel):
+        super(_PencilWindowsNavigationFilter, self).__init__()
+        import ctypes
+        from ctypes import wintypes
+        self._ctypes = ctypes
+        self._message_type = wintypes.MSG
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self._get_key_state = user32.GetKeyState
+        self._get_key_state.argtypes = [ctypes.c_int]
+        self._get_key_state.restype = ctypes.c_short
+        self._is_window = user32.IsWindow
+        self._is_window.argtypes = [wintypes.HWND]
+        self._is_window.restype = wintypes.BOOL
+        self._is_window_visible = user32.IsWindowVisible
+        self._is_window_visible.argtypes = [wintypes.HWND]
+        self._is_window_visible.restype = wintypes.BOOL
+        self.panel = panel
+        self._panels_by_handle = {}
+        self._app = None
+        self._clear_callback = self.clear
+        panel.destroyed.connect(self._clear_callback)
+
+    def set_panels(self, panels_by_handle):
+        self._panels_by_handle = dict(panels_by_handle)
+        if not self._panels_by_handle:
+            self.clear()
+            return
+        if self._app is None:
+            app = QtCore.QCoreApplication.instance()
+            if _qt_object_valid(app):
+                app.installNativeEventFilter(self)
+                app.aboutToQuit.connect(self._clear_callback)
+                self._app = app
+
+    def clear(self, *_args):
+        # Clear targets before detaching so reentrant delivery does no work.
+        self._panels_by_handle = {}
+        app = self._app
+        self._app = None
+        if _qt_object_valid(app):
+            app.removeNativeEventFilter(self)
+            try:
+                app.aboutToQuit.disconnect(self._clear_callback)
+            except (RuntimeError, TypeError):
+                pass
+
+    def nativeEventFilter(self, event_type, message):
+        try:
+            if bytes(event_type) != b"windows_generic_MSG" or not self._panels_by_handle:
+                return False, 0
+            address = int(message)
+            if not address:
+                return False, 0
+            msg = self._message_type.from_address(address)
+            message_id = int(msg.message)
+            # Button down, drag move, and wheel match the existing Qt route.
+            if message_id not in (0x0200, 0x0201, 0x0204, 0x0207, 0x020A, 0x020E):
+                return False, 0
+            handle = int(msg.hWnd or 0)
+            panel_name = self._panels_by_handle.get(handle)
+            if not (panel_name and _qt_object_valid(self.panel)):
+                return False, 0
+            if not (self._is_window(handle) and self._is_window_visible(handle)):
+                return False, 0
+            has_alt = bool(self._get_key_state(0x12) & 0x8000)
+            if message_id in (0x020A, 0x020E):
+                navigate = has_alt
+            elif message_id == 0x0200:
+                buttons = int(msg.wParam) & 0x0013  # MK_LBUTTON | MK_RBUTTON | MK_MBUTTON
+                navigate = bool(buttons) if has_alt else bool(buttons & 0x0010)
+            else:
+                navigate = has_alt or message_id == 0x0207
+            # Resolve through Maya again before acting, rejecting reused HWNDs.
+            if navigate and _model_panel_native_window(panel_name) == handle:
+                self.panel._prepare_viewport_navigation(panel_name=panel_name)
+        except Exception:
+            # Native input always continues to Maya, including on stale UI.
+            pass
+        return False, 0
+
+
 class AnimatorsPencilViewportNavigationFilter(QtCore.QObject):
     """Switch one fixed Pencil View to persp before Maya handles navigation."""
 
@@ -4973,29 +5190,31 @@ class AnimatorsPencilViewportNavigationFilter(QtCore.QObject):
         super(AnimatorsPencilViewportNavigationFilter, self).__init__(panel)
         self.panel = panel
         self._widgets = []
+        self._native_filter = _PencilWindowsNavigationFilter(panel) if os.name == "nt" else None
 
     def refresh(self):
         if not MAYA_AVAILABLE:
             self.clear()
             return
+        if self._native_filter is not None:
+            panels_by_handle = {}
+            for panel_name in cmds.getPanel(type="modelPanel") or []:
+                handle = _model_panel_native_window(panel_name)
+                if handle and self._native_filter._is_window(handle) and self._native_filter._is_window_visible(handle):
+                    panels_by_handle.setdefault(handle, panel_name)
+            self._native_filter.set_panels(panels_by_handle)
+            return
         resolved = []
+        resolved_ids = set()
         for panel_name in cmds.getPanel(type="modelPanel") or []:
             widget = _model_panel_viewport_widget(panel_name)
             if not (_qt_object_valid(widget) and widget.isVisible()):
                 continue
-            candidates = [widget]
-            owner = widget.parentWidget()
-            while _qt_object_valid(owner):
-                candidates.append(owner)
-                if str(owner.objectName() or "") == panel_name:
-                    break
-                owner = owner.parentWidget()
-            resolved_ids = {id(candidate) for candidate in resolved}
-            for candidate in candidates:
-                if id(candidate) not in resolved_ids:
-                    resolved.append(candidate)
-                    resolved_ids.add(id(candidate))
-        resolved_ids = {id(widget) for widget in resolved}
+            # Observe the viewport itself. Ancestors can reach Maya's main
+            # window and expose unrelated native Qt objects to Python.
+            if id(widget) not in resolved_ids:
+                resolved.append(widget)
+                resolved_ids.add(id(widget))
         for widget in list(self._widgets):
             if id(widget) not in resolved_ids or not _qt_object_valid(widget):
                 try:
@@ -5016,6 +5235,10 @@ class AnimatorsPencilViewportNavigationFilter(QtCore.QObject):
                 continue
 
     def clear(self):
+        if self._native_filter is not None:
+            self._native_filter.clear()
+            self._widgets = []
+            return
         for widget in list(self._widgets):
             try:
                 if _qt_object_valid(widget):
@@ -5231,7 +5454,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self._reflow_action_groups()
         self._install_shortcuts()
         if MAYA_AVAILABLE:
-            self.current_layer = self.controller.active_layer()
+            self.current_layer = self.controller.active_layer(create=False)
             self._restore_video_draw_over_state()
         self.refresh_drawing_views()
         self.refresh_layers()
@@ -5248,9 +5471,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
 
         intro = QtWidgets.QLabel(
-            "Choose a tool and colour, then press Start Drawing once. Aminate saves the current angle as a fixed Pencil "
-            "View and draws on its camera layer. Tool, colour, size, opacity, and layer changes update the next stroke. "
-            "New marks use the current frame by default. Press E for current-layer erasure."
+            "Choose a tool and colour. Click Start Drawing, then drag in the view. Press E to erase."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -5498,21 +5719,21 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
                 widget.setSizePolicy(size_policy)
         # Two columns are enough for every control and avoid summing three
         # intrinsic widget widths into a hard minimum wider than a 360px dock.
-        # The long package action and status keep a full row, so no text is
-        # clipped when the panel is narrow.
-        video_layout.addWidget(self.attach_video_button, 0, 0)
-        video_layout.addWidget(self.video_display_combo, 0, 1)
-        video_layout.addWidget(self.video_placement_combo, 1, 0)
-        video_layout.addWidget(self.video_scale_spin, 1, 1)
-        video_layout.addWidget(self.video_start_frame_spin, 2, 0)
-        video_layout.addWidget(self.video_opacity_spin, 2, 1)
-        video_layout.addWidget(self.video_line_opacity_spin, 3, 0)
-        video_layout.addWidget(self.video_include_audio_box, 3, 1)
-        video_layout.addWidget(self.video_keep_strokes_on_top_box, 4, 0)
-        video_layout.addWidget(self.show_pencil_view_button, 4, 1)
-        video_layout.addWidget(self.package_annotated_scene_button, 5, 0, 1, 2)
-        video_layout.addWidget(self.video_source_status, 6, 0)
-        video_layout.addWidget(self.clear_video_status_button, 6, 1)
+        # Give the display mode its own full row so the complete selected mode
+        # stays readable independently of the numeric controls' column widths.
+        video_layout.addWidget(self.attach_video_button, 0, 0, 1, 2)
+        video_layout.addWidget(self.video_display_combo, 1, 0, 1, 2)
+        video_layout.addWidget(self.video_placement_combo, 2, 0)
+        video_layout.addWidget(self.video_scale_spin, 2, 1)
+        video_layout.addWidget(self.video_start_frame_spin, 3, 0)
+        video_layout.addWidget(self.video_opacity_spin, 3, 1)
+        video_layout.addWidget(self.video_line_opacity_spin, 4, 0)
+        video_layout.addWidget(self.video_include_audio_box, 4, 1)
+        video_layout.addWidget(self.video_keep_strokes_on_top_box, 5, 0)
+        video_layout.addWidget(self.show_pencil_view_button, 5, 1)
+        video_layout.addWidget(self.package_annotated_scene_button, 6, 0, 1, 2)
+        video_layout.addWidget(self.video_source_status, 7, 0)
+        video_layout.addWidget(self.clear_video_status_button, 7, 1)
         for column in range(2):
             video_layout.setColumnStretch(column, 1)
         layout.addWidget(self.video_draw_over_group)
@@ -7644,10 +7865,11 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
     def _set_status(self, message):
         self.status_label.setText(message)
 
-    def _prepare_viewport_navigation(self, viewport_widget):
+    def _prepare_viewport_navigation(self, viewport_widget=None, panel_name=""):
         if not MAYA_AVAILABLE:
             return False
-        panel_name = _model_panel_for_viewport_widget(viewport_widget) if _qt_object_valid(viewport_widget) else ""
+        if not panel_name:
+            panel_name = _model_panel_for_viewport_widget(viewport_widget) if _qt_object_valid(viewport_widget) else ""
         if not panel_name:
             panel_name = _active_model_panel()
         if not panel_name or panel_name == REFERENCE_VIEWER_PANEL_NAME:
@@ -7661,7 +7883,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         drawing_was_enabled = bool(self._drawing_enabled)
         if drawing_was_enabled:
             self._set_drawing_enabled(False, restore_tool=True, update_status=False)
-        switched = _set_camera_for_viewport_widget(viewport_widget, perspective_camera)
+        switched = _set_camera_for_viewport_widget(viewport_widget, perspective_camera) if _qt_object_valid(viewport_widget) else False
         if not switched:
             # The panel itself remains valid even when its Qt viewport wrapper
             # was deleted during a Maya layout/camera rebuild.  Switch through
@@ -7803,6 +8025,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
             self._set_start_button_state(True)
             return self._activate_drag_draw(force=True)
 
+        self.controller._stop_drag_cursor_capture()
         was_enabled = self._drawing_enabled
         self._drawing_enabled = False
         self._viewport_input_mode = ""
@@ -8079,6 +8302,7 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         if context_active:
             self._viewport_input_mode = "draw"
             return
+        self.controller._stop_drag_cursor_capture()
         self._drawing_enabled = False
         self._viewport_input_mode = ""
         self._set_start_button_state(False)

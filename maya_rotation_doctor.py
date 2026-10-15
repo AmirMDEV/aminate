@@ -195,7 +195,7 @@ def _maya_main_window():
     main_window = omui.MQtUtil.mainWindow()
     if not main_window:
         return None
-    return shiboken.wrapInstance(int(main_window), QtWidgets.QWidget)
+    return shiboken.wrapInstance(int(main_window), QtWidgets.QMainWindow)
 
 
 def _close_existing_window():
