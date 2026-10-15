@@ -2879,6 +2879,8 @@ if QtWidgets:
             self.auto_enabled_checkbox.toggled.connect(self._auto_enabled_toggled)
             self.auto_full_checkbox.toggled.connect(self._auto_full_toggled)
             self.apply_auto_rules_button.clicked.connect(self._apply_auto_snapshot_rules)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'history', locals())
 
         def _set_status(self, message, success=True):
             self.status_label.setText(message)

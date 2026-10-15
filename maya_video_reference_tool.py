@@ -1832,6 +1832,8 @@ if QtWidgets:
             self.placement_combo.currentIndexChanged.connect(self._update_mode_ui)
             self.update_timing_button.clicked.connect(self._update_current_reference_timing)
             self.start_spin.valueChanged.connect(self._start_frame_changed)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'video', locals())
 
         def _auto_use_safe_current_state(self):
             if MAYA_AVAILABLE and not self.controller.camera_name:
@@ -1943,7 +1945,7 @@ if QtWidgets:
             self.use_target_button.setEnabled(target_enabled)
             self.card_width_spin.setEnabled(mode_key != "camera_overlay")
             self.depth_offset_spin.setEnabled(mode_key != "camera_overlay")
-            self.import_button.setText("Make Camera Overlay" if mode_key == "camera_overlay" else "Make Tracing Card")
+            self.import_button.setText("Create / Update Camera Overlay" if mode_key == "camera_overlay" else "Create / Update Tracing Card")
             ready = bool(self.controller.camera_name and self.controller.media_path)
             self.import_button.setEnabled(ready)
             self.import_button.setToolTip(

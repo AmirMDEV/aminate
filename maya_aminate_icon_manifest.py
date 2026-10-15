@@ -51,8 +51,8 @@ WORKFLOW_ICON_MANIFEST = (
         "label": "RM",
         "asset": "icon_reference_manager.svg",
         "accent": "#43D4C0",
-        "purpose": "Collect scene files plus linked assets.",
-        "help": "Save the scene, then build a portable transfer package.",
+        "purpose": "Save and package the scene plus linked assets into a zip.",
+        "help": "One click creates the ZIP and opens its folder. Open the Reference Manager tab for packaging options.",
         "shortcut": None,
     },
     {

@@ -5938,6 +5938,8 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         self.retime_forward_button.clicked.connect(lambda: self.controller.retime_selected(1))
         self.ghost_button.clicked.connect(lambda: self.controller.make_ghosts(self.current_layer))
         self.clear_ghosts_button.clicked.connect(self.controller.clear_ghosts)
+        import maya_aminate_ui
+        maya_aminate_ui.apply(self, 'pencil', locals())
 
     def resizeEvent(self, event):
         try:
@@ -5969,6 +5971,8 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
         top = getattr(self, "layer_top_layout", None)
         if top is not None:
             self._clear_grid_layout(top)
+            for column in range(4):
+                top.setColumnStretch(column, 1 if column < (2 if compact else 4) else 0)
             if compact:
                 top.addWidget(self.layer_name_label, 0, 0)
                 top.addWidget(self.layer_name, 0, 1)
@@ -6044,7 +6048,6 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
             self.size_spin,
             self.opacity_spin,
             self.eraser_mode_combo,
-            self.drawing_settings,
         )
         for widget in widgets:
             self.active_tool_layout.removeWidget(widget)
@@ -6057,7 +6060,6 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
                 (self.size_spin, 4, 0, 1, 2),
                 (self.opacity_spin, 5, 0, 1, 2),
                 (self.eraser_mode_combo, 6, 0, 1, 2),
-                (self.drawing_settings, 7, 0, 1, 2),
             )
         else:
             placements = (
@@ -6068,19 +6070,20 @@ class AnimatorsPencilPanel(QtWidgets.QWidget):
                 (self.size_spin, 1, 2, 1, 1),
                 (self.opacity_spin, 1, 3, 1, 1),
                 (self.eraser_mode_combo, 2, 0, 1, 1),
-                (self.drawing_settings, 2, 1, 1, 3),
             )
-        # A narrow dock gives the active strip eight stacked rows. Explicit
+        for column in range(4):
+            self.active_tool_layout.setColumnStretch(column, 1 if not compact or column < 2 else 0)
+        # A narrow dock gives the active strip stacked rows. Explicit
         # row minimums stop Qt from compressing the swatch row into the Size
         # field when the surrounding Pencil panel is shorter than its content.
         for row in range(8):
-            self.active_tool_layout.setRowMinimumHeight(row, 30 if compact else 0)
+            self.active_tool_layout.setRowMinimumHeight(row, 30 if compact and row < 6 else 0)
         # Keep the stacked compact rows in the scrollable Pencil surface. A
         # fixed-height host must not squeeze them into overlapping one-pixel
         # cells before the outer tab scroll area can take over.
-        self.active_tool_strip.setMinimumHeight(320 if compact else 150)
         for widget, row, column, row_span, column_span in placements:
             self.active_tool_layout.addWidget(widget, row, column, row_span, column_span)
+        self.active_tool_strip.setMinimumHeight(self.active_tool_layout.minimumSize().height())
 
     def _open_shape_library(self):
         if self._shape_library_window is None:

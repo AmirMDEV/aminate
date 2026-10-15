@@ -1026,6 +1026,8 @@ if QtWidgets:
             self.clear_button.clicked.connect(self._clear_preview)
             self.report_tree.itemSelectionChanged.connect(self._update_detail_from_selection)
             self.donate_button.clicked.connect(self._open_donate_url)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'rotation', locals())
 
         def _update_split_direction(self):
             if not getattr(self, "split_layout", None):

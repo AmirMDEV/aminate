@@ -61,6 +61,7 @@ GRAPH_EDITOR_OUTLINER_PANEL_NAME = "aminateFloatingGraphEditorOutlinerPanel"
 GRAPH_EDITOR_PANE_NAME = "aminateFloatingGraphEditorPane"
 _GLOBAL_MANAGER = None
 _GRAPH_EDITOR_RESIZE_FILTER = None
+_GRAPH_EDITOR_SHOW_OUTLINER = True
 
 
 def _qt_object_valid(widget):
@@ -616,8 +617,8 @@ def _attr_names_for_node(node_name):
     return result
 
 
-def channel_records_for_selection():
-    nodes = _selected_nodes()
+def channel_records_for_selection(nodes=None):
+    nodes = _selected_nodes() if nodes is None else nodes
     if not nodes:
         return []
     primary = nodes[0]
@@ -1154,6 +1155,22 @@ def apply_euler_flip_to_graph_editor():
     return success, message
 
 
+def set_graph_editor_outliner_visible(visible):
+    """Reassign existing panes without destroying either native editor."""
+    global _GRAPH_EDITOR_SHOW_OUTLINER
+    graph = cmds.scriptedPanel(GRAPH_EDITOR_PANEL_NAME, query=True, control=True)
+    outliner = cmds.outlinerPanel(GRAPH_EDITOR_OUTLINER_PANEL_NAME, query=True, control=True)
+    if visible:
+        cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, configuration="vertical2")
+        cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, setPane=(outliner, 1))
+        cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, setPane=(graph, 2))
+    else:
+        cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, setPane=(graph, 1))
+        cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, configuration="single")
+    _GRAPH_EDITOR_SHOW_OUTLINER = bool(visible)
+    _resize_graph_editor_split()
+
+
 def _resize_graph_editor_split():
     if not cmds:
         return False
@@ -1169,7 +1186,7 @@ def _resize_graph_editor_split():
             pass
         height = max(GRAPH_EDITOR_MIN_BODY_HEIGHT, int(window_height) - header_height - 4)
         outliner_width = int(min(380, max(220, width * 0.26)))
-        graph_width = max(420, width - outliner_width - 8)
+        graph_width = max(420, width - outliner_width - 8) if _GRAPH_EDITOR_SHOW_OUTLINER else width
         outliner_percent = int(min(45, max(18, round((float(outliner_width) / float(width)) * 100.0))))
         graph_percent = max(10, 100 - outliner_percent)
         try:
@@ -1178,8 +1195,9 @@ def _resize_graph_editor_split():
         except Exception:
             pass
         try:
-            cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, paneSize=(1, outliner_percent, 100))
-            cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, paneSize=(2, graph_percent, 100))
+            if _GRAPH_EDITOR_SHOW_OUTLINER:
+                cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, paneSize=(1, outliner_percent, 100))
+                cmds.paneLayout(GRAPH_EDITOR_PANE_NAME, edit=True, paneSize=(2, graph_percent, 100))
         except Exception:
             pass
         graph_control = ""
@@ -1408,7 +1426,7 @@ def _ensure_graph_editor_window():
             backgroundColor=(0.188, 0.188, 0.188),
         )
         cmds.text(label="Aminate Graph Editor", align="left", font="boldLabelFont", backgroundColor=(0.188, 0.188, 0.188))
-        cmds.text(label="Outliner + native curves  translucent split mode", align="left", backgroundColor=(0.188, 0.188, 0.188))
+        cmds.checkBox(label="Outliner", value=_GRAPH_EDITOR_SHOW_OUTLINER, changeCommand=set_graph_editor_outliner_visible)
         cmds.text(
             label="Hotkey {0}".format(get_graph_editor_hotkey()),
             align="right",
@@ -1483,6 +1501,7 @@ def _ensure_graph_editor_window():
             _schedule_graph_editor_resize()
         except Exception:
             pass
+        set_graph_editor_outliner_visible(_GRAPH_EDITOR_SHOW_OUTLINER)
         _apply_graph_editor_style()
         _apply_graph_editor_opacity()
         _fit_graph_editor_curves()
@@ -1627,6 +1646,8 @@ if QtWidgets:
             self.status_label = QtWidgets.QLabel("")
             self.status_label.setWordWrap(True)
             layout.addWidget(self.status_label)
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'channel', locals())
 
         def show_for_selection(self):
             self.refresh()
@@ -1690,9 +1711,10 @@ if QtWidgets:
             return True
 
         def refresh(self):
+            pinned = getattr(self, "pin_selection_check", None) is not None and self.pin_selection_check.isChecked() and self._target_nodes
             while self.rows_layout.rowCount():
                 self.rows_layout.removeRow(0)
-            nodes = _selected_nodes()
+            nodes = [node for node in self._target_nodes if cmds.objExists(node)] if pinned else _selected_nodes()
             self._target_nodes = list(nodes)
             if not nodes:
                 self.selection_label.setText("Select an object to edit channels.")
@@ -1701,7 +1723,7 @@ if QtWidgets:
             primary = nodes[0]
             suffix = " Editing {0} selected objects.".format(len(nodes)) if len(nodes) > 1 else ""
             self.selection_label.setText("{0}.{1}".format(_short_name(primary), suffix))
-            records = channel_records_for_selection()
+            records = channel_records_for_selection(nodes)
             if not records:
                 self.status_label.setText("No keyable or channel-box attrs found.")
                 return

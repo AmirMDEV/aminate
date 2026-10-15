@@ -1233,6 +1233,8 @@ class AnimationAssistantPanel(_QtWidgetBase):
         self.add_contacts_button.clicked.connect(self._add_contacts)
         self.remove_contacts_button.clicked.connect(self._remove_contacts)
         self.clear_contacts_button.clicked.connect(self._clear_contacts)
+        import maya_aminate_ui
+        maya_aminate_ui.apply(self, 'assistant', locals())
 
     def _sync_from_controller(self):
         config = self.controller.current_configuration()

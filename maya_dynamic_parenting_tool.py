@@ -1729,6 +1729,8 @@ if QtWidgets:
             self.advanced_toggle.toggled.connect(self._toggle_advanced)
             scroll_area.setWidget(content_widget)
             root_layout.addWidget(scroll_area)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'parenting', locals())
 
         def _selected_target_ids(self):
             rows = sorted(set(index.row() for index in self.targets_table.selectionModel().selectedRows()))

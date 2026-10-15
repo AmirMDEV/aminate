@@ -2794,6 +2794,8 @@ if QtWidgets:
             self.character_copy_button.clicked.connect(self._create_whole_character_copy)
             self.replace_button.clicked.connect(self._replace_original)
             self.delete_button.clicked.connect(self._delete_clean_copy)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'skin_cleanup', locals())
 
         def _refresh_report(self):
             self.report_text.setPlainText(self.controller.report_text())

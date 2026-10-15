@@ -2431,7 +2431,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.6")
+            self.version_label = QtWidgets.QLabel("Version 0.3.8")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -2456,6 +2456,8 @@ if QtWidgets:
             self.contacts_table.itemDoubleClicked.connect(self._load_selected_contact)
             scroll_area.setWidget(content_widget)
             root_layout.addWidget(scroll_area)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'surface', locals())
 
         def _selected_table_records(self):
             rows = sorted(set(index.row() for index in self.contacts_table.selectionModel().selectedRows()))

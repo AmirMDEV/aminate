@@ -15,6 +15,7 @@ DEFAULT_RUNTIME_FILES = [
     "aminate_package_manifest.py",
     "maya_aminate_customization.py",
     "maya_aminate_theme.py",
+    "maya_aminate_ui.py",
     "maya_animation_assistant.py",
     "maya_animation_styling.py",
     "maya_aminate_icon_manifest.py",

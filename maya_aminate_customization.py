@@ -362,6 +362,8 @@ if QtWidgets is not None:
             self.reset_button.clicked.connect(self._reset)
             scroll.setWidget(content)
             outer_layout.addWidget(scroll)
+            import maya_aminate_ui
+            maya_aminate_ui.build_customization(self, locals())
 
         def _build_theme_selector(self, parent_layout):
             group = QtWidgets.QGroupBox("Aminate Theme")

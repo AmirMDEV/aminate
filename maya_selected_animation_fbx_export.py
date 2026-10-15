@@ -515,6 +515,8 @@ if QtWidgets:
             buttons.accepted.connect(self._accept_export)
             buttons.rejected.connect(self.reject)
             root.addWidget(buttons)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'fbx', locals())
 
         def _refresh_visible_range(self):
             start, end = current_visible_playback_range(cmds_api=self.cmds_api)

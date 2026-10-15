@@ -1094,6 +1094,8 @@ if QtWidgets:
             self.end_spin.valueChanged.connect(self._schedule_auto_update_note)
             self.opacity_spin.valueChanged.connect(self._handle_opacity_changed)
             self.note_text.textChanged.connect(self._schedule_auto_update_note)
+            import maya_aminate_ui
+            maya_aminate_ui.apply_extra(self, 'notes', locals())
 
         def _build_customization_tab(self):
             settings = self.controller.timeline_customization()

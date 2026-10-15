@@ -1237,7 +1237,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 0, 0, 1, 2)
-            self.version_label = QtWidgets.QLabel("Version 0.3.6")
+            self.version_label = QtWidgets.QLabel("Version 0.3.8")
             footer_layout.addWidget(self.version_label, 1, 0)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -1266,6 +1266,8 @@ if QtWidgets:
             self.reduce_keys_check.toggled.connect(self._sync_to_controller)
             self.pairs_table.itemSelectionChanged.connect(self._on_pair_selection_changed)
             self.pairs_table.itemDoubleClicked.connect(self._load_selected_pair)
+            import maya_aminate_ui
+            maya_aminate_ui.apply(self, 'retarget', locals())
 
         def _clear_layout(self, layout):
             while layout.count():
