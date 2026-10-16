@@ -2,7 +2,13 @@
 
 # Aminate
 
-## Version 0.3.10
+## Version 0.3.11
+
+Hand / Foot Hold Suggest Range now shows frame progress and a Cancel button. Cancelling restores the current frame and keeps your previous range and suggestion. Scans retain normal Maya evaluation for rig correctness; their total cost still depends on the scene.
+
+Verified with a Magpie production rig in one fresh Maya 2026.2 session, including a real Cancel click during a 10,000-frame scan, repeated cancellation and unchanged completed results. History snapshot restore and its recovery checkpoint passed on a disposable saved scene. The main dock, fixed bottom bar, 37 toolbar buttons and installed workflow paths also passed.
+
+### Included from 0.3.10
 
 Controls Retargeter now evaluates each shared source key time once. In a Magpie production-rig comparison, the same output keys and values took 2.92 seconds instead of 4.99 seconds, with 11 scene evaluations instead of 20. Hand / Foot Hold mirror lookup now searches exact opposite names instead of scanning every scene transform.
 
@@ -56,7 +62,7 @@ The sections in regular use in this release are:
 
 There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap and Root Motion. The offline tutorial includes searchable lessons and button help.
 
-`Version 0.3.10`
+`Version 0.3.11`
 
 ## What Was New In 0.3.7
 

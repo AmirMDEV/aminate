@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.3.11 - 2026-10-16
+
+- Add frame progress and Cancel to Hand / Foot Hold Suggest Range. Cancellation preserves the previous range and suggestion and restores the original frame, including callback failures. Normal Maya frame evaluation remains enabled.
+- Reuse the progress dialog across scans and guard against re-entry. Add four cancellation and completed-result regression tests.
+- Verified in one fresh Maya 2026.2 session with the Magpie production rig: actual Suggest Range and Cancel clicks during a 10,000-frame scan, repeated cancellation, unchanged completed results and preserved selection/time. History restored original animation keys and a recovery checkpoint on a disposable saved scene. All 29 workflow modules loaded from the installed runtime; the fixed bottom bar and 37 icon buttons passed.
+- This improves responsiveness and safe interruption. It does not promise faster evaluation of every rig or exhaustive crash-free operation.
+
 ## Version 0.3.10 - 2026-10-15
 
 - Evaluate shared source key times once during Controls Retargeter baking, preserving authored output times and sampling all source values before target writes.

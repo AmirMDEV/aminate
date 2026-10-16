@@ -4,8 +4,8 @@ from __future__ import absolute_import, division, print_function
 LICENSE_FILE_NAME = "LICENSE"
 MANIFEST_FILE_NAME = "manifest.json"
 TUTORIAL_FILE_NAME = "tutorial.html"
-RELEASE_VERSION_LABEL = "Version 0.3.10"
-RELEASE_TAG = "v0.3.10"
+RELEASE_VERSION_LABEL = "Version 0.3.11"
+RELEASE_TAG = "v0.3.11"
 RELEASE_TAG_FILE_SAFE = RELEASE_TAG.replace(".", "_").replace("-", "_")
 INSTALLER_RELEASE_NAME = "Aminate_{0}_drag_this_file_into_Maya.py".format(RELEASE_TAG_FILE_SAFE)
 LEGACY_INSTALLER_RELEASE_NAME = "Aminate drag and drop this onto Maya viewport.py"

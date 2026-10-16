@@ -78,9 +78,9 @@ DOCKED_WORKFLOW_MIN_HEIGHT = 480
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.10"
+VERSION_LABEL = "Version 0.3.11"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
-TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.10/Aminate_v0.3.10_offline_tutorial.zip"
+TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.11/Aminate_v0.3.11_offline_tutorial.zip"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "aminateShelfButton"

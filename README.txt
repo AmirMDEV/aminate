@@ -2,7 +2,7 @@ Aminate release package
 
 How to install or update:
 1. Open Maya.
-2. Drag 'Aminate_v0_3_10_drag_this_file_into_Maya.py' into the Maya viewport.
+2. Drag 'Aminate_v0_3_11_drag_this_file_into_Maya.py' into the Maya viewport.
 3. The tool updates installed files and refreshes the shelf button. In a fresh Maya session it opens Aminate.
 If Aminate is already loaded, the installer preserves the session. Restart Maya before reopening Aminate to load the update.
 Use the versioned drag file above. Maya caches dropped Python files by filename, so the versioned name avoids older installer code being reused in the same Maya session.
@@ -11,7 +11,7 @@ Do not move the installer out of this folder. It needs the aminate_package folde
 If you already installed an older version, drag the new installer into Maya again.
 
 Tutorials:
-The offline tutorial is a separate release asset: Aminate_v0.3.10_offline_tutorial.zip.
+The offline tutorial is a separate release asset: Aminate_v0.3.11_offline_tutorial.zip.
 Download that ZIP from the same GitHub release, extract it, and double-click tutorial.html.
 The Maya installer stays self-contained and does not include the tutorial site.
 

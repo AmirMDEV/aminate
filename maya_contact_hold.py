@@ -249,7 +249,11 @@ def _percentile(values, fraction):
     return ordered[low_index] * (1.0 - blend) + ordered[high_index] * blend
 
 
-def _sample_contact_metrics(control_nodes, start_frame, end_frame, keep_rotation):
+class ContactScanCancelled(Exception):
+    """Abort a read-only scan without committing a partial suggestion."""
+
+
+def _sample_contact_metrics(control_nodes, start_frame, end_frame, keep_rotation, progress_callback=None):
     if end_frame <= start_frame:
         return []
     current_time = float(cmds.currentTime(query=True))
@@ -257,6 +261,8 @@ def _sample_contact_metrics(control_nodes, start_frame, end_frame, keep_rotation
         previous_data = None
         metrics = []
         for frame_value in range(start_frame, end_frame + 1):
+            if progress_callback is not None and progress_callback(frame_value - start_frame, end_frame - start_frame + 1) is False:
+                raise ContactScanCancelled()
             cmds.currentTime(frame_value, edit=True)
             frame_data = {}
             for node_name in control_nodes:
@@ -286,14 +292,16 @@ def _sample_contact_metrics(control_nodes, start_frame, end_frame, keep_rotation
                     }
                 )
             previous_data = frame_data
+        if progress_callback is not None and progress_callback(end_frame - start_frame + 1, end_frame - start_frame + 1) is False:
+            raise ContactScanCancelled()
     finally:
         cmds.currentTime(current_time, edit=True)
     return metrics
 
 
-def _suggest_contact_run(control_nodes, current_frame, keep_rotation):
+def _suggest_contact_run(control_nodes, current_frame, keep_rotation, progress_callback=None):
     playback_start, playback_end = _playback_frame_range()
-    metrics = _sample_contact_metrics(control_nodes, playback_start, playback_end, keep_rotation)
+    metrics = _sample_contact_metrics(control_nodes, playback_start, playback_end, keep_rotation, progress_callback)
     if not metrics:
         return None
 
@@ -1285,7 +1293,7 @@ class MayaContactHoldController(object):
             self.start_frame = self.end_frame
         return True, "End frame set to {0}.".format(int(self.end_frame))
 
-    def suggest_range(self):
+    def suggest_range(self, progress_callback=None):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
         controls = []
@@ -1296,7 +1304,10 @@ class MayaContactHoldController(object):
         if not controls:
             return False, "Pick one or more hand or foot controls first."
 
-        suggestion = _suggest_contact_run(controls, _current_frame(), self.keep_rotation)
+        try:
+            suggestion = _suggest_contact_run(controls, _current_frame(), self.keep_rotation, progress_callback)
+        except ContactScanCancelled:
+            return False, "Contact scan cancelled. Your previous range is unchanged."
         if not suggestion:
             return False, "I could not find a calm planted range in the playback range yet."
 
@@ -1893,10 +1904,33 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _suggest_range(self):
-            self._sync_to_controller()
-            success, message = self.controller.suggest_range()
-            self._sync_from_controller()
-            self._set_status(message, success)
+            if getattr(self, "_contact_scan_active", False):
+                return
+            self._contact_scan_active = True
+            progress = getattr(self, "_contact_scan_progress", None)
+            if progress is None:
+                progress = QtWidgets.QProgressDialog("Preparing contact scan...", "Cancel", 0, 1, self)
+                self._contact_scan_progress = progress
+            progress.reset()
+            progress.setWindowTitle("Suggest Contact Range")
+            progress.setWindowModality(_qt_flag("WindowModality", "ApplicationModal"))
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(False)
+            progress.setAutoReset(False)
+            def report(completed, total):
+                progress.setMaximum(total)
+                progress.setLabelText("Scanning contact poses: {0} / {1} frames".format(completed, total))
+                # A modal progress dialog services Cancel without enabling scene edits.
+                progress.setValue(completed)
+                return not progress.wasCanceled()
+            try:
+                self._sync_to_controller()
+                success, message = self.controller.suggest_range(progress_callback=report)
+                self._sync_from_controller()
+                self._set_status(message, success)
+            finally:
+                progress.hide()
+                self._contact_scan_active = False
 
         def _analyze(self):
             self._sync_to_controller()
