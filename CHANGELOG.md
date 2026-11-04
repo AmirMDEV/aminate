@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.3.12 - 2026-11-04
+
+- Tween Machine now creates keys during slider changes as well as percentage-button clicks, independently of Maya Auto Key. Slider groove clicks choose the clicked percentage. Reusing the popup follows the current controls and frame, including frame zero.
+- Key animated channels directly so a rejected preview setAttr cannot prevent key creation. Failed edits remain retryable.
+- Preserve key order, count and values when Auto Snap moves dense fractional keys to whole frames. Report failed and partial retimes accurately.
+- Preserve imported Timeline Notes identifiers so repeated imports update existing notes instead of duplicating them; report import failures accurately.
+- Add regression checks for automatic keying, retained-popup targeting, absolute slider input, snap collisions, retime failures and note import identity.
+
 ## Version 0.3.11 - 2026-10-16
 
 - Add frame progress and Cancel to Hand / Foot Hold Suggest Range. Cancellation preserves the previous range and suggestion and restores the original frame, including callback failures. Normal Maya frame evaluation remains enabled.

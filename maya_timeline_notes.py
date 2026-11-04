@@ -726,7 +726,7 @@ class MayaTimelineNotesController(object):
         html = "".join(html_parts)
         return "<div style='max-width:{0}px'>{1}</div>".format(int(MAX_TOOLTIP_WIDTH), html)
 
-    def create_note(self, title, start_frame, end_frame, color, opacity, text):
+    def create_note(self, title, start_frame, end_frame, color, opacity, text, export_id=None):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya."
         self.bookmark_api = self.bookmark_api or _ensure_bookmark_api()
@@ -744,7 +744,7 @@ class MayaTimelineNotesController(object):
         _set_string_attr(bookmark, NOTE_TITLE_ATTR, title)
         _set_string_attr(bookmark, NOTE_TEXT_ATTR, text)
         _set_string_attr(bookmark, NOTE_RGB_ATTR, json.dumps([float(value) for value in color]))
-        _set_string_attr(bookmark, NOTE_EXPORT_ID_ATTR, bookmark)
+        _set_string_attr(bookmark, NOTE_EXPORT_ID_ATTR, export_id or bookmark)
         _set_double_attr(bookmark, NOTE_OPACITY_ATTR, opacity)
         self.refresh_timeline_overlay()
         return True, "Added timeline note from frame {0} to {1}.".format(int(start_frame), int(end_frame))
@@ -804,6 +804,7 @@ class MayaTimelineNotesController(object):
         existing = {item["export_id"]: item for item in self.notes()}
         created = 0
         updated = 0
+        failed = 0
         for item in notes:
             export_id = item.get("export_id", "")
             color = tuple(item.get("color") or DEFAULT_NOTE_COLOR)
@@ -820,6 +821,8 @@ class MayaTimelineNotesController(object):
                 )
                 if success:
                     updated += 1
+                else:
+                    failed += 1
             else:
                 success, _message = self.create_note(
                     item.get("title", "Timeline Note"),
@@ -828,11 +831,19 @@ class MayaTimelineNotesController(object):
                     color,
                     opacity,
                     item.get("text", ""),
+                    export_id=export_id,
                 )
                 if success:
                     created += 1
+                    # Later entries in this file must reuse the imported identity.
+                    existing.update({note["export_id"]: note for note in self.notes()})
+                else:
+                    failed += 1
         self.refresh_timeline_overlay()
-        return True, "Imported {0} new note(s) and updated {1} existing note(s).".format(created, updated)
+        message = "Imported {0} new note(s) and updated {1} existing note(s).".format(created, updated)
+        if failed:
+            message += " Failed to import {0} note(s).".format(failed)
+        return bool(created or updated), message
 
 
 class _WindowBase(QtWidgets.QDialog if QtWidgets else object):

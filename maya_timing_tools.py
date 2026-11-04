@@ -3716,7 +3716,12 @@ def _snap_curve_times(node_name, attr_name):
             previous_time = candidate_time
 
     changed = 0
-    for old_time, new_time in zip(unique_times, snapped_times):
+    moves = list(zip(unique_times, snapped_times))
+    # Targets remain ordered and unique. Move earlier keys left first, then
+    # later keys right first, so no edit lands on a key still awaiting its move.
+    moves = ([pair for pair in moves if pair[1] < pair[0]]
+             + list(reversed([pair for pair in moves if pair[1] > pair[0]])))
+    for old_time, new_time in moves:
         delta = float(new_time) - float(old_time)
         if abs(delta) <= 1.0e-8:
             continue
@@ -6018,6 +6023,8 @@ class MayaTimingToolsController(object):
             return False, "Selected controls do not have any keyframes to retime."
         original_time = float(cmds.currentTime(query=True))
         changed_keys = 0
+        failed_curves = 0
+        completed_curves = 0
         try:
             cmds.undoInfo(openChunk=True, chunkName="SceneHelpersRetimeEveryNFrames")
         except Exception:
@@ -6033,7 +6040,9 @@ class MayaTimingToolsController(object):
                 for attr_name in attrs:
                     try:
                         changed_keys += _retime_curve_times(node_name, attr_name, step)
+                        completed_curves += 1
                     except Exception:
+                        failed_curves += 1
                         continue
             all_times = []
             for node_name, attrs in attrs_by_node.items():
@@ -6042,7 +6051,7 @@ class MayaTimingToolsController(object):
                         all_times.extend(float(value) for value in (cmds.keyframe(node_name, attribute=attr_name, query=True, timeChange=True) or []))
                     except Exception:
                         continue
-            if all_times:
+            if all_times and completed_curves:
                 cmds.playbackOptions(edit=True, minTime=min(all_times), maxTime=max(all_times))
         finally:
             try:
@@ -6058,6 +6067,10 @@ class MayaTimingToolsController(object):
                 cmds.undoInfo(closeChunk=True)
             except Exception:
                 pass
+        if not completed_curves:
+            return False, "Retime failed: {0} curve(s) could not be edited.".format(failed_curves)
+        if failed_curves:
+            return False, "Retime partial: {0} key(s) moved; {1} curve(s) could not be edited.".format(changed_keys, failed_curves)
         return True, "Retime complete: {0} key(s) moved to every {1} frame(s); timeline expanded to keyed range.".format(changed_keys, step)
 
     def key_selected_controls_on_union_frames(self, include_translation=True, include_rotation=True, include_other=False):
@@ -6299,7 +6312,7 @@ class MayaTimingToolsController(object):
             else:
                 message = "No settable keyed channels were found for Tween Machine."
             return {"items": [], "message": message, "valid": False}
-        return {"items": items, "time": current_time, "message": "Tween Machine ready.", "valid": True}
+        return {"items": items, "time": current_time, "nodes": list(nodes), "message": "Tween Machine ready.", "valid": True}
 
     def apply_tween_machine(self, percent, context=None, key=True):
         if not MAYA_AVAILABLE:
@@ -6313,7 +6326,8 @@ class MayaTimingToolsController(object):
         items = list((context or {}).get("items") or [])
         if not items:
             return False, (context or {}).get("message") or "Tween Machine needs a previous and next key around the current frame."
-        current_time = float((context or {}).get("time") or cmds.currentTime(query=True))
+        context_time = context.get("time")
+        current_time = float(cmds.currentTime(query=True) if context_time is None else context_time)
         changed_attrs = 0
         values_by_index = []
         items_by_node_attr = {}
@@ -6337,7 +6351,9 @@ class MayaTimingToolsController(object):
                 ("rotate", ("rotateX", "rotateY", "rotateZ")),
                 ("scale", ("scaleX", "scaleY", "scaleZ")),
             )
-            for node_name, attr_map in items_by_node_attr.items():
+            # Key animated plugs directly. setAttr can be refused by a rig's
+            # animation connections even when setKeyframe can author the key.
+            for node_name, attr_map in (() if key else items_by_node_attr.items()):
                 for compound_attr, component_attrs in compound_sets:
                     if not all(attr_name in attr_map for attr_name in component_attrs):
                         continue
@@ -6362,9 +6378,10 @@ class MayaTimingToolsController(object):
                     continue
                 plug = item.get("plug") or "{0}.{1}".format(item.get("node"), item.get("attribute"))
                 try:
-                    cmds.setAttr(plug, tween_value)
                     if key:
                         cmds.setKeyframe(item.get("node"), attribute=item.get("attribute"), time=current_time, value=tween_value)
+                    else:
+                        cmds.setAttr(plug, tween_value)
                     changed_attrs += 1
                 except Exception:
                     continue
@@ -7473,6 +7490,43 @@ if QtWidgets:
         popup.move(int(x_pos), int(y_pos))
 
 
+    class TweenMachineSlider(QtWidgets.QSlider):
+        """Click to an exact percentage; preserve native keyboard controls."""
+
+        def _set_from_mouse(self, event):
+            option = QtWidgets.QStyleOptionSlider()
+            self.initStyleOption(option)
+            handle = self.style().subControlRect(
+                QtWidgets.QStyle.CC_Slider, option, QtWidgets.QStyle.SC_SliderHandle, self)
+            position = event.position().x() if hasattr(event, "position") else event.pos().x()
+            span = max(1, self.width() - handle.width())
+            self.setValue(QtWidgets.QStyle.sliderValueFromPosition(
+                self.minimum(), self.maximum(), int(position - handle.width() / 2), span, option.upsideDown))
+
+        def mousePressEvent(self, event):
+            if event.button() == QtCore.Qt.LeftButton:
+                self.setSliderDown(True)
+                self._set_from_mouse(event)
+                event.accept()
+                return
+            super(TweenMachineSlider, self).mousePressEvent(event)
+
+        def mouseMoveEvent(self, event):
+            if self.isSliderDown():
+                self._set_from_mouse(event)
+                event.accept()
+                return
+            super(TweenMachineSlider, self).mouseMoveEvent(event)
+
+        def mouseReleaseEvent(self, event):
+            if event.button() == QtCore.Qt.LeftButton and self.isSliderDown():
+                self._set_from_mouse(event)
+                self.setSliderDown(False)
+                event.accept()
+                return
+            super(TweenMachineSlider, self).mouseReleaseEvent(event)
+
+
     class TweenMachinePopup(QtWidgets.QDialog):
         def __init__(self, controller, status_callback=None, post_apply_callback=None, parent=None):
             super(TweenMachinePopup, self).__init__(parent or _maya_main_window())
@@ -7621,7 +7675,7 @@ if QtWidgets:
             title.setObjectName("tweenMachineTitle")
             header.addWidget(title)
 
-            self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            self.slider = TweenMachineSlider(QtCore.Qt.Horizontal)
             self.slider.setObjectName("toolkitBarTweenMachineSlider")
             self.slider.setRange(0, 100)
             self.slider.setValue(50)
@@ -7673,14 +7727,24 @@ if QtWidgets:
         def _apply_current_value(self, create_history=True):
             if self._apply_timer.isActive():
                 self._apply_timer.stop()
+            # The popup can remain open while selection or frame changes.
+            # Never send a delayed slider edit to its old controls or frame.
+            if MAYA_AVAILABLE:
+                nodes = _selected_transform_nodes()
+                current_time = float(cmds.currentTime(query=True))
+                if (not self.context.get("valid")
+                        or nodes != self.context.get("nodes")
+                        or current_time != self.context.get("time")):
+                    self.context = self.controller.build_tween_machine_context()
+                    self._last_applied_value = None
             if self._last_applied_value == self.slider.value() and not create_history:
                 return
-            self._last_applied_value = self.slider.value()
             success, message = self.controller.apply_tween_machine(
                 self.slider.value(),
                 context=self.context,
-                key=bool(create_history),
+                key=True,
             )
+            self._last_applied_value = self.slider.value() if success else None
             self.setToolTip(message)
             if self.status_callback:
                 self.status_callback(message, success)
@@ -9388,7 +9452,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.11")
+            self.version_label = QtWidgets.QLabel("Version 0.3.12")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)

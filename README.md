@@ -2,7 +2,15 @@
 
 # Aminate
 
-## Version 0.3.11
+## Version 0.3.12
+
+Tween Machine now creates keys on the selected controls when you click a percentage, click the slider groove, or drag the slider, even with Maya Auto Key disabled. Groove clicks choose the clicked percentage directly. The retained popup refreshes its target when selection or frame changes, and frame zero is supported.
+
+This release also preserves keys during whole-frame snapping, reports failed retimes accurately, and prevents duplicate Timeline Notes when importing the same exported notes again.
+
+Verified in one fresh Maya 2026.2 session using the installed runtime: all 26 panels, all 37 toolbar commands/icons, real Tween Machine mouse gestures, and representative animation, rigging, skinning, contact, retargeting and timeline workflows. The package gate passed 41 checks. This is representative coverage, not a claim that every third-party rig and media format has been exercised.
+
+### Included from 0.3.11
 
 Hand / Foot Hold Suggest Range now shows frame progress and a Cancel button. Cancelling restores the current frame and keeps your previous range and suggestion. Scans retain normal Maya evaluation for rig correctness; their total cost still depends on the scene.
 
