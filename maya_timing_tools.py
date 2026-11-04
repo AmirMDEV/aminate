@@ -283,6 +283,7 @@ TEACHER_RIG_DUPLICATE_GROUP_SUFFIX = "_OFFSET_GRP"
 TEACHER_RIG_DUPLICATE_LAYER_NAME = "aminateTeacherDuplicate_LYR"
 TEACHER_RIG_DUPLICATE_MARKER_ATTR = "aminateTeacherDemoDuplicate"
 TEACHER_RIG_DUPLICATE_SOURCE_ATTR = "teacherDemoSource"
+TEACHER_RIG_DUPLICATE_OWNED_UUIDS_ATTR = "teacherDemoOwnedNodeUuidsJson"
 TEACHER_RIG_DUPLICATE_EDIT_BASELINE_ATTR = "teacherDemoEditBaselineJson"
 TEACHER_RIG_DUPLICATE_EDIT_LOG_TEXT_ATTR = "teacherDemoEditLogText"
 TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME = "aminateTeacherDemoEditLog_GRP"
@@ -508,11 +509,82 @@ def _copy_keyed_attributes(source_node, target_node):
     return copied_attrs
 
 
-def _copy_hierarchy_keyframes(source_root, duplicate_root):
-    source_nodes = _dag_hierarchy_in_order(source_root)
-    duplicate_nodes = _dag_hierarchy_in_order(duplicate_root)
+def _teacher_duplicate_hierarchy_pairs(source_root, duplicate_root):
+    """Match DAG parents and visible shapes by names and unambiguous identity.
+
+    Upstream duplication can reorder unrelated DAG branches and Maya can rename
+    shape suffixes. Global traversal order is therefore not a node identity.
+    """
+    pairs = []
+
+    def _walk(source, target):
+        if cmds.nodeType(source) != cmds.nodeType(target):
+            raise RuntimeError("The duplicate hierarchy has a different node type.")
+        pairs.append((source, target))
+        # NURBS underworld dimensions use "surface->|node" paths; these are
+        # construction helpers, not children in the duplicated character DAG.
+        source_children = [n for n in (cmds.listRelatives(source, children=True, fullPath=True) or [])
+                           if n.startswith(source + "|")]
+        target_children = [n for n in (cmds.listRelatives(target, children=True, fullPath=True) or [])
+                           if n.startswith(target + "|")]
+        source_transforms = [n for n in source_children if cmds.objectType(n, isAType="transform")]
+        target_transforms = [n for n in target_children if cmds.objectType(n, isAType="transform")]
+        target_by_name = {}
+        for node in target_transforms:
+            key = _node_base_name(node)
+            if key in target_by_name:
+                raise RuntimeError("The duplicate hierarchy has ambiguous child names.")
+            target_by_name[key] = node
+        if len(source_transforms) != len(target_transforms):
+            raise RuntimeError("The duplicate hierarchy has different transform children at {0}.".format(source))
+        for node in source_transforms:
+            target_node = target_by_name.pop(_node_base_name(node), None)
+            if not target_node:
+                raise RuntimeError("Could not match a duplicated rig transform: {0}".format(node))
+            _walk(node, target_node)
+        # Construction shapes already retain their own copied history. Maya
+        # renumbers Orig suffixes; leave those untouched instead of guessing
+        # identities and copying material/key edits onto the wrong shape.
+        source_shapes = [n for n in source_children if n not in source_transforms
+                         and not cmds.getAttr(n + ".intermediateObject")]
+        target_shapes = [n for n in target_children if n not in target_transforms
+                         and not cmds.getAttr(n + ".intermediateObject")]
+        if len(source_shapes) != len(target_shapes):
+            raise RuntimeError("The duplicate hierarchy is missing a shape.")
+        unmatched = list(target_shapes)
+        pending = []
+        for source_shape in source_shapes:
+            matches = [n for n in unmatched if _node_base_name(n) == _node_base_name(source_shape)
+                       and cmds.nodeType(n) == cmds.nodeType(source_shape)]
+            if len(matches) == 1:
+                unmatched.remove(matches[0])
+                _walk(source_shape, matches[0])
+            else:
+                pending.append(source_shape)
+        for source_shape in pending:
+            matches = [n for n in unmatched if cmds.nodeType(n) == cmds.nodeType(source_shape)]
+            if len(matches) > 1 and cmds.nodeType(source_shape) == "nurbsCurve":
+                points = cmds.xform(source_shape + ".cv[*]", query=True, objectSpace=True, translation=True)
+                signature = tuple(round(value, 6) for value in points)
+                matches = [n for n in matches if tuple(round(value, 6) for value in
+                           cmds.xform(n + ".cv[*]", query=True, objectSpace=True, translation=True)) == signature]
+                if len(matches) > 1:
+                    # Identical control shapes need no manual metadata edits;
+                    # retain their native copied attributes and connections.
+                    continue
+            if len(matches) != 1:
+                raise RuntimeError("The duplicate has ambiguous or mismatched visible shapes at {0}.".format(source_shape))
+            unmatched.remove(matches[0])
+            _walk(source_shape, matches[0])
+
+    _walk(_long_scene_name(source_root), _long_scene_name(duplicate_root))
+    return pairs
+
+
+def _copy_hierarchy_keyframes(source_root, duplicate_root, pairs=None):
+    pairs = pairs if pairs is not None else _teacher_duplicate_hierarchy_pairs(source_root, duplicate_root)
     copied_attrs = 0
-    for source_node, duplicate_node in zip(source_nodes, duplicate_nodes):
+    for source_node, duplicate_node in pairs:
         try:
             copied_attrs += _copy_keyed_attributes(source_node, duplicate_node)
         except Exception:
@@ -698,11 +770,10 @@ def _create_teacher_duplicate_display_layer(offset_group):
         return ""
 
 
-def _rename_teacher_duplicate_hierarchy(source_root, duplicate_root):
-    source_nodes = _dag_hierarchy_in_order(source_root)
-    duplicate_nodes = _dag_hierarchy_in_order(duplicate_root)
+def _rename_teacher_duplicate_hierarchy(source_root, duplicate_root, pairs=None):
+    pairs = pairs if pairs is not None else _teacher_duplicate_hierarchy_pairs(source_root, duplicate_root)
     paired_nodes = []
-    for source_node, duplicate_node in zip(source_nodes, duplicate_nodes):
+    for source_node, duplicate_node in pairs:
         duplicate_uuid = ""
         try:
             duplicate_uuid = (cmds.ls(duplicate_node, uuid=True) or [""])[0]
@@ -776,7 +847,15 @@ def _delete_teacher_demo_duplicates():
         if not cmds.objExists(root_name):
             continue
         try:
-            cmds.delete(root_name)
+            owned_nodes = []
+            ownership_attr = root_name + "." + TEACHER_RIG_DUPLICATE_OWNED_UUIDS_ATTR
+            if cmds.objExists(ownership_attr):
+                identities = json.loads(cmds.getAttr(ownership_attr) or "[]")
+                if isinstance(identities, list) and identities and all(
+                        isinstance(value, str) and re.match(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$", value)
+                        for value in identities):
+                    owned_nodes = cmds.ls(identities, long=True) or []
+            cmds.delete(_dedupe_preserve_order([root_name] + owned_nodes))
             deleted += 1
         except Exception:
             pass
@@ -1143,12 +1222,158 @@ def _sync_teacher_demo_edit_log_scene_storage(root_nodes, text):
     return log_root
 
 
-def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X):
+def _teacher_demo_rig_root(node_name):
+    """Resolve connected rig branches without absorbing unrelated scene siblings.
+
+    Amanda's main control drives sibling skeleton and geometry branches. Follow
+    transform data links (also through constraints/deformers), expanding to their
+    common DAG ancestor. Message/shading links never establish rig ownership.
+    Disjoint assemblies and control-only selections require an explicit root.
+    """
+    candidate = _long_scene_name(node_name)
+    for _iteration in range(32):
+        nodes = [candidate] + (cmds.listRelatives(candidate, allDescendents=True, fullPath=True) or [])
+        bridges = (cmds.listConnections(nodes, type="constraint", skipConversionNodes=True) or [])
+        bridges += cmds.listConnections(nodes, type="geometryFilter", skipConversionNodes=True) or []
+        links = cmds.listConnections(nodes + list(set(bridges)), type="transform",
+                                     connections=True, plugs=True, skipConversionNodes=True) or []
+        endpoints = []
+        for index in range(0, len(links) - 1, 2):
+            local_plug, remote_plug = links[index:index + 2]
+            if cmds.getAttr(local_plug, type=True) == "message":
+                continue
+            remote = _long_scene_name(remote_plug.split(".", 1)[0])
+            if remote != candidate and not remote.startswith(candidate + "|"):
+                endpoints.append(remote)
+        if endpoints:
+            paths = [candidate.split("|")[1:]] + [node.split("|")[1:] for node in endpoints]
+            common = []
+            for parts in zip(*paths):
+                if len(set(parts)) != 1:
+                    break
+                common.append(parts[0])
+            if not common:
+                return ""
+            expanded = "|" + "|".join(common)
+            if expanded != candidate:
+                # A common scene container must not bring along an independent
+                # geometry branch that has no connection to this rig.
+                children = cmds.listRelatives(expanded, children=True, fullPath=True) or []
+                owned_paths = [candidate] + endpoints
+                for child in children:
+                    if not any(path == child or path.startswith(child + "|") for path in owned_paths):
+                        if cmds.listRelatives(child, allDescendents=True, type="mesh", fullPath=True):
+                            return ""
+                candidate = expanded
+                continue
+        if cmds.listRelatives(candidate, allDescendents=True, type="mesh", fullPath=True):
+            return candidate
+        return ""
+    return ""
+
+
+def _offset_teacher_duplicate(root_node, offset_group, pairs, offset_x, preferred_control=None):
+    """Choose an offset that preserves the evaluated visible character shape."""
+    from maya.api import OpenMaya
+
+    mapping = dict(pairs)
+    meshes = cmds.listRelatives(root_node, allDescendents=True, type="mesh", fullPath=True) or []
+    visible_meshes = cmds.ls(meshes, visible=True, long=True) if meshes else []
+    samples = []
+    for mesh in visible_meshes or []:
+        if cmds.getAttr(mesh + ".intermediateObject"):
+            continue
+        count = int(cmds.polyEvaluate(mesh, vertex=True))
+        for index in sorted({0, count // 2, count - 1}) if count else []:
+            samples.append((mapping[mesh] + ".vtx[{0}]".format(index),
+                            cmds.xform(mesh + ".vtx[{0}]".format(index), query=True, worldSpace=True, translation=True)))
+    if not samples:
+        raise RuntimeError("No visible mesh geometry could be checked. Show the character geometry before duplicating.")
+    tolerance = max(0.001, abs(float(offset_x)) * 0.00001)
+
+    def _matches():
+        for component, point in samples:
+            actual = cmds.xform(component, query=True, worldSpace=True, translation=True)
+            expected = (point[0] + float(offset_x), point[1], point[2])
+            if any(not math.isfinite(a) or not math.isfinite(b) or abs(a - b) > tolerance for a, b in zip(actual, expected)):
+                return False
+        return True
+
+    controls = []
+    for source, _target in pairs:
+        if cmds.objectType(source, isAType="transform") and cmds.listRelatives(source, shapes=True, type="nurbsCurve"):
+            controls.append(source)
+    controls.sort(key=lambda node: node.count("|"))
+    candidates = _dedupe_preserve_order(([preferred_control] if preferred_control in controls else []) + controls[:8])
+    for source in candidates:
+        driver = mapping[source]
+        ancestor = (cmds.listRelatives(driver, parent=True, fullPath=True) or [None])[0]
+        stable_parent = True
+        while ancestor:
+            if any(cmds.listConnections(ancestor + "." + attr, source=True, destination=False)
+                   for attr in ("rotate", "scale", "shear", "offsetParentMatrix")):
+                stable_parent = False
+                break
+            ancestor = (cmds.listRelatives(ancestor, parent=True, fullPath=True) or [None])[0]
+        if not stable_parent:
+            continue
+        inverse = OpenMaya.MMatrix(cmds.getAttr(driver + ".parentInverseMatrix[0]"))
+        delta = OpenMaya.MVector(float(offset_x), 0.0, 0.0) * inverse
+        edits = []
+        accepted = False
+        try:
+            for axis, amount in zip("XYZ", delta):
+                if abs(amount) < 1e-10:
+                    continue
+                plug = driver + ".translate" + axis
+                if cmds.getAttr(plug, lock=True):
+                    raise RuntimeError("The global control translation is locked.")
+                if cmds.keyframe(plug, query=True, keyframeCount=True):
+                    cmds.keyframe(plug, edit=True, relative=True, valueChange=amount)
+                    edits.append((plug, amount, True))
+                else:
+                    old = cmds.getAttr(plug)
+                    cmds.setAttr(plug, old + amount)
+                    edits.append((plug, old, False))
+            accepted = _matches()
+            if accepted:
+                return {"offset_mode": "global_control", "offset_control": driver,
+                        "disabled_skin_geometry_inherits": 0, "verified_mesh_samples": len(samples)}
+        except Exception:
+            pass
+        finally:
+            if not accepted:
+                for plug, value, keyed in reversed(edits):
+                    if keyed:
+                        cmds.keyframe(plug, edit=True, relative=True, valueChange=-value)
+                    else:
+                        cmds.setAttr(plug, value)
+
+    # Simple rigs and static props can use the containing group. Preserve a
+    # complex rig's authored inheritance unless the evaluated check proves the
+    # skin-only adjustment is needed and sufficient.
+    inherited = [(target, cmds.getAttr(target + ".inheritsTransform")) for source, target in pairs
+                 if cmds.objectType(source, isAType="transform")]
+    for isolate_skin in (False, True):
+        disabled = _disable_skinned_geometry_inherits_transform(mapping[root_node]) if isolate_skin else 0
+        cmds.setAttr(offset_group + ".translateX", float(offset_x))
+        if _matches():
+            return {"offset_mode": "group", "offset_control": offset_group,
+                    "disabled_skin_geometry_inherits": disabled, "verified_mesh_samples": len(samples)}
+        cmds.setAttr(offset_group + ".translateX", 0.0)
+    for target, value in inherited:
+        if cmds.getAttr(target + ".inheritsTransform") != value:
+            cmds.setAttr(target + ".inheritsTransform", value)
+    raise RuntimeError("The rig cannot be offset without changing its visible shape. The distorted copy was rejected.")
+
+
+def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X, preferred_control=None):
     root_node = _long_scene_name(root_node)
     root_base = _safe_scene_node_name(_node_base_name(root_node), "rig")
     offset_group = None
     duplicate_root = None
     copied_attrs = 0
+    original_uuids = set(cmds.ls(cmds.ls(long=True) or [], uuid=True) or [])
     try:
         cmds.undoInfo(openChunk=True, chunkName="AminateDuplicateRigForTeacherDemo")
     except Exception:
@@ -1156,29 +1381,37 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
     try:
         duplicate_nodes = cmds.duplicate(
             root_node,
-            renameChildren=True,
+            renameChildren=False,
             upstreamNodes=True,
             inputConnections=False,
             returnRootsOnly=True,
         ) or []
         if not duplicate_nodes:
-            return False, "Could not duplicate selected rig root.", {}
+            raise RuntimeError("Could not duplicate selected rig root.")
         duplicate_root = _long_scene_name(duplicate_nodes[0])
-        copied_attrs = _copy_hierarchy_keyframes(root_node, duplicate_root)
-        duplicate_root, uuid_pairs = _rename_teacher_duplicate_hierarchy(root_node, duplicate_root)
+        source_meshes = cmds.listRelatives(root_node, allDescendents=True, type="mesh", fullPath=True) or []
+        duplicate_meshes = cmds.listRelatives(duplicate_root, allDescendents=True, type="mesh", fullPath=True) or []
+        if not source_meshes or len(duplicate_meshes) != len(source_meshes):
+            raise RuntimeError("The copy contains {0} of {1} mesh shapes; the incomplete copy was rejected.".format(
+                len(duplicate_meshes), len(source_meshes)))
+        pairs = _teacher_duplicate_hierarchy_pairs(root_node, duplicate_root)
+        copied_attrs = _copy_hierarchy_keyframes(root_node, duplicate_root, pairs=pairs)
+        duplicate_root, uuid_pairs = _rename_teacher_duplicate_hierarchy(root_node, duplicate_root, pairs=pairs)
         offset_group_name = _unique_scene_node_name(root_base + TEACHER_RIG_DUPLICATE_SUFFIX + TEACHER_RIG_DUPLICATE_GROUP_SUFFIX)
         offset_group = cmds.group(empty=True, name=offset_group_name)
         _ensure_bool_attr(offset_group, TEACHER_RIG_DUPLICATE_MARKER_ATTR, True)
         _ensure_string_attr(offset_group, TEACHER_RIG_DUPLICATE_SOURCE_ATTR, root_node)
         duplicate_root = _long_scene_name((cmds.parent(duplicate_root, offset_group) or [duplicate_root])[0])
-        cmds.setAttr(offset_group + ".translateX", float(offset_x))
-        disabled_skin_inherits = _disable_skinned_geometry_inherits_transform(duplicate_root)
         _remove_nodes_from_display_layers([offset_group] + _dag_hierarchy_in_order(duplicate_root))
         current_pairs = _resolve_uuid_pairs(uuid_pairs)
         _copy_visual_state_for_pairs(current_pairs)
         copied_shading = _copy_shading_assignments_for_pairs(current_pairs)
+        offset_detail = _offset_teacher_duplicate(root_node, offset_group, current_pairs, offset_x, preferred_control)
+        disabled_skin_inherits = offset_detail["disabled_skin_geometry_inherits"]
         layer_name = _create_teacher_duplicate_display_layer(offset_group)
         _teacher_demo_set_baseline(offset_group)
+        owned_uuids = sorted(set(cmds.ls(cmds.ls(long=True) or [], uuid=True) or []) - original_uuids)
+        _ensure_string_attr(offset_group, TEACHER_RIG_DUPLICATE_OWNED_UUIDS_ATTR, json.dumps(owned_uuids))
         try:
             cmds.select(offset_group, replace=True)
         except Exception:
@@ -1191,7 +1424,10 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
             "copied_shading_assignments": copied_shading,
             "disabled_skin_geometry_inherits": disabled_skin_inherits,
             "offset_x": float(offset_x),
+            "source_root": root_node,
+            "mesh_shape_count": len(duplicate_meshes),
         }
+        detail.update(offset_detail)
         message = "Duplicated rig for teacher demo: {0}. Copied keyframes on {1} attribute(s), copied {2} shading assignment(s), isolated {3} skinned mesh transform(s), and offset X by {4:g}.".format(
             _node_short_name(offset_group),
             copied_attrs,
@@ -1201,16 +1437,15 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
         )
         return True, message, detail
     except Exception as exc:
-        if offset_group and cmds.objExists(offset_group):
+        # upstreamNodes can create DG nodes outside the returned DAG root.
+        # Remove only UUIDs created by this synchronous operation on failure.
+        created_uuids = set(cmds.ls(cmds.ls(long=True) or [], uuid=True) or []) - original_uuids
+        created_nodes = cmds.ls(list(created_uuids), long=True) if created_uuids else []
+        if created_nodes:
             try:
-                cmds.delete(offset_group)
-            except Exception:
-                pass
-        elif duplicate_root and cmds.objExists(duplicate_root):
-            try:
-                cmds.delete(duplicate_root)
-            except Exception:
-                pass
+                cmds.delete(created_nodes)
+            except Exception as cleanup_error:
+                return False, "Rig duplicate failed: {0}. Cleanup also failed: {1}".format(exc, cleanup_error), {}
         return False, "Rig duplicate failed: {0}".format(exc), {}
     finally:
         try:
@@ -6900,16 +7135,23 @@ class MayaTimingToolsController(object):
     def duplicate_selected_rig_for_teacher_demo(self, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya.", {}
-        roots = _selected_transform_roots()
-        if not roots:
-            message = "Select one rig root group, then click Duplicate Rig For Teacher Demo."
+        selected_roots = _selected_transform_roots()
+        try:
+            roots = _dedupe_preserve_order([_teacher_demo_rig_root(node) for node in selected_roots])
+        except Exception as exc:
+            message = "Could not resolve the selected character hierarchy: {0}. No rig was duplicated.".format(exc)
+            self._emit_status(message, False)
+            return False, message, {}
+        if not roots or any(not root for root in roots):
+            message = "Select a control or root inside one complete character hierarchy containing geometry. No rig was duplicated."
             self._emit_status(message, False)
             return False, message, {}
         if len(roots) > 1:
             message = "Select only one rig root group. Found {0} selected roots.".format(len(roots))
             self._emit_status(message, False)
             return False, message, {}
-        success, message, detail = _duplicate_rig_root_for_teacher_demo(roots[0], offset_x=offset_x)
+        success, message, detail = _duplicate_rig_root_for_teacher_demo(
+            roots[0], offset_x=offset_x, preferred_control=selected_roots[0] if len(selected_roots) == 1 else None)
         if success:
             self.reset_teacher_demo_edit_log()
         self._emit_status(message, success)
@@ -9232,13 +9474,18 @@ if QtWidgets:
             blocking_options_row.addStretch(1)
             blocking_layout.addLayout(blocking_options_row)
 
+            hotkey_help = QtWidgets.QLabel("Click a hotkey field and press your shortcut, then click Apply Hotkey. Leaving the field does not save. Reset Default applies the default if it is available.")
+            hotkey_help.setObjectName("sceneHelpersHotkeyInstructions")
+            hotkey_help.setWordWrap(True)
+            blocking_layout.addWidget(hotkey_help)
             tween_machine_row = ResponsiveRow()
             tween_machine_row.setSpacing(8)
             tween_machine_row.addWidget(QtWidgets.QLabel("Tween Machine Hotkey"))
             self.tween_machine_hotkey_edit = HotkeyCaptureLineEdit(DEFAULT_TWEEN_MACHINE_HOTKEY)
             self.tween_machine_hotkey_edit.setObjectName("sceneHelpersTweenMachineHotkeyEdit")
+            self.tween_machine_hotkey_edit.setAccessibleName("Tween Machine hotkey")
             self.tween_machine_hotkey_edit.setText(getattr(self.controller, "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY))
-            self.tween_machine_hotkey_edit.setToolTip("Press a collision-free hotkey, then press Enter or leave the field to save automatically.")
+            self.tween_machine_hotkey_edit.setToolTip("Press your shortcut here, then click Apply Hotkey to save. Leaving this field keeps the draft.")
             tween_machine_row.addWidget(self.tween_machine_hotkey_edit, 1)
             tween_machine_row.addWidget(QtWidgets.QLabel("Opacity"))
             self.tween_machine_opacity_spin = QtWidgets.QDoubleSpinBox()
@@ -9249,24 +9496,34 @@ if QtWidgets:
             self.tween_machine_opacity_spin.setValue(getattr(self.controller, "tween_machine_opacity", DEFAULT_TWEEN_MACHINE_OPACITY))
             self.tween_machine_opacity_spin.setToolTip("Transparency for the Tween Machine popup. Lower is more see-through.")
             tween_machine_row.addWidget(self.tween_machine_opacity_spin)
-            self.set_tween_machine_hotkey_button = QtWidgets.QPushButton("Set Hotkey")
+            self.set_tween_machine_hotkey_button = QtWidgets.QPushButton("Apply Hotkey")
             self.set_tween_machine_hotkey_button.setObjectName("sceneHelpersSetTweenMachineHotkeyButton")
+            self.set_tween_machine_hotkey_button.setAutoDefault(False)
             self.set_tween_machine_hotkey_button.setToolTip("Save the custom hotkey for Tween Machine.")
-            self.set_tween_machine_hotkey_button.setVisible(False)
             tween_machine_row.addWidget(self.set_tween_machine_hotkey_button)
+            self.reset_tween_machine_hotkey_button = QtWidgets.QPushButton("Reset Default")
+            self.reset_tween_machine_hotkey_button.setObjectName("sceneHelpersResetTweenMachineHotkeyButton")
+            self.reset_tween_machine_hotkey_button.setAutoDefault(False)
+            self.reset_tween_machine_hotkey_button.setToolTip("Apply the default Tween Machine shortcut: {0}. Conflicts are checked before saving.".format(DEFAULT_TWEEN_MACHINE_HOTKEY))
+            tween_machine_row.addWidget(self.reset_tween_machine_hotkey_button)
             self.open_tween_machine_button = QtWidgets.QPushButton("Open Tween Machine")
             self.open_tween_machine_button.setObjectName("sceneHelpersOpenTweenMachineButton")
             self.open_tween_machine_button.setToolTip("Open the translucent inbetween popup next to the cursor.")
             tween_machine_row.addWidget(self.open_tween_machine_button)
             blocking_layout.addLayout(tween_machine_row)
+            self.tween_machine_hotkey_binding_label = QtWidgets.QLabel()
+            self.tween_machine_hotkey_binding_label.setObjectName("sceneHelpersTweenMachineHotkeyBinding")
+            self.tween_machine_hotkey_binding_label.setWordWrap(True)
+            blocking_layout.addWidget(self.tween_machine_hotkey_binding_label)
 
             floating_channel_row = ResponsiveRow()
             floating_channel_row.setSpacing(8)
             floating_channel_row.addWidget(QtWidgets.QLabel("Floating Channel Box Hotkey"))
             self.floating_channel_hotkey_edit = HotkeyCaptureLineEdit(maya_floating_channel_box.DEFAULT_HOTKEY)
             self.floating_channel_hotkey_edit.setObjectName("sceneHelpersFloatingChannelHotkeyEdit")
+            self.floating_channel_hotkey_edit.setAccessibleName("Floating Channel Box hotkey")
             self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
-            self.floating_channel_hotkey_edit.setToolTip("Press a collision-free hotkey, then press Enter or leave the field to save automatically.")
+            self.floating_channel_hotkey_edit.setToolTip("Press your shortcut here, then click Apply Hotkey to save. Leaving this field keeps the draft.")
             floating_channel_row.addWidget(self.floating_channel_hotkey_edit, 1)
             floating_channel_row.addWidget(QtWidgets.QLabel("Opacity"))
             self.floating_channel_opacity_spin = QtWidgets.QDoubleSpinBox()
@@ -9277,24 +9534,34 @@ if QtWidgets:
             self.floating_channel_opacity_spin.setValue(getattr(self.controller, "floating_channel_box_opacity", maya_floating_channel_box.DEFAULT_CHANNEL_OPACITY))
             self.floating_channel_opacity_spin.setToolTip("Transparency for the Floating Channel Box. Lower is more see-through.")
             floating_channel_row.addWidget(self.floating_channel_opacity_spin)
-            self.set_floating_channel_hotkey_button = QtWidgets.QPushButton("Set Hotkey")
+            self.set_floating_channel_hotkey_button = QtWidgets.QPushButton("Apply Hotkey")
             self.set_floating_channel_hotkey_button.setObjectName("sceneHelpersSetFloatingChannelHotkeyButton")
+            self.set_floating_channel_hotkey_button.setAutoDefault(False)
             self.set_floating_channel_hotkey_button.setToolTip("Save the custom hotkey for the Floating Channel Box.")
-            self.set_floating_channel_hotkey_button.setVisible(False)
             floating_channel_row.addWidget(self.set_floating_channel_hotkey_button)
+            self.reset_floating_channel_hotkey_button = QtWidgets.QPushButton("Reset Default")
+            self.reset_floating_channel_hotkey_button.setObjectName("sceneHelpersResetFloatingChannelHotkeyButton")
+            self.reset_floating_channel_hotkey_button.setAutoDefault(False)
+            self.reset_floating_channel_hotkey_button.setToolTip("Apply the default Floating Channel Box shortcut: {0}. Conflicts are checked before saving.".format(maya_floating_channel_box.DEFAULT_HOTKEY))
+            floating_channel_row.addWidget(self.reset_floating_channel_hotkey_button)
             self.open_floating_channel_box_button = QtWidgets.QPushButton("Open Floating Channel Box")
             self.open_floating_channel_box_button.setObjectName("sceneHelpersOpenFloatingChannelBoxButton")
             self.open_floating_channel_box_button.setToolTip("Open the semi-transparent floating channel editor for the current selection.")
             floating_channel_row.addWidget(self.open_floating_channel_box_button)
             blocking_layout.addLayout(floating_channel_row)
+            self.floating_channel_hotkey_binding_label = QtWidgets.QLabel()
+            self.floating_channel_hotkey_binding_label.setObjectName("sceneHelpersFloatingChannelHotkeyBinding")
+            self.floating_channel_hotkey_binding_label.setWordWrap(True)
+            blocking_layout.addWidget(self.floating_channel_hotkey_binding_label)
 
             floating_graph_row = ResponsiveRow()
             floating_graph_row.setSpacing(8)
             floating_graph_row.addWidget(QtWidgets.QLabel("Floating Graph Editor Hotkey"))
             self.floating_graph_hotkey_edit = HotkeyCaptureLineEdit(maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY)
             self.floating_graph_hotkey_edit.setObjectName("sceneHelpersFloatingGraphHotkeyEdit")
+            self.floating_graph_hotkey_edit.setAccessibleName("Floating Graph Editor hotkey")
             self.floating_graph_hotkey_edit.setText(getattr(self.controller, "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
-            self.floating_graph_hotkey_edit.setToolTip("Press a collision-free hotkey, then press Enter or leave the field to save automatically.")
+            self.floating_graph_hotkey_edit.setToolTip("Press your shortcut here, then click Apply Hotkey to save. Leaving this field keeps the draft.")
             floating_graph_row.addWidget(self.floating_graph_hotkey_edit, 1)
             floating_graph_row.addWidget(QtWidgets.QLabel("Opacity"))
             self.floating_graph_opacity_spin = QtWidgets.QDoubleSpinBox()
@@ -9305,16 +9572,25 @@ if QtWidgets:
             self.floating_graph_opacity_spin.setValue(getattr(self.controller, "floating_graph_editor_opacity", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_OPACITY))
             self.floating_graph_opacity_spin.setToolTip("Transparency for the Floating Graph Editor. Lower is more see-through.")
             floating_graph_row.addWidget(self.floating_graph_opacity_spin)
-            self.set_floating_graph_hotkey_button = QtWidgets.QPushButton("Set Hotkey")
+            self.set_floating_graph_hotkey_button = QtWidgets.QPushButton("Apply Hotkey")
             self.set_floating_graph_hotkey_button.setObjectName("sceneHelpersSetFloatingGraphHotkeyButton")
+            self.set_floating_graph_hotkey_button.setAutoDefault(False)
             self.set_floating_graph_hotkey_button.setToolTip("Save the custom hotkey for the Floating Graph Editor.")
-            self.set_floating_graph_hotkey_button.setVisible(False)
             floating_graph_row.addWidget(self.set_floating_graph_hotkey_button)
+            self.reset_floating_graph_hotkey_button = QtWidgets.QPushButton("Reset Default")
+            self.reset_floating_graph_hotkey_button.setObjectName("sceneHelpersResetFloatingGraphHotkeyButton")
+            self.reset_floating_graph_hotkey_button.setAutoDefault(False)
+            self.reset_floating_graph_hotkey_button.setToolTip("Apply the default Floating Graph Editor shortcut: {0}. Conflicts are checked before saving.".format(maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
+            floating_graph_row.addWidget(self.reset_floating_graph_hotkey_button)
             self.open_floating_graph_button = QtWidgets.QPushButton("Open Floating Graph Editor")
             self.open_floating_graph_button.setObjectName("sceneHelpersOpenFloatingGraphButton")
             self.open_floating_graph_button.setToolTip("Open a semi-transparent native Maya Graph Editor clone that can float or dock without creating duplicates.")
             floating_graph_row.addWidget(self.open_floating_graph_button)
             blocking_layout.addLayout(floating_graph_row)
+            self.floating_graph_hotkey_binding_label = QtWidgets.QLabel()
+            self.floating_graph_hotkey_binding_label.setObjectName("sceneHelpersFloatingGraphHotkeyBinding")
+            self.floating_graph_hotkey_binding_label.setWordWrap(True)
+            blocking_layout.addWidget(self.floating_graph_hotkey_binding_label)
 
             help_box = QtWidgets.QPlainTextEdit()
             help_box.setReadOnly(True)
@@ -9452,7 +9728,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.12")
+            self.version_label = QtWidgets.QLabel("Version 0.3.13")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -9470,15 +9746,18 @@ if QtWidgets:
             self.solo_current_layer_button.toggled.connect(self._solo_current_animation_layer)
             self.clear_layer_solos_button.clicked.connect(self._clear_animation_layer_solos)
             self.set_tween_machine_hotkey_button.clicked.connect(self._set_tween_machine_hotkey)
-            self.tween_machine_hotkey_edit.editingFinished.connect(self._set_tween_machine_hotkey)
+            self.reset_tween_machine_hotkey_button.clicked.connect(lambda: self._apply_helper_hotkey("tween", DEFAULT_TWEEN_MACHINE_HOTKEY))
+            self.tween_machine_hotkey_edit.textChanged.connect(lambda: self._refresh_helper_hotkey("tween"))
             self.tween_machine_opacity_spin.valueChanged.connect(self._set_tween_machine_opacity)
             self.open_tween_machine_button.clicked.connect(self._open_tween_machine)
             self.set_floating_channel_hotkey_button.clicked.connect(self._set_floating_channel_hotkey)
-            self.floating_channel_hotkey_edit.editingFinished.connect(self._set_floating_channel_hotkey)
+            self.reset_floating_channel_hotkey_button.clicked.connect(lambda: self._apply_helper_hotkey("channel", maya_floating_channel_box.DEFAULT_HOTKEY))
+            self.floating_channel_hotkey_edit.textChanged.connect(lambda: self._refresh_helper_hotkey("channel"))
             self.floating_channel_opacity_spin.valueChanged.connect(self._set_floating_channel_opacity)
             self.open_floating_channel_box_button.clicked.connect(self._open_floating_channel_box)
             self.set_floating_graph_hotkey_button.clicked.connect(self._set_floating_graph_hotkey)
-            self.floating_graph_hotkey_edit.editingFinished.connect(self._set_floating_graph_hotkey)
+            self.reset_floating_graph_hotkey_button.clicked.connect(lambda: self._apply_helper_hotkey("graph", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
+            self.floating_graph_hotkey_edit.textChanged.connect(lambda: self._refresh_helper_hotkey("graph"))
             self.floating_graph_opacity_spin.valueChanged.connect(self._set_floating_graph_opacity)
             self.open_floating_graph_button.clicked.connect(self._open_floating_graph_editor)
             self.snap_now_button.clicked.connect(self._snap_now)
@@ -9557,15 +9836,15 @@ if QtWidgets:
             self.camera_dolly_offset_spin.blockSignals(True)
             self.camera_dolly_offset_spin.setValue(float(getattr(self.controller, "scene_helpers_camera_dolly_offset", 0.0)))
             self.camera_dolly_offset_spin.blockSignals(False)
-            self.tween_machine_hotkey_edit.setText(getattr(self.controller, "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY))
+            self._refresh_helper_hotkey("tween")
             self.tween_machine_opacity_spin.blockSignals(True)
             self.tween_machine_opacity_spin.setValue(float(getattr(self.controller, "tween_machine_opacity", DEFAULT_TWEEN_MACHINE_OPACITY)))
             self.tween_machine_opacity_spin.blockSignals(False)
-            self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
+            self._refresh_helper_hotkey("channel")
             self.floating_channel_opacity_spin.blockSignals(True)
             self.floating_channel_opacity_spin.setValue(float(getattr(self.controller, "floating_channel_box_opacity", maya_floating_channel_box.DEFAULT_CHANNEL_OPACITY)))
             self.floating_channel_opacity_spin.blockSignals(False)
-            self.floating_graph_hotkey_edit.setText(getattr(self.controller, "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
+            self._refresh_helper_hotkey("graph")
             self.floating_graph_opacity_spin.blockSignals(True)
             self.floating_graph_opacity_spin.setValue(float(getattr(self.controller, "floating_graph_editor_opacity", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_OPACITY)))
             self.floating_graph_opacity_spin.blockSignals(False)
@@ -9656,8 +9935,37 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _set_tween_machine_hotkey(self):
-            success, message = self.controller.set_tween_machine_hotkey(self.tween_machine_hotkey_edit.text())
-            self.tween_machine_hotkey_edit.setText(getattr(self.controller, "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY))
+            self._apply_helper_hotkey("tween")
+
+        def _helper_hotkey_controls(self, helper):
+            return {
+                "tween": (self.tween_machine_hotkey_edit, self.tween_machine_hotkey_binding_label,
+                          "tween_machine_hotkey", DEFAULT_TWEEN_MACHINE_HOTKEY, self.controller.set_tween_machine_hotkey),
+                "channel": (self.floating_channel_hotkey_edit, self.floating_channel_hotkey_binding_label,
+                            "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY, self.controller.set_floating_channel_box_hotkey),
+                "graph": (self.floating_graph_hotkey_edit, self.floating_graph_hotkey_binding_label,
+                          "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY, self.controller.set_floating_graph_editor_hotkey),
+            }[helper]
+
+        def _refresh_helper_hotkey(self, helper, saved_to_field=False):
+            edit, label, attribute, default, _setter = self._helper_hotkey_controls(helper)
+            saved = getattr(self.controller, attribute, default)
+            if saved_to_field:
+                edit.setText(saved)
+            suffix = " (unapplied change)" if edit.text() != saved else ""
+            label.setText("Current binding: {0}{1}".format(saved, suffix))
+
+        def _apply_helper_hotkey(self, helper, candidate=None):
+            edit, _label, attribute, default, setter = self._helper_hotkey_controls(helper)
+            if candidate is not None:
+                edit.setText(candidate)
+            if edit.text().strip():
+                success, message = setter(edit.text())
+            else:
+                success, message = False, "Press a shortcut before clicking Apply Hotkey."
+            self._refresh_helper_hotkey(helper, saved_to_field=success)
+            if not success:
+                message += " Current binding remains {0}.".format(getattr(self.controller, attribute, default))
             self._set_status(message, success)
 
         def _set_tween_machine_opacity(self, opacity):
@@ -9669,9 +9977,7 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _set_floating_channel_hotkey(self):
-            success, message = self.controller.set_floating_channel_box_hotkey(self.floating_channel_hotkey_edit.text())
-            self.floating_channel_hotkey_edit.setText(getattr(self.controller, "floating_channel_box_hotkey", maya_floating_channel_box.DEFAULT_HOTKEY))
-            self._set_status(message, success)
+            self._apply_helper_hotkey("channel")
 
         def _set_floating_channel_opacity(self, opacity):
             success, message = self.controller.set_floating_channel_box_opacity(opacity)
@@ -9682,9 +9988,7 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _set_floating_graph_hotkey(self):
-            success, message = self.controller.set_floating_graph_editor_hotkey(self.floating_graph_hotkey_edit.text())
-            self.floating_graph_hotkey_edit.setText(getattr(self.controller, "floating_graph_editor_hotkey", maya_floating_channel_box.DEFAULT_GRAPH_EDITOR_HOTKEY))
-            self._set_status(message, success)
+            self._apply_helper_hotkey("graph")
 
         def _set_floating_graph_opacity(self, opacity):
             success, message = self.controller.set_floating_graph_editor_opacity(opacity)

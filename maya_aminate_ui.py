@@ -462,7 +462,10 @@ def apply_extra(owner, key, local):
             ('Scene setup', True, [owner.load_textures_button, owner.recover_autosave_button, local['self.game_mode_group'] if 'self.game_mode_group' in local else owner.game_mode_group, owner.render_env_button, owner.delete_render_env_button, local['camera_row']]),
             ('Animation', False, [action_grid(owner,[owner.auto_key_button, owner.auto_snap_button]), local['retime_row'], local['snap_row'], local['layer_row'], local['animation_layers_group'], local['blocking_options_row']]),
             ('Teaching', False, [owner.duplicate_teacher_rig_button, owner.delete_teacher_rig_button, teacher_offset, local['teacher_log_group'], local['notes_page']]),
-            ('Floating windows', False, [owner.open_tween_machine_button, owner.open_floating_channel_box_button, owner.open_floating_graph_button, prefs]),
+            ('Floating windows', False, [local['hotkey_help'], local['tween_machine_row'],
+                                       owner.tween_machine_hotkey_binding_label, local['floating_channel_row'],
+                                       owner.floating_channel_hotkey_binding_label, local['floating_graph_row'],
+                                       owner.floating_graph_hotkey_binding_label, prefs]),
             ('Camera and security options', False, [offsets, owner.disable_security_popups_button]),
             ('Help', False, [local['help_page']]),
         ]

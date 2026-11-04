@@ -23,6 +23,10 @@ Fixed non-movable controls at Maya's bottom edge for repeated animation jobs: ke
 
 Scene prep and review helpers: Auto Key, snap selected keys to frames, texture reload, game animation mode, render environment setup, camera presets, animation-layer tint, non-destructive layer duplication and consolidation, layer solo controls, floating Channel Box, floating Graph Editor, scene text notes, teacher-demo duplication, and toolbar-extra visibility behavior when Aminate hides.
 
+Expand **Floating windows** to edit shortcuts directly: click the field, press the shortcut, then choose **Apply Hotkey**. The saved binding and unapplied changes are shown. **Reset Default** checks conflicts before saving. Percentage clicks, slider clicks and slider dragging in Tween Machine create keys on the current selected controls, even with Maya Auto Key off.
+
+For a teacher-demo copy, select the character's main/global control or complete rig root. Connected sibling geometry is included. The tool checks the visible copied shape before accepting its offset; complex rigs can use a suitable global control instead of moving their entire deformer hierarchy. Unsupported offsets are rejected. Deleting a new teacher copy also removes its recorded upstream nodes. Save and restart Maya after updating an already loaded Aminate runtime.
+
 ### Reference Manager
 
 Packages the current Maya scene plus references, textures, image planes, audio, Alembic/GPU caches, and a manifest into one zip. It can scan unknown Maya data and keeps the live scene safer by using copy-only packaging unless saving is explicitly selected.

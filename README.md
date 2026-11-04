@@ -2,7 +2,19 @@
 
 # Aminate
 
-## Version 0.3.12
+## Version 0.3.13
+
+Scene Helpers now exposes shortcut capture, **Apply Hotkey**, **Reset Default**, and the current binding directly under **Floating windows** for Tween Machine, Channel Box and Graph Editor. Drafts stay unapplied until you click Apply; conflicts preserve the saved binding.
+
+Teacher-demo duplication now includes connected sibling geometry when you select a character's main control. It matches copied nodes safely and checks visible geometry before accepting an offset. Amanda's complete 87-mesh copy passed, including independent skin motion and source preservation. Complex rigs can use their global control to avoid deforming the copy. Unsupported offsets are rejected.
+
+Tween Machine percentage clicks, slider clicks and drags automatically key selected controls, including with Maya Auto Key off. The timing and Timeline Notes fixes from 0.3.12 are included.
+
+Download the runtime ZIP, extract it, and drag **Aminate_v0_3_13_drag_this_file_into_Maya.py** into Maya. Save and restart Maya if Aminate was already loaded. The legacy installer remains available as a fallback.
+
+Validation includes offscreen interactions with the new shortcut editor and live checks of the new teacher-demo functions in the retained Maya 2026.2 session. The broad fresh-session tool audit below covers 0.3.12. The complete 0.3.13 UI still needs a fresh Maya start; current-pose geometry checks do not prove every third-party rig or animation.
+
+### Included from 0.3.12
 
 Tween Machine now creates keys on the selected controls when you click a percentage, click the slider groove, or drag the slider, even with Maya Auto Key disabled. Groove clicks choose the clicked percentage directly. The retained popup refreshes its target when selection or frame changes, and frame zero is supported.
 

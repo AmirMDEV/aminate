@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.3.13 - 2026-11-04
+
+- Add visible Apply Hotkey and Reset Default controls for Tween Machine, Floating Channel Box and Floating Graph Editor in Scene Helpers. Show the current saved binding and unapplied changes; leaving a field no longer saves automatically.
+- Preserve invalid or conflicting hotkey drafts for correction while retaining the saved binding. Reset uses the existing collision checks, and text-entry suppression remains in place.
+- Resolve a selected child control to its character hierarchy before Duplicate Teacher Demo Rig, including sibling geometry. Deduplicate controls from one character and reject selections spanning different characters.
+- Match copied hierarchy nodes by parent/name/type instead of global traversal order. Preserve construction shapes, verify visible geometry before accepting an offset, prefer a suitable global control for complex rigs, and reject distorted copies. Track created UUIDs for failure and normal duplicate cleanup.
+- Keep shortcut capture, saved bindings and Apply/Reset buttons reachable in the compact Scene Helpers Floating windows section.
+- Add focused hotkey-editor and teacher-rig-root regression checks to the reliable change gate. Update the Rig Scale smoke assertion to check the completed full source comparison and retained compact snapshot identities.
+
 ## Version 0.3.12 - 2026-11-04
 
 - Tween Machine now creates keys during slider changes as well as percentage-button clicks, independently of Maya Auto Key. Slider groove clicks choose the clicked percentage. Reusing the popup follows the current controls and frame, including frame zero.
