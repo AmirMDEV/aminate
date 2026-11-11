@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.3.14
+
+- Add guided Manual Setup beside automatic IK/FK detection, with control selection and Channel Box capture.
+- Improve verified IK/FK matching, pose preservation, saved mappings and failure rollback.
+- Add direct character resizing alongside reusable rig scale controls, and support more verified rig structures.
+- Add Parent Manager follow targets, attach points, timeline markers and practice lessons.
+
+
 ## Version 0.3.13 - 2026-11-04
 
 - Add visible Apply Hotkey and Reset Default controls for Tween Machine, Floating Channel Box and Floating Graph Editor in Scene Helpers. Show the current saved binding and unapplied changes; leaving a field no longer saves automatically.

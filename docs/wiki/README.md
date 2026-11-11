@@ -31,9 +31,11 @@ For a teacher-demo copy, select the character's main/global control or complete 
 
 Packages the current Maya scene plus references, textures, image planes, audio, Alembic/GPU caches, and a manifest into one zip. It can scan unknown Maya data and keeps the live scene safer by using copy-only packaging unless saving is explicitly selected.
 
-### Dynamic Parenting
+### Parent Manager
 
-Switches props or controls between parents without visible pops. Core flow: add driven object, pick parent, snap if needed, switch to selected parent or world, fix jumps, delete picked switches, or delete all switches.
+Fill in **I want** [what should move] **to follow** [what it should follow], then choose **Move**, **Turn** or **Resize**. Use **Start following here** to key the follow. Pick a new target and use **Follow this instead** to key a handoff on the same frame. **Stop following and keep this pose** keys the release and the object's pose.
+
+Choose a marker in **Attach To Points** to preview it. **Start following here** keeps the object's pose. **Snap to attach point and follow** lines the object up on the current frame. Turn on **Set start and arrival frames** to move into place over time. Use **Show follow keys** to see the changes in Maya and **Follow history** to revisit them. Previous Dynamic Parenting setups are available from a separate section in the same panel.
 
 ### Hand / Foot Hold
 
@@ -49,7 +51,7 @@ Creates one bright temporary pivot marker so selected props and controls can rot
 
 ### Universal IK/FK
 
-Finds limb controls, saves switch profiles, and matches FK to IK or IK to FK at the current frame without a visible pop. Saved profiles are reused for repeat shots.
+Switches supported control chains between IK and FK at the current frame. Detect a mapping from selection or configure a mapped chain manually, then save it for later shots. Check the active mode before switching.
 
 ### Controls Retargeter (Face and Body)
 

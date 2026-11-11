@@ -3972,6 +3972,79 @@ if QtWidgets:
             main_layout.setContentsMargins(12, 12, 12, 12)
             main_layout.setSpacing(10)
 
+            multiply_group = QtWidgets.QGroupBox("Resize the character")
+            multiply_layout = QtWidgets.QVBoxLayout(multiply_group)
+            multiply_help = QtWidgets.QLabel("Multiply the current size. Aminate checks and saves the required scene setup without adding a visible master control.")
+            multiply_help.setWordWrap(True)
+            multiply_layout.addWidget(multiply_help)
+            self.multiply_master_line = QtWidgets.QLineEdit()
+            self.multiply_master_line.setReadOnly(True)
+            self.multiply_master_line.setPlaceholderText("Select the master control in Maya")
+            self.multiply_master_line.setAccessibleName("Character master for resizing")
+            multiply_layout.addWidget(self.multiply_master_line)
+            self.multiply_use_button = QtWidgets.QPushButton("Use Selected Master")
+            multiply_layout.addWidget(self.multiply_use_button)
+            multiply_row = QtWidgets.QHBoxLayout()
+            multiply_label = QtWidgets.QLabel("Multiply by")
+            self.multiply_spin = QtWidgets.QDoubleSpinBox()
+            self.multiply_spin.setRange(0.001, 1000.0)
+            self.multiply_spin.setDecimals(3)
+            self.multiply_spin.setValue(1.5)
+            self.multiply_spin.setSingleStep(0.1)
+            self.multiply_spin.setSuffix(" ×")
+            self.multiply_spin.setAccessibleName("Multiply current character size by")
+            self.multiply_spin.setToolTip("1.5 makes the current character 50% larger. 0.5 halves it. Each click multiplies the current size again.")
+            multiply_label.setBuddy(self.multiply_spin)
+            self.multiply_button = QtWidgets.QPushButton("Scale Character")
+            self.multiply_button.setMinimumHeight(36)
+            self.multiply_button.setToolTip("Resize the selected character with verified scene compensation. A failed check rolls the operation back. Undo restores the previous size.")
+            multiply_row.addWidget(multiply_label)
+            multiply_row.addWidget(self.multiply_spin)
+            multiply_row.addWidget(self.multiply_button, 1)
+            multiply_layout.addLayout(multiply_row)
+            self.multiply_result_label = QtWidgets.QLabel("1.5 × makes the current size 50% larger. Each click applies another multiplier.")
+            self.multiply_result_label.setWordWrap(True)
+            multiply_layout.addWidget(self.multiply_result_label)
+            self.multiply_failure_button = QtWidgets.QPushButton("Highlight failed geometry")
+            self.multiply_failure_button.hide()
+            multiply_layout.addWidget(self.multiply_failure_button)
+            self._multiply_result = {}
+            self._multiply_scene = None
+            self._multiply_master_id = None
+            self.multiply_use_button.clicked.connect(self._use_multiply_master)
+            self.multiply_button.clicked.connect(self._multiply_character)
+            self.multiply_failure_button.clicked.connect(self._highlight_multiply_failure)
+            main_layout.addWidget(multiply_group)
+
+            live_group = QtWidgets.QGroupBox("Scale the animation rig")
+            live_layout = QtWidgets.QVBoxLayout(live_group)
+            live_help = QtWidgets.QLabel("Select the rig's master control, then add Rig Scale. Geometry and control curves are checked before the setup is kept.")
+            live_help.setWordWrap(True)
+            live_layout.addWidget(live_help)
+            self.live_master_line = QtWidgets.QLineEdit()
+            self.live_master_line.setPlaceholderText("Select the master control in Maya")
+            self.live_master_line.setReadOnly(True)
+            live_layout.addWidget(self.live_master_line)
+            self.live_use_button = QtWidgets.QPushButton("Use Selected Master")
+            self.live_add_button = QtWidgets.QPushButton("Add Rig Scale")
+            self.live_add_button.setMinimumHeight(36)
+            self.live_add_button.setToolTip("Add a positive uniform scale channel. Unsupported setups are left unchanged. Save a new scene after testing your animation.")
+            live_layout.addWidget(self.live_use_button)
+            live_layout.addWidget(self.live_add_button)
+            self.live_result_label = QtWidgets.QLabel("After setup, use Rig Scale on the master in Maya's Channel Box. 1 = original size.")
+            self.live_result_label.setWordWrap(True)
+            live_layout.addWidget(self.live_result_label)
+            self.live_failure_button = QtWidgets.QPushButton("Highlight failed geometry")
+            self.live_failure_button.setToolTip("Select the geometry that failed the scale check in Maya. The rig remains unchanged.")
+            self.live_failure_button.hide()
+            live_layout.addWidget(self.live_failure_button)
+            self._live_scale_result = {}
+            self._live_scale_scene = None
+            self.live_failure_button.clicked.connect(self._highlight_scale_failure)
+            self.live_use_button.clicked.connect(self._use_live_master)
+            self.live_add_button.clicked.connect(self._add_live_scale)
+            main_layout.addWidget(live_group)
+
             description = QtWidgets.QLabel(
                 "Create a clean resized copy. The selected control rig stays untouched."
             )
@@ -4051,7 +4124,7 @@ if QtWidgets:
             action_row.setSpacing(8)
             self.analyze_button = QtWidgets.QPushButton("Check Setup")
             self.create_button = QtWidgets.QPushButton("Make Copy")
-            self.create_button.setDefault(True)
+            self.create_button.setDefault(False)
             self.analyze_button.setMinimumHeight(36)
             self.create_button.setMinimumHeight(36)
             self.select_button = QtWidgets.QPushButton("Select Export Copy")
@@ -4095,7 +4168,7 @@ if QtWidgets:
             self.report_text.setMinimumHeight(140)
             main_layout.addWidget(self.report_text, 1)
 
-            self.status_label = QtWidgets.QLabel("Pick one rig control plus the top skeleton joint, then click Check Setup.")
+            self.status_label = QtWidgets.QLabel("Resize a character, add a scale control, or export a resized copy.")
             self.status_label.setWordWrap(True)
             selectable_flag = _qt_flag("TextInteractionFlag", "TextSelectableByMouse", 0)
             self.status_label.setTextInteractionFlags(selectable_flag)
@@ -4131,6 +4204,126 @@ if QtWidgets:
             self._update_scale_input_ui()
             import maya_aminate_ui
             maya_aminate_ui.apply(self, 'rig_scale', locals())
+
+        def _use_multiply_master(self):
+            self.multiply_failure_button.hide()
+            self._multiply_result = {}
+            selected = cmds.ls(selection=True, long=True, type="transform") or []
+            if len(selected) != 1:
+                self.multiply_master_line.clear()
+                self._multiply_master_id = None
+                self.multiply_result_label.setText("Select exactly one master control in Maya.")
+                return False
+            self.multiply_master_line.setText(selected[0])
+            identities = cmds.ls(selected[0], uuid=True) or []
+            self._multiply_master_id = identities[0] if len(identities) == 1 else None
+            self._multiply_scene = cmds.file(query=True, sceneName=True)
+            self.multiply_result_label.setText("Ready to multiply the character's current size.")
+            return True
+
+        def _multiply_character(self):
+            self.multiply_failure_button.hide()
+            self._multiply_result = {}
+            if not self.multiply_master_line.text() and not self._use_multiply_master():
+                return
+            import maya_rig_scale_setup
+            matches = cmds.ls(self._multiply_master_id, long=True) if self._multiply_master_id else []
+            if len(matches) != 1:
+                self.multiply_master_line.clear()
+                self.multiply_result_label.setText("The selected master is no longer in this scene. Select it again.")
+                return
+            self.multiply_button.setEnabled(False)
+            self.live_add_button.setEnabled(False)
+            try:
+                result = maya_rig_scale_setup.scale_character(matches[0], self.multiply_spin.value())
+                self._multiply_result = result
+                self._multiply_scene = cmds.file(query=True, sceneName=True)
+                master = result.get("master_control")
+                if master and cmds.objExists(master):
+                    self.multiply_master_line.setText(master)
+                if result.get("status") == "scaled":
+                    message = "Scaled by {0:g} ×. Current size: {1:g} × the setup size. Undo restores the previous size.".format(result["multiplier"], result["resulting_scale"])
+                    if result.get("usage_note"):
+                        message += "\n\n" + result["usage_note"]
+                    self.multiply_result_label.setText(message)
+                else:
+                    self.multiply_result_label.setText("Size not changed: " + result.get("reason", "This rig is not supported."))
+                    self.multiply_failure_button.setVisible(bool(result.get("failed_nodes")))
+            except Exception as exc:
+                self.multiply_result_label.setText("Resize could not finish: " + str(exc))
+            finally:
+                self.multiply_button.setEnabled(True)
+                self.live_add_button.setEnabled(True)
+
+        def _highlight_multiply_failure(self):
+            nodes = []
+            failures = self._multiply_result.get("failed_nodes", [])
+            if cmds.file(query=True, sceneName=True) != self._multiply_scene:
+                failures = []
+            for failure in failures:
+                matches = cmds.ls(failure.get("uuid"), long=True) if failure.get("uuid") else []
+                if len(matches) == 1 and cmds.nodeType(matches[0]) == failure.get("type"):
+                    nodes.append(matches[0])
+            if nodes:
+                cmds.select(list(dict.fromkeys(nodes)), replace=True)
+            else:
+                self.multiply_failure_button.hide()
+                self.multiply_result_label.setText("The failed geometry is no longer in this scene. Select the master and try again.")
+
+        def _use_live_master(self):
+            self.live_failure_button.hide()
+            self._live_scale_result = {}
+            selected = cmds.ls(selection=True, long=True, type="transform") or []
+            if len(selected) != 1:
+                self.live_result_label.setText("Select exactly one master control in Maya.")
+                return False
+            self.live_master_line.setText(selected[0])
+            self.live_result_label.setText("Ready to check and add Rig Scale to the selected master.")
+            return True
+
+        def _add_live_scale(self):
+            if not self.live_master_line.text() and not self._use_live_master():
+                return
+            import maya_rig_scale_setup
+            self.live_failure_button.hide()
+            self._live_scale_result = {}
+            self.live_add_button.setEnabled(False)
+            try:
+                result = maya_rig_scale_setup.add_rig_scale(self.live_master_line.text())
+                self._live_scale_result = result
+                self._live_scale_scene = cmds.file(query=True, sceneName=True)
+                if result.get("status") in ("added", "already_added"):
+                    master = result.get("master_control")
+                    if master and cmds.objExists(master):
+                        self.live_master_line.setText(master)
+                        cmds.select(master, replace=True)
+                    message = "Rig Scale is ready on the master. Use 0.5 for half size or 2 for double size. Test your animation, then save a new scene."
+                    if result.get("usage_note"):
+                        message += "\n\n" + result["usage_note"]
+                    self.live_result_label.setText(message)
+                else:
+                    self.live_result_label.setText("Setup not changed: " + result.get("reason", "This rig is not supported."))
+                    self.live_failure_button.setVisible(bool(result.get("failed_nodes")))
+            except Exception as exc:
+                self.live_result_label.setText("Setup could not finish: " + str(exc))
+            finally:
+                self.live_add_button.setEnabled(True)
+
+        def _highlight_scale_failure(self):
+            nodes = []
+            failures = self._live_scale_result.get("failed_nodes", [])
+            if cmds.file(query=True, sceneName=True) != self._live_scale_scene:
+                failures = []
+            for failure in failures:
+                node_id = failure.get("uuid")
+                matches = cmds.ls(node_id, long=True) if node_id else []
+                if len(matches) == 1 and cmds.nodeType(matches[0]) == failure.get("type"):
+                    nodes.append(matches[0])
+            if nodes:
+                cmds.select(list(dict.fromkeys(nodes)), replace=True)
+            else:
+                self.live_failure_button.hide()
+                self.live_result_label.setText("The failed geometry is no longer in this scene. Select the master and run the check again.")
 
         def _scale_mode_changed(self, *_args):
             self._update_scale_input_ui()

@@ -528,56 +528,57 @@ window.AMINATE_DOCS = {
       "id": "dynamic-parenting",
       "icon": "DP",
       "short": "Parent",
-      "title": "Dynamic Parenting",
+      "title": "Parent Manager",
       "media": "assets/panel-dynamic-parenting.png",
       "mediaItems": [
         {
           "type": "image",
           "src": "assets/panel-dynamic-parenting.png",
-          "title": "Dynamic Parenting · built panel preview"
+          "title": "Previous Dynamic Parenting panel"
         },
         {
           "type": "video",
           "src": "assets/dynamic_parenting.mp4",
-          "title": "Dynamic Parent tutorial",
+          "title": "Previous Dynamic Parenting tutorial",
           "poster": "assets/dynamic_parenting.png"
         },
         {
           "type": "image",
           "src": "assets/dynamic_parenting.gif",
-          "title": "Dynamic Parent GIF"
+          "title": "Previous Dynamic Parenting example"
         },
         {
           "type": "image",
           "src": "assets/dynamic_parenting.png",
-          "title": "Dynamic Parenting screenshot"
+          "title": "Previous Dynamic Parenting screenshot"
         }
       ],
-      "purpose": "Make an object follow a hand, then let go without a jump.",
-      "when": "A magazine, sword, phone, hand, or prop needs to follow different controls during a shot.",
+      "purpose": "Key what an object follows on a chosen frame.",
+      "when": "A scene object needs to follow different targets during a shot, such as a camera changing mounts or a prop changing hands.",
       "steps": [
-        "Select the moving object. Click Add Object.",
-        "Select the hand or other target. Click Pick Parent.",
-        "Choose a frame and target. Click Switch to this Parent."
+        "Fill in I want [what should move] to follow [what it should follow] using the Maya selection, then choose Move, Turn or Resize.",
+        "Go to the right frame and click Start following here.",
+        "Pick a new target and click Follow this instead. To release, click Stop following and keep this pose."
       ],
       "buttons": [
-        "Add Object",
-        "Pick Parent",
-        "Snap To Parent",
-        "Switch to this Parent",
-        "World",
-        "Fix Jumps",
-        "Delete Picked Switch"
+        "Start following here",
+        "Follow this instead",
+        "Stop following and keep this pose",
+        "Select follow link and keys",
+        "Save selection as a spot",
+        "Rename or recolor spot"
       ],
       "tips": [
-        "Leave Maintain Current Offset on when you want the object to keep its visible pose at the switch frame.",
-        "Bake to Rig uses the original source keyframe times by default; choose Bake Frames only when dense whole-frame sampling is intentional."
+        "Open Line up at a saved spot (optional) to save a locator's position and angle on the target. Move to the chosen spot lets you set a frame range to line up with it.",
+        "Select follow link and keys selects the Maya matrix link and its switch keys for the Graph Editor. Stopping also keys the object's pose.",
+        "Add changes in timeline order. Use Follow history to jump to an earlier change.",
+        "Open Previous Dynamic Parenting setups to edit scenes made with the earlier tool."
       ],
-      "before": "Pick the prop that changes hands, such as a phone, sword, or magazine.",
-      "see": "The prop follows the new parent without a sudden jump.",
-      "help": "A jump usually means the wrong parent or offset was saved. Undo, keep the current offset, and try the switch on a clean test frame.",
+      "before": "Pick any compatible object or control and the target it should follow.",
+      "see": "The object keeps its pose when it switches or detaches. Parent Manager shows the frames keyed on the follow link. Scrub back to see the earlier target restored.",
+      "help": "If the rig locks a needed channel or the target depends on the object, choose a different compatible control.",
       "number": "05",
-      "tabTitle": "Dynamic Parenting",
+      "tabTitle": "Parent Manager",
       "searchTerms": "attach detach follow pickup pick up let go drop pass hand prop gun magazine world parent blend offset"
     },
     {
@@ -1670,7 +1671,7 @@ window.AMINATE_DOCS = {
     {
       "label": "DP",
       "group": "Workflow",
-      "tooltip": "Open Dynamic Parenting."
+      "tooltip": "Open Parent Manager."
     },
     {
       "label": "HF",

@@ -134,11 +134,9 @@ RECIPES = {
   ('Advanced cleanup', False, 'self.euler_cleanup_button self.preserve_spins_button self.sync_euler_button self.quaternion_button self.custom_pass_button self.clear_button'),
   ('Help', False, 'description note')]),
  'rig_scale': ('main_layout', [
-  ('1. Rig and target size', True, 'roots_group'),
-  ('2. Create export copy', True, 'action_row'),
-  ('3. Export copy', True, 'self.select_button self.export_button'),
-  ('Copy management', False, 'self.advanced_toggle self.advanced_body'),
-  ('Details', False, 'description note self.report_text')]),
+  ('Scale character', True, 'multiply_group'),
+  ('Add a scale control', False, 'live_group'),
+  ('Export a resized copy', False, 'description note roots_group action_row self.advanced_toggle self.advanced_body self.report_text')]),
  'assistant': ('layout', [
   ('1. Character and ground', True, 'setup_group'),
   ('2. Contact points', True, 'contacts_group'),
@@ -193,10 +191,10 @@ RECIPES = {
   ('2. Rotate around pivot', True, 'self.apply_pivot_button self.clear_pivot_button self.pivot_range_status'),
   ('Help', False, 'summary self.pivot_help')]),
  'ikfk': ('layout', [
-  ('Use saved switch', True, 'saved_group self.switch_fk_to_ik_button self.switch_ik_to_fk_button'),
-  ('Set up rig', False, 'setup_group fk_group ik_group self.detect_profile_button self.save_profile_button'),
-  ('Advanced matching', False, 'details_group'),
-  ('Help', False, 'summary self.ikfk_help')]),
+  ('Switch on current frame', True, 'setup_actions self.ikfk_state self.switch_fk_to_ik_button self.switch_ik_to_fk_button'),
+  ('Set up rig', False, 'self.ikfk_manual_hint self.ikfk_chain_mode_combo fk_group ik_group self._ikfk_details_section advanced_section mapping_actions'),
+  ('Saved switches', False, 'saved_group'),
+  ('Help', False, 'self.ikfk_help')]),
 }
 
 
@@ -248,7 +246,8 @@ def apply(owner, key, local):
     elif key == 'rotation':
         primary(owner.apply_recommended_button, 'Apply Recommended Fix')
     elif key == 'rig_scale':
-        primary(owner.create_button, 'Create Export Copy')
+        primary(owner.multiply_button, 'Scale Character')
+        owner.create_button.setText('Create Export Copy')
         owner.advanced_toggle.setChecked(True); owner.advanced_toggle.hide(); owner.advanced_body.show()
     elif key == 'assistant':
         owner._task_sections[0].toggle.setText('Pose Balance (Preview)')
@@ -307,9 +306,11 @@ def apply(owner, key, local):
         owner.edit_pivot_button.setText('Reposition Pivot')
         primary(owner.apply_pivot_button, 'Rotate Around Pivot')
     elif key == 'ikfk':
+        owner.detect_profile_button.setText('Detect Selected Limb')
         owner.switch_fk_to_ik_button.setText('Switch to IK')
         owner.switch_ik_to_fk_button.setText('Switch to FK')
-        owner.load_profile_button.clicked.connect(lambda _checked=False, section=owner._task_sections[1]: section.setExpanded(False))
+        owner._ikfk_setup_section = owner._task_sections[1]
+        owner.load_profile_button.clicked.connect(lambda _checked=False, section=owner._ikfk_setup_section: section.setExpanded(False))
     owner.setMinimumWidth(320)
     for form in owner.findChildren(QtWidgets.QFormLayout):
         form.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)

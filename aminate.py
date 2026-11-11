@@ -16,6 +16,9 @@ import maya_crash_recovery as _crash_recovery  # noqa: F401
 
 _WORKFLOW_MODULE_NAMES = (
     "maya_dynamic_parenting_tool",
+    "maya_parent_manager",
+    "maya_parent_manager_tutorial",
+    "maya_parent_manager_ui",
     "maya_contact_hold",
     "maya_crash_recovery",
     "maya_animators_pencil",
@@ -39,6 +42,8 @@ _WORKFLOW_MODULE_NAMES = (
     "maya_skinning_cleanup",
     "maya_root_motion",
     "maya_rig_scale_export",
+    "maya_rig_scale_setup",
+    "maya_ikfk_matching",
     "maya_video_reference_tool",
     "maya_timeline_notes",
     "maya_aminate_customization",

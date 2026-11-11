@@ -4,8 +4,8 @@ from __future__ import absolute_import, division, print_function
 LICENSE_FILE_NAME = "LICENSE"
 MANIFEST_FILE_NAME = "manifest.json"
 TUTORIAL_FILE_NAME = "tutorial.html"
-RELEASE_VERSION_LABEL = "Version 0.3.13"
-RELEASE_TAG = "v0.3.13"
+RELEASE_VERSION_LABEL = "Version 0.3.14"
+RELEASE_TAG = "v0.3.14"
 RELEASE_TAG_FILE_SAFE = RELEASE_TAG.replace(".", "_").replace("-", "_")
 INSTALLER_RELEASE_NAME = "Aminate_{0}_drag_this_file_into_Maya.py".format(RELEASE_TAG_FILE_SAFE)
 LEGACY_INSTALLER_RELEASE_NAME = "Aminate drag and drop this onto Maya viewport.py"
@@ -43,6 +43,9 @@ RUNTIME_FILES = [
     "maya_crash_recovery.py",
     "maya_dynamic_parent_pivot.py",
     "maya_dynamic_parenting_tool.py",
+    "maya_parent_manager.py",
+    "maya_parent_manager_tutorial.py",
+    "maya_parent_manager_ui.py",
     "maya_face_retarget.py",
     "maya_floating_channel_box.py",
     "maya_history_timeline.py",
@@ -50,6 +53,7 @@ RUNTIME_FILES = [
     "maya_reference_manager.py",
     "maya_root_motion.py",
     "maya_rig_scale_export.py",
+    "maya_rig_scale_setup.py",
     "maya_selected_animation_fbx_export.py",
     "maya_rotation_doctor.py",
     "maya_shelf_utils.py",
@@ -60,6 +64,7 @@ RUNTIME_FILES = [
     "maya_timeline_notes.py",
     "maya_timing_tools.py",
     "maya_universal_ikfk_switcher.py",
+    "maya_ikfk_matching.py",
     "maya_video_reference_tool.py",
     "combine_freeze_pivot_icon.png",
     "game_animation_mode_icon.png",

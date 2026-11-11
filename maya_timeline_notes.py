@@ -377,14 +377,16 @@ class _TimelineTooltipFilter(QtCore.QObject if QtCore else object):
         if watched is not self.widget or not QtCore:
             return False
         event_type = event.type()
-        if event_type == _qt_flag("QEvent", "ToolTip", fallback=QtCore.QEvent.ToolTip):
-            note = self.controller.note_at_widget_x(event.pos().x(), self.widget.width())
+        if event_type == QtCore.QEvent.ToolTip:
+            note = self.controller.follow_note_at_x(event.pos().x(), self.widget.width())
+            if not note:
+                note = self.controller.note_at_widget_x(event.pos().x(), self.widget.width())
             if note:
                 self.controller.show_tooltip(note, event.globalPos())
                 return True
             self.controller.hide_tooltip()
-            return True
-        if event_type == _qt_flag("QEvent", "Leave", fallback=QtCore.QEvent.Leave):
+            return False
+        if event_type == QtCore.QEvent.Leave:
             self.controller.hide_tooltip()
         return False
 
@@ -425,7 +427,15 @@ class _TimelineNoteTooltipBubble(QtWidgets.QFrame if QtWidgets else object):
         )
         self.label.setText(self.controller.tooltip_html(note))
         self.adjustSize()
-        self.move(global_pos + QtCore.QPoint(14, 18))
+        position = global_pos + QtCore.QPoint(14, 18)
+        screen = QtGui.QGuiApplication.screenAt(global_pos)
+        if screen:
+            area = screen.availableGeometry()
+            if position.y() + self.height() > area.bottom() + 1:
+                position.setY(global_pos.y() - self.height() - 12)
+            position.setX(max(area.left(), min(position.x(), area.right() - self.width() + 1)))
+            position.setY(max(area.top(), min(position.y(), area.bottom() - self.height() + 1)))
+        self.move(position)
         if self._animation and self._effect:
             self._animation.stop()
             self._effect.setOpacity(0.0)
@@ -466,9 +476,9 @@ class _TimelineNotesOverlay(QtWidgets.QWidget if QtWidgets else object):
         if watched is self.parent_widget and QtCore:
             event_type = event.type()
             if event_type in (
-                _qt_flag("QEvent", "Resize", fallback=QtCore.QEvent.Resize),
-                _qt_flag("QEvent", "Show", fallback=QtCore.QEvent.Show),
-                _qt_flag("QEvent", "Paint", fallback=QtCore.QEvent.Paint),
+                QtCore.QEvent.Resize,
+                QtCore.QEvent.Show,
+                QtCore.QEvent.Paint,
             ):
                 self.sync_geometry()
                 self.raise_()
@@ -478,10 +488,9 @@ class _TimelineNotesOverlay(QtWidgets.QWidget if QtWidgets else object):
         if not QtGui:
             return
         settings = self.controller.timeline_customization()
-        if not settings["overlay_enabled"]:
-            return
-        rects = self.controller.timeline_note_rects(self.width(), height=self.height())
-        if not rects:
+        rects = self.controller.timeline_note_rects(self.width(), height=self.height()) if settings["overlay_enabled"] else []
+        marks = self.controller.follow_mark_positions(self.width())
+        if not rects and not marks:
             return
         painter = QtGui.QPainter(self)
         antialiasing = getattr(QtGui.QPainter, "Antialiasing", None)
@@ -502,6 +511,16 @@ class _TimelineNotesOverlay(QtWidgets.QWidget if QtWidgets else object):
                 3.0,
                 3.0,
             )
+        for x, entries in marks.items():
+            colors = list(dict.fromkeys(color for _, color in entries))
+            # Draw in the key row so a follow change is visible even when
+            # the selected object also has an ordinary key on that frame.
+            key_top = 9
+            key_height = max(1, self.height() - key_top - 9)
+            for index, color in enumerate(colors):
+                top = key_top + round(key_height * index / len(colors))
+                bottom = key_top + round(key_height * (index + 1) / len(colors))
+                painter.fillRect(x - 2, top, 5, max(1, bottom - top), QtGui.QColor(color))
         painter.end()
 
 
@@ -513,9 +532,14 @@ class MayaTimelineNotesController(object):
         self.tooltip_widget = None
         self.tooltip_bubble = None
         self.overlay_widget = None
+        self.follow_marks = []
+        self.follow_callbacks = []
         self.install_timeline_ui_hooks()
 
     def shutdown(self):
+        for callback in self.follow_callbacks:
+            om.MMessage.removeCallback(callback)
+        self.follow_callbacks.clear()
         if self.tooltip_filter and self.tooltip_widget:
             try:
                 self.tooltip_widget.removeEventFilter(self.tooltip_filter)
@@ -584,8 +608,6 @@ class MayaTimelineNotesController(object):
             except Exception:
                 pass
             self.overlay_widget = None
-        if not self.timeline_customization()["overlay_enabled"]:
-            return
         self.overlay_widget = _TimelineNotesOverlay(self, widget)
         self.overlay_widget.refresh_notes()
 
@@ -599,6 +621,43 @@ class MayaTimelineNotesController(object):
                 self.overlay_widget.refresh_notes()
             except Exception:
                 pass
+
+    def refresh_follow_marks(self, *_):
+        from maya_parent_manager import follow_timeline_marks
+
+        self.follow_marks = follow_timeline_marks()
+        self.hide_tooltip()
+        self.refresh_timeline_overlay()
+
+    def watch_follow_marks(self):
+        if not self.follow_callbacks:
+            for event in ("Undo", "Redo", "NewSceneOpened", "SceneOpened"):
+                self.follow_callbacks.append(om.MEventMessage.addEventCallback(event, self.refresh_follow_marks))
+        self.refresh_follow_marks()
+
+    def follow_mark_positions(self, width):
+        if not self.follow_marks or width <= 0:
+            return {}
+        start = cmds.playbackOptions(query=True, minTime=True)
+        end = cmds.playbackOptions(query=True, maxTime=True)
+        # Maya's Time Slider reserves an eight-pixel margin at each end.
+        inset = min(8, width // 2)
+        pixels_per_frame = (width - 2 * inset) / (end - start + 1)
+        positions = {}
+        for frame, label, color in self.follow_marks:
+            if start <= frame <= end:
+                x = min(width - 1, round(inset + (frame - start) * pixels_per_frame))
+                positions.setdefault(x, []).append((label, color))
+        return positions
+
+    def follow_note_at_x(self, x, width):
+        positions = self.follow_mark_positions(width)
+        if not positions:
+            return None
+        nearest = min(positions, key=lambda position: abs(position - x))
+        if abs(nearest - x) > 5:
+            return None
+        return {"follow_lines": positions[nearest]}
 
     def hide_tooltip(self):
         if self.tooltip_bubble:
@@ -706,6 +765,11 @@ class MayaTimelineNotesController(object):
         return rects
 
     def tooltip_html(self, note):
+        if "follow_lines" in note:
+            return "<br>".join(
+                "<span style='color:{0}'>●</span> {1}".format(color, _escape_html(label))
+                for label, color in note["follow_lines"]
+            )
         title = (note.get("title") or "").strip()
         preferred_text = _preferred_note_text(note)
         html_parts = [
@@ -1558,6 +1622,17 @@ if QtWidgets:
             _open_external_url(DONATE_URL)
 
 
+def refresh_parent_manager_timeline():
+    """Keep Parent Manager and Timeline Notes on the same time-slider widgets."""
+    global GLOBAL_CONTROLLER
+    if MAYA_AVAILABLE and QtWidgets and not cmds.about(batch=True):
+        if GLOBAL_CONTROLLER is None:
+            GLOBAL_CONTROLLER = MayaTimelineNotesController()
+        elif not GLOBAL_CONTROLLER.overlay_widget:
+            GLOBAL_CONTROLLER.install_timeline_ui_hooks()
+        GLOBAL_CONTROLLER.watch_follow_marks()
+
+
 def launch_maya_timeline_notes(dock=False):
     global GLOBAL_CONTROLLER, GLOBAL_WINDOW
     if not (MAYA_AVAILABLE and QtWidgets):
@@ -1571,9 +1646,9 @@ def launch_maya_timeline_notes(dock=False):
             return GLOBAL_WINDOW
         except Exception:
             GLOBAL_WINDOW = None
-            GLOBAL_CONTROLLER = None
 
-    GLOBAL_CONTROLLER = MayaTimelineNotesController()
+    if GLOBAL_CONTROLLER is None:
+        GLOBAL_CONTROLLER = MayaTimelineNotesController()
     GLOBAL_WINDOW = MayaTimelineNotesWindow(GLOBAL_CONTROLLER, parent=_maya_main_window())
     GLOBAL_WINDOW.show()
     return GLOBAL_WINDOW

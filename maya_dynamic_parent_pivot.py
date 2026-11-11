@@ -22,6 +22,7 @@ import maya_dynamic_parenting_tool
 import maya_control_picker
 import maya_face_retarget
 import maya_history_timeline
+import maya_ikfk_matching
 import maya_reference_manager
 import maya_onion_skin
 import maya_surface_contact
@@ -78,9 +79,9 @@ DOCKED_WORKFLOW_MIN_HEIGHT = 480
 FOLLOW_AMIR_URL = "https://followamir.com"
 DEFAULT_DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=2U2GXSKFJKJCA"
 DONATE_URL = os.environ.get("AMIR_PAYPAL_DONATE_URL") or os.environ.get("AMIR_DONATE_URL") or DEFAULT_DONATE_URL
-VERSION_LABEL = "Version 0.3.13"
+VERSION_LABEL = "Version 0.3.14"
 TUTORIALS_DOCS_RELATIVE_PATH = os.path.join("docs", "index.html")
-TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.13/Aminate_v0.3.13_offline_tutorial.zip"
+TUTORIAL_RELEASE_URL = "https://github.com/AmirMDEV/aminate/releases/download/v0.3.14/Aminate_v0.3.14_offline_tutorial.zip"
 DEFAULT_SHELF_NAME = maya_shelf_utils.DEFAULT_SHELF_NAME
 DEFAULT_SHELF_BUTTON_LABEL = "Aminate"
 SHELF_BUTTON_DOC_TAG = "aminateShelfButton"
@@ -101,7 +102,7 @@ PROFILE_FILE_NAME = "amir_anim_workflow_ikfk_profiles.json"
 PROFILE_VERSION = 1
 DEFAULT_PV_DISTANCE_MULTIPLIER = 2.0
 EPSILON = 1.0e-5
-TAB_PARENTING = "Dynamic Parenting"
+TAB_PARENTING = "Parent Manager"
 TAB_CONTACT_HOLD = "Hand / Foot Hold"
 TAB_SURFACE_CONTACT = "Surface Contact"
 TAB_PIVOT = "Dynamic Pivot"
@@ -672,11 +673,11 @@ TAB_HELP_TEXT = {
     TAB_STUDENT_CORE: "Move keys, change timing, and open tools from Maya's bottom bar.",
     TAB_TIMING: "Set up cameras, textures, key snapping, and other scene helpers.",
     TAB_REFERENCE_MANAGER: "Put your saved scene and its needed files in one zip.",
-    TAB_PARENTING: "Make an object follow a hand, then let go without a jump.",
+    TAB_PARENTING: "Choose what should move and what it should follow. Key the change on this frame.",
     TAB_CONTACT_HOLD: "Keep a hand or foot still while the character moves.",
     TAB_SURFACE_CONTACT: "Keep hands, feet, or objects from passing through a surface.",
     TAB_PIVOT: "Turn controls around a temporary point, such as a heel.",
-    TAB_IKFK: "Switch an arm or leg between IK and FK without changing its pose.",
+    TAB_IKFK: "Switch a mapped control chain between IK and FK while holding its pose.",
     TAB_FACE_RETARGET: "Copy movement from one character's controls to another character's controls.",
     TAB_CONTROL_PICKER: "Find and select a character's controls from a list or picture.",
     TAB_ANIMATORS_PENCIL: "Draw on the view to plan poses or leave notes.",
@@ -687,7 +688,7 @@ TAB_HELP_TEXT = {
     TAB_ROTATION: "Find and fix unwanted twists or flips in animated controls.",
     TAB_SKIN: "Fix a character's transforms or copy how its skin follows the bones.",
     TAB_ROOT_MOTION: "Animate the root independently while preserving the body, then bake root motion.",
-    TAB_RIG_SCALE: "Make a bigger or smaller export copy. Keep the original rig unchanged.",
+    TAB_RIG_SCALE: "Add a checked scale control to your rig, or make a separate resized export copy.",
     TAB_VIDEO: "Put a video or picture in the view to follow or trace.",
     TAB_TIMELINE: "Add coloured notes to frames so you can find them later.",
     TAB_SMEAR_FRAMES: "Make a stretchy motion shape. Edit it and choose when it appears.",
@@ -717,9 +718,9 @@ TAB_WORKFLOW_STEPS = {
         "Choose a folder, then click Package Scene To Zip.",
     ),
     TAB_PARENTING: (
-        "Select the moving object. Click Add Object.",
-        "Select the hand or other target. Click Pick Parent.",
-        "Choose a frame and target. Click Switch to this Parent.",
+        "Fill in I want [what should move] to follow [what it should follow].",
+        "Go to the frame where the follow should start. Click Start following here.",
+        "Pick a new target and click Follow this instead to switch on one frame. Click Stop following and keep this pose to let it move freely again.",
     ),
     TAB_CONTACT_HOLD: (
         "Select a hand or foot. Click Use Selected Control.",
@@ -737,9 +738,9 @@ TAB_WORKFLOW_STEPS = {
         "Rotate the marker, then use the turn button. Check the movement.",
     ),
     TAB_IKFK: (
-        "Pick one arm or leg. Click Set Up From Selection.",
-        "Check its controls: IK moves the end; FK turns each joint.",
-        "Save the setup. Switch to IK or FK and check the pose.",
+        "Select a limb control and choose Detect Selected Limb, or choose Manual Setup.",
+        "In Manual Setup, pick the FK chain and the IK hand or foot in Maya.",
+        "Check the target and active mode. Switch on the current frame.",
     ),
     TAB_FACE_RETARGET: (
         "Load the controls to copy from on the left.",
@@ -792,9 +793,9 @@ TAB_WORKFLOW_STEPS = {
         "Bake every frame or authored keyframes, or cancel to restore the original.",
     ),
     TAB_RIG_SCALE: (
-        "Load the rig control and top skeleton joint.",
-        "Set the size. 150% means one and a half times the original.",
-        "Click Check Setup, then Make Copy. Export the copy when it looks right.",
+        "Select the character's master control in Maya.",
+        "Click Add Rig Scale. Unsupported setups are left unchanged.",
+        "Use Rig Scale on the master: 1 is original size. Check your animation and save a new scene.",
     ),
     TAB_VIDEO: (
         "Click Use Active View, then Pick Video / Images.",
@@ -1536,52 +1537,6 @@ def _pose_mismatches(node_name, translation, rotation):
             if abs(_angle_delta(current_rotation[index], value)) > 1.0e-4:
                 mismatches.append(("rotateX", "rotateY", "rotateZ")[index])
     return mismatches
-
-
-def _copy_world_pose(target_node, source_node):
-    """Copy world translation and rotation, returning honest pose/key status.
-
-    Maya controls can expose locked translate or rotate channels.  A failed
-    xform is intentionally retained as a mismatch instead of being reported as
-    an exact match.  Callers can still finish the switch and surface the
-    actionable mismatch to the user.
-    """
-    result = {
-        "target": target_node,
-        "source": source_node,
-        "translation": False,
-        "rotation": False,
-        "mismatches": [],
-        "locked": [],
-    }
-    if not target_node or not source_node:
-        result["mismatches"] = ["missing target or source"]
-        return result
-    try:
-        translation = list(_world_translation(source_node))
-        rotation = list(_world_rotation(source_node))
-    except Exception as exc:
-        result["mismatches"] = ["could not read source pose: {0}".format(exc)]
-        return result
-    for attr_name in ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"):
-        plug = "{0}.{1}".format(target_node, attr_name)
-        try:
-            if cmds.objExists(plug) and cmds.getAttr(plug, lock=True):
-                result["locked"].append(attr_name)
-        except Exception:
-            pass
-    try:
-        _set_world_translation(target_node, translation)
-        result["translation"] = True
-    except Exception:
-        pass
-    try:
-        _set_world_rotation(target_node, rotation)
-        result["rotation"] = True
-    except Exception:
-        pass
-    result["mismatches"] = _pose_mismatches(target_node, translation, rotation)
-    return result
 
 
 def _set_keyable_channels(node_name, attrs):
@@ -2525,20 +2480,10 @@ def _control_candidate_adjustment(node_name):
     return score
 
 
-def _detect_side_from_nodes(nodes):
-    combined = " ".join(_strip_namespace(node).lower() for node in nodes)
-    if any(token in combined for token in SIDE_TOKEN_SETS["left"]):
-        return "left"
-    if any(token in combined for token in SIDE_TOKEN_SETS["right"]):
-        return "right"
-    return "left"
-
-
-def _detect_limb_from_nodes(nodes):
-    combined = " ".join(_strip_namespace(node).lower() for node in nodes)
-    if "leg" in combined or "ankle" in combined or "knee" in combined or "foot" in combined:
-        return "leg"
-    return "arm"
+def _has_named_side(name, side):
+    words = name.replace("-", "_").split("_")
+    return any(word.startswith(side) or word in (alias.rstrip("_") for alias in SIDE_TOKEN_SETS[side])
+               for word in words)
 
 
 def _top_parent(node_name):
@@ -2618,7 +2563,18 @@ def _ranked_candidates(nodes, required_tokens, bonus_tokens, prefer_controls=Fal
 
 def _best_candidate(nodes, required_tokens, bonus_tokens, prefer_controls=False):
     ranked = _ranked_candidates(nodes, required_tokens, bonus_tokens, prefer_controls=prefer_controls)
-    return ranked[0][1] if ranked else ""
+    return ranked[0][1] if ranked and (len(ranked) == 1 or ranked[0][0] > ranked[1][0]) else ""
+
+
+def _unique_ranked_control(ranked, excluded):
+    best_controls = []
+    for score, node in ranked:
+        if best_controls and score < best_controls[0][0]:
+            break
+        control = _nearest_anim_control(node)
+        if control not in excluded and (score, control) not in best_controls:
+            best_controls.append((score, control))
+    return best_controls[0][1] if len(best_controls) == 1 else ""
 
 
 def _best_chain_candidates(nodes, side, limb, control_type):
@@ -2633,14 +2589,12 @@ def _best_chain_candidates(nodes, side, limb, control_type):
 
             def _fk_segment_score(node_name):
                 lowered = _strip_namespace(node_name).lower()
+                if fk_token not in lowered or not any(alias in lowered for alias in aliases):
+                    return 0
                 score = _score_node_name(node_name, prefix_tokens + [fk_token], ("ctrl", "ctl", "control"))
                 score += _control_candidate_adjustment(node_name)
-                if any(alias in lowered for alias in aliases):
-                    score += 8
-                    if segment in lowered:
-                        score += 4
-                else:
-                    score -= 6
+                if segment in lowered:
+                    score += 4
                 return score
 
             ranked = _ranked_candidates(nodes, (), (), prefer_controls=False, score_fn=_fk_segment_score)
@@ -2650,13 +2604,7 @@ def _best_chain_candidates(nodes, side, limb, control_type):
                 required.append(fk_token)
             required.append(segment)
             ranked = _ranked_candidates(nodes, required, ("ctrl", "ctl"), prefer_controls=True)
-        candidate = ""
-        for _, node_name in ranked:
-            resolved = _nearest_anim_control(node_name)
-            if resolved in used:
-                continue
-            candidate = resolved
-            break
+        candidate = _unique_ranked_control(ranked, used)
         if candidate:
             used.add(candidate)
             results.append(candidate)
@@ -2682,19 +2630,14 @@ def _ik_end_control_score(node_name, side, limb):
 
 
 def _best_ik_end_control(nodes, side, limb, exclude=None):
-    exclude = set(exclude or [])
     ranked = _ranked_candidates(
-        nodes,
+        [node for node in nodes if "ik" in _strip_namespace(node).lower()],
         (),
         (),
         prefer_controls=False,
         score_fn=lambda node_name: _ik_end_control_score(node_name, side, limb),
     )
-    for _, node_name in ranked:
-        resolved = _nearest_anim_control(node_name)
-        if resolved not in exclude:
-            return resolved
-    return ""
+    return _unique_ranked_control(ranked, exclude or ())
 
 
 def _pole_vector_score(node_name, side, limb):
@@ -2713,23 +2656,18 @@ def _pole_vector_score(node_name, side, limb):
 
 
 def _best_pole_vector_control(nodes, side, limb, exclude=None):
-    exclude = set(exclude or [])
     ranked = _ranked_candidates(
-        nodes,
+        [node for node in nodes if any(token in _strip_namespace(node).lower() for token in ("pv", "pole", "vector"))],
         (),
         (),
         prefer_controls=False,
         score_fn=lambda node_name: _pole_vector_score(node_name, side, limb),
     )
-    for _, node_name in ranked:
-        resolved = _nearest_anim_control(node_name)
-        if resolved not in exclude:
-            return resolved
-    return ""
+    return _unique_ranked_control(ranked, exclude or ())
 
 
 def _detect_switch_attr(nodes, side, limb):
-    token_sets = (("ikfk",), ("fkik",), ("ik_fk",), ("fk_ik",), ("blend",), ("ik", "fk"))
+    token_sets = (("ikfk",), ("fkik",), ("ik_fk",), ("fk_ik",), ("ik", "fk"))
     candidates = []
     for node_name in nodes:
         attr_names = _dedupe_preserve_order((cmds.listAttr(node_name, keyable=True) or []) + (cmds.listAttr(node_name, userDefined=True) or []))
@@ -2741,22 +2679,34 @@ def _detect_switch_attr(nodes, side, limb):
                     token_score += 6
             if token_score <= 0:
                 continue
+            plug = "{0}.{1}".format(node_name, attr_name)
+            if not cmds.getAttr(plug, keyable=True) or cmds.getAttr(plug, type=True) not in (
+                "bool", "enum", "byte", "short", "long", "float", "double",
+            ):
+                continue
             score = token_score
             short = _strip_namespace(node_name).lower()
             if any(alias in short for alias in SIDE_TOKEN_SETS.get(side, (side,))):
                 score += 1
             if limb in short:
                 score += 1
-            candidates.append((score, "{0}.{1}".format(node_name, attr_name)))
-    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return candidates[0][1] if candidates else ""
+            candidates.append((score, plug))
+    candidates.sort(reverse=True)
+    if not candidates or len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
+        return ""
+    return candidates[0][1]
 
 
 def _detect_match_chain(nodes, side, limb):
     segment_tokens = SEGMENT_TOKENS.get(limb, SEGMENT_TOKENS["arm"])
+    source_tokens = ("jnt", "joint", "bind", "result", "drv", "match")
+    nodes = [
+        node for node in nodes
+        if cmds.nodeType(node) == "joint" or any(token in _strip_namespace(node).lower() for token in source_tokens)
+    ]
     results = []
     for segment in segment_tokens:
-        candidate = _best_candidate(nodes, (side, limb, segment), ("jnt", "joint", "bind", "result", "drv"))
+        candidate = _best_candidate(nodes, (side, limb, segment), source_tokens)
         if candidate:
             results.append(candidate)
     return results
@@ -2799,7 +2749,7 @@ def _detect_ik_match_node(nodes, ik_control, side, limb):
     return best[0] if len(best) == 1 else ""
 
 
-def _resolve_profile_node(node_name, rig_root_hint=""):
+def _resolve_profile_node(node_name, rig_root_hint="", exact_paths=False):
     if not node_name:
         return ""
     all_nodes = _all_transforms_and_joints()
@@ -2813,8 +2763,8 @@ def _resolve_profile_node(node_name, rig_root_hint=""):
 
     rig_root = rig_root_hint or ""
     if rig_root:
-        if rig_root.startswith("|") and rig_root in all_nodes:
-            root_candidates = [rig_root]
+        if rig_root.startswith("|") and (exact_paths or rig_root in all_nodes):
+            root_candidates = [rig_root] if rig_root in all_nodes else []
         else:
             root_candidates = [candidate for candidate in all_nodes if _matches_name(candidate, rig_root)]
         if len(root_candidates) != 1:
@@ -2826,7 +2776,7 @@ def _resolve_profile_node(node_name, rig_root_hint=""):
             candidates = []
     else:
         candidates = []
-    if not candidates:
+    if not candidates and not (exact_paths and node_name.startswith("|")):
         for candidate in all_nodes:
             if not _matches_name(candidate, node_name):
                 continue
@@ -2840,11 +2790,11 @@ def _resolve_profile_node(node_name, rig_root_hint=""):
     return candidates[0]
 
 
-def _resolve_profile_attr(attr_path, rig_root_hint=""):
+def _resolve_profile_attr(attr_path, rig_root_hint="", exact_paths=False):
     if not attr_path or "." not in attr_path:
         return ""
     node_name, attr_name = attr_path.rsplit(".", 1)
-    resolved = _resolve_profile_node(node_name, rig_root_hint=rig_root_hint)
+    resolved = _resolve_profile_node(node_name, rig_root_hint=rig_root_hint, exact_paths=exact_paths)
     if not resolved:
         return ""
     plug = "{0}.{1}".format(resolved, attr_name)
@@ -2856,10 +2806,22 @@ def _is_generic_chain(profile):
     mode = (profile.get("chain_mode", "") or "").strip().lower()
     if mode in ("generic", "chain", "explicit"):
         return True
+    if mode == "limb":
+        return False
     fk_controls = [node_name for node_name in profile.get("fk_controls", []) if node_name]
     ik_controls = [node_name for node_name in profile.get("ik_controls", []) if node_name]
     match_nodes = [node_name for node_name in profile.get("match_nodes", []) if node_name]
     return len(fk_controls) >= 3 and len(fk_controls) == len(ik_controls) == len(match_nodes)
+
+
+def _ikfk_profile_paths(profile):
+    return {
+        node for node in (
+            profile["rig_root"], profile["switch_attr"].rsplit(".", 1)[0],
+            profile["ik_control"], profile["pole_vector_control"], profile["ik_match_node"],
+            *profile["fk_controls"], *profile["ik_controls"], *profile["match_nodes"], *profile["extra_controls"],
+        ) if node
+    }
 
 
 class AminateController(object):
@@ -3521,29 +3483,16 @@ class AminateController(object):
                 "match_nodes": [],
                 "ik_match_node": "",
             }, ["Select controls from one rig root only; the current selection spans multiple rigs."]
-        search_nodes = selected
-        side = _detect_side_from_nodes(search_nodes)
-        limb = _detect_limb_from_nodes(search_nodes)
         rig_root = roots[0]
-
-        def _switch_score(plug_name):
-            if not plug_name or "." not in plug_name:
-                return -999
-            node_name, attr_name = plug_name.rsplit(".", 1)
-            lowered_attr = attr_name.lower()
-            score = 0
-            for token_group in (("ikfk",), ("fkik",), ("ik_fk",), ("fk_ik",), ("blend",), ("ik", "fk")):
-                if all(token in lowered_attr for token in token_group):
-                    score += 6
-            short = _strip_namespace(node_name).lower()
-            if any(alias in short for alias in SIDE_TOKEN_SETS.get(side, (side,))):
-                score += 1
-            if limb in short:
-                score += 1
-            return score
-
-        def _match_score(nodes):
-            return sum(_score_node_name(node_name, (side, limb), ("jnt", "joint", "bind", "result", "drv")) for node_name in nodes)
+        connected = maya_ikfk_matching.detect(selected, rig_root)
+        if len(connected) == 1:
+            profile = connected[0]
+            profile["namespace_hint"] = _namespace_prefix(selected[0])
+            return self._normalize_profile(profile), []
+        if len(connected) > 1:
+            return {"rig_root": rig_root, "chain_mode": "limb"}, [
+                "This selection identifies several connected limbs. Select one FK, IK, or pole-vector control."
+            ]
 
         def _detect_from_candidates(candidates):
             pole_vector_control = _best_pole_vector_control(candidates, side, limb)
@@ -3559,7 +3508,27 @@ class AminateController(object):
                 "ik_match_node": _detect_ik_match_node(candidates, ik_control, side, limb),
             }
 
-        candidates = _candidate_nodes_for_profile(rig_root_hint=rig_root)
+        # Auto-setup is for recognizable limbs. Generic chains use an explicit map.
+        limb_tokens = {
+            "arm": ("arm", "shoulder", "elbow", "wrist", "hand"),
+            "leg": ("leg", "hip", "knee", "ankle", "foot"),
+        }
+        selection_names = [_strip_namespace(node).lower() for node in selected]
+        sides = {key for key in SIDE_TOKEN_SETS if any(_has_named_side(name, key) for name in selection_names)}
+        limbs = {key for key, aliases in limb_tokens.items() if any(
+            alias in name for name in selection_names for alias in aliases
+        )}
+        if len(sides) != 1 or len(limbs) != 1:
+            return {"rig_root": rig_root, "chain_mode": "generic"}, [
+                "Select controls from one clearly named arm or leg, or fill in a mapped chain manually."
+            ]
+        side = sides.pop()
+        limb = limbs.pop()
+        candidates = [
+            node for node in _candidate_nodes_for_profile(rig_root_hint=rig_root)
+            if _has_named_side(_strip_namespace(node).lower(), side)
+            and any(alias in _strip_namespace(node).lower() for alias in limb_tokens[limb])
+        ]
         detected_data = _detect_from_candidates(candidates)
         if not candidates:
             return {
@@ -3592,6 +3561,7 @@ class AminateController(object):
             "rig_root": rig_root,
             "namespace_hint": _namespace_prefix(selected[0]) if selected else "",
             "limb_type": limb,
+            "chain_mode": "limb",
             "side": side,
             "fk_controls": detected_data["fk_controls"],
             "ik_controls": _dedupe_preserve_order(
@@ -3606,7 +3576,8 @@ class AminateController(object):
             "match_nodes": detected_data["match_nodes"],
             "ik_match_node": detected_data["ik_match_node"],
         }
-        issues = []
+        detected["detection_kind"] = "name_draft"
+        issues = ["The connection graph did not establish this mapping or switch polarity. Verify the controls and endpoint values before saving it."]
         if len(detected_data["fk_controls"]) < 3:
             issues.append("Could not confidently find all 3 FK controls.")
         if not detected_data["ik_control"]:
@@ -3616,10 +3587,123 @@ class AminateController(object):
         if detected_data["ik_control"] and detected_data["ik_control"] == detected_data["pole_vector_control"]:
             issues.append("The hand or foot control and the elbow or knee guide came back as the same object. Check the IK boxes.")
         if not detected_data["switch_attr"]:
-            issues.append("Could not detect an IK/FK switch attribute.")
+            issues.append("Could not identify a unique IK/FK switch setting.")
         if len(detected_data["match_nodes"]) < 3:
             issues.append("Could not detect a full match chain; IK -> FK may need manual setup.")
+        if len(detected_data["match_nodes"]) != len(set(detected_data["match_nodes"])):
+            issues.append("Pose sources were ambiguous. Assign one source per link.")
         return detected, issues
+
+    def capture_ikfk_selection(self, rig_root="", count=1, switch_channel=False, channel_names=None, order_fk=False):
+        """Read explicit Maya picks without modifying selection or scene state."""
+        selected = cmds.ls(selection=True, long=True) or []
+        if not selected or (count is not None and len(selected) != count):
+            raise ValueError("Select {0} in Maya first.".format(
+                "one object" if count == 1 else "{0} objects".format(count) if count else "the objects in chain order"
+            ))
+        if not all(node.startswith("|") and "." not in node and cmds.objectType(node, isAType="transform")
+                   for node in selected):
+            raise ValueError("Select whole controls or joints in Object mode.")
+        if rig_root:
+            rig_root = _resolve_profile_node(rig_root, exact_paths=True)
+            if not rig_root:
+                raise ValueError("The current rig root is missing. Pick the exact rig root in Advanced mapping.")
+        else:
+            rig_root = _top_parent(selected[0])
+        if any(node != rig_root and not node.startswith(rig_root + "|") for node in selected):
+            raise ValueError("Select objects inside the current rig root: {0}.".format(rig_root))
+        if len(selected) > 1:
+            if cmds.selectPref(query=True, trackSelectionOrder=True):
+                selected = cmds.ls(orderedSelection=True, long=True) or []
+            else:
+                matches = maya_ikfk_matching.detect(selected, rig_root) if order_fk else []
+                chains = [item["fk_controls"] for item in matches if set(item["fk_controls"]) == set(selected)]
+                if len(chains) != 1:
+                    raise ValueError("Maya is not tracking selection order. Select and capture one object at a time, from first to last.")
+                selected = chains[0]
+        if not switch_channel:
+            return rig_root, selected
+        node = selected[0]
+        if channel_names is None:
+            box = mel.eval("$aminateChannelBox = $gChannelBoxName")
+            objects = cmds.channelBox(box, query=True, mainObjectList=True) or []
+            if cmds.ls(objects, long=True) != [node]:
+                raise ValueError("Select the switch control and highlight its switch channel in Maya's Channel Box.")
+            channel_names = cmds.channelBox(box, query=True, selectedMainAttributes=True) or []
+        if len(channel_names) != 1:
+            raise ValueError("Highlight exactly one switch channel name in Maya's Channel Box.")
+        plug = node + "." + channel_names[0]
+        numeric = {"bool", "enum", "byte", "char", "short", "long", "float", "double", "doubleAngle", "doubleLinear"}
+        if not cmds.objExists(plug) or cmds.getAttr(plug, type=True) not in numeric or not cmds.getAttr(plug, keyable=True):
+            raise ValueError("Choose a keyable numeric switch channel on the selected control.")
+        return rig_root, [node + "." + cmds.attributeName(plug, long=True)]
+
+    def infer_manual_ikfk_limb(self, fields):
+        """Fill missing details only when the selected primary controls prove one limb."""
+        if _is_generic_chain(fields) or len(fields["fk_controls"]) != 3 or not fields["ik_control"]:
+            return None
+        controls = fields["fk_controls"] + [fields["ik_control"]]
+        profiles = maya_ikfk_matching.detect(controls, fields["rig_root"])
+        if len(profiles) != 1:
+            return None
+        connected = profiles[0]
+        if fields["fk_controls"] == connected["fk_controls"] and fields["ik_control"] != connected["ik_control"]:
+            raise ValueError("This limb matches through {0}. Select that IK control and click Use Selected.".format(
+                _short_name(connected["ik_control"])
+            ))
+        for key in ("fk_controls", "ik_control", "pole_vector_control", "switch_attr", "match_nodes", "ik_match_node"):
+            if fields.get(key) and fields[key] != connected[key]:
+                return None
+        endpoints = (fields["fk_value"], fields["ik_value"])
+        if (fields.get("switch_attr") or fields.get("manual_endpoints_edited") or endpoints != (0.0, 1.0)) and endpoints != (
+            connected["fk_value"], connected["ik_value"]
+        ):
+            return None
+        return connected
+
+    def bind_manual_ikfk_selection(self, fields, key, count, channel=False, channel_names=None):
+        fields = dict(fields)
+        generic = _is_generic_chain(fields)
+        if generic and key in ("fk_controls", "match_nodes"):
+            count = None
+        chain_pick = key in ("fk_controls", "ik_controls", "match_nodes")
+        append = chain_pick and len(cmds.ls(selection=True, long=True) or []) == 1
+        if append and count is not None and len(fields[key]) >= count:
+            raise ValueError("This chain is already filled. Clear its field to pick it again one object at a time.")
+        root, selected = self.capture_ikfk_selection(
+            "" if key == "rig_root" else fields["rig_root"], 1 if append else count, channel, channel_names,
+            order_fk=key == "fk_controls" and not generic,
+        )
+        picked = [node.rsplit(".", 1)[0] if channel else node for node in selected]
+        if append:
+            selected = fields[key] + selected
+            if len(selected) != len(set(selected)):
+                raise ValueError("That object is already in this chain. Select the next object in order.")
+        fields["rig_root"] = root
+        fields[key] = selected if isinstance(fields[key], list) else selected[0]
+        fields["manual_selection"] = True
+        fields.pop("detection_evidence", None)
+        fields.pop("result_nodes", None)
+        if fields.get("detection_kind") == "graph":
+            fields.pop("detection_kind")
+        if not generic and key in ("ik_control", "pole_vector_control"):
+            fields["ik_controls"] = []
+        connected = self.infer_manual_ikfk_limb(fields)
+        if connected:
+            fields.update({name: connected[name] for name in (
+                "pole_vector_control", "switch_attr", "fk_value", "ik_value", "match_nodes", "ik_match_node",
+                "result_nodes", "detection_kind", "detection_evidence",
+            )})
+        label_node = next(iter(fields["fk_controls"]), "") if generic else fields["ik_control"]
+        if label_node and not fields["profile_name"]:
+            fields["profile_name"] = "{0} / {1}".format(fields["rig_root"].rsplit("|", 1)[-1], label_node.rsplit("|", 1)[-1])
+        paths = _ikfk_profile_paths(fields)
+        identities = {node: identity for node, identity in fields.get("manual_node_ids", {}).items() if node in paths}
+        if root not in identities:
+            picked.append(root)
+        identities.update({node: cmds.ls(node, uuid=True)[0] for node in picked})
+        fields["manual_node_ids"] = identities
+        return fields
 
     def _normalize_profile(self, profile):
         normalized = dict(profile)
@@ -3629,57 +3713,48 @@ class AminateController(object):
         normalized["limb_type"] = (normalized.get("limb_type", "arm") or "arm").strip()
         normalized["side"] = (normalized.get("side", "left") or "left").strip()
         normalized["chain_mode"] = (normalized.get("chain_mode", "") or "").strip().lower()
-        normalized["fk_controls"] = _dedupe_preserve_order(
-            [item.strip() for item in normalized.get("fk_controls", []) if item and item.strip()]
-        )
+        generic_chain = _is_generic_chain(normalized)
+        normalized["fk_controls"] = [item.strip() for item in normalized.get("fk_controls", []) if item and item.strip()]
         normalized["ik_control"] = normalized.get("ik_control", "").strip()
         normalized["pole_vector_control"] = normalized.get("pole_vector_control", "").strip()
         ik_controls = [item.strip() for item in normalized.get("ik_controls", []) if item and item.strip()]
-        if not ik_controls:
-            ik_controls = [normalized["ik_control"], normalized["pole_vector_control"]]
-        else:
-            if normalized["ik_control"]:
-                ik_controls.insert(0, normalized["ik_control"])
-            if normalized["pole_vector_control"]:
-                ik_controls.append(normalized["pole_vector_control"])
-        normalized["ik_controls"] = _dedupe_preserve_order([item for item in ik_controls if item])
+        if not generic_chain:
+            ik_controls = [normalized["ik_control"]] + ik_controls + [normalized["pole_vector_control"]]
+            ik_controls = _dedupe_preserve_order([item for item in ik_controls if item])
+            normalized["fk_controls"] = _dedupe_preserve_order(normalized["fk_controls"])
+        normalized["ik_controls"] = ik_controls
         normalized["switch_attr"] = normalized.get("switch_attr", "").strip()
         normalized["fk_value"] = float(normalized.get("fk_value", 0.0))
         normalized["ik_value"] = float(normalized.get("ik_value", 1.0))
         normalized["extra_controls"] = _dedupe_preserve_order(
             [item.strip() for item in normalized.get("extra_controls", []) if item and item.strip()]
         )
-        normalized["match_nodes"] = _dedupe_preserve_order(
-            [item.strip() for item in normalized.get("match_nodes", []) if item and item.strip()]
-        )
+        normalized["match_nodes"] = [item.strip() for item in normalized.get("match_nodes", []) if item and item.strip()]
+        if not generic_chain:
+            normalized["match_nodes"] = _dedupe_preserve_order(normalized["match_nodes"])
         normalized["ik_match_node"] = normalized.get("ik_match_node", "").strip()
+        normalized["result_nodes"] = [item.strip() for item in normalized.get("result_nodes", []) if item and item.strip()]
         return normalized
 
     def _profile_from_fields(self, fields):
-        profile = {
-            "profile_name": fields.get("profile_name", "").strip(),
-            "rig_root": fields.get("rig_root", "").strip(),
-            "namespace_hint": fields.get("namespace_hint", "").strip(),
-            "limb_type": fields.get("limb_type", "arm").strip() or "arm",
-            "side": fields.get("side", "left").strip() or "left",
-            "chain_mode": fields.get("chain_mode", "").strip().lower(),
-            "fk_controls": [item.strip() for item in fields.get("fk_controls", []) if item.strip()],
-            "ik_controls": [item.strip() for item in fields.get("ik_controls", []) if item.strip()],
-            "ik_control": fields.get("ik_control", "").strip(),
-            "pole_vector_control": fields.get("pole_vector_control", "").strip(),
-            "switch_attr": fields.get("switch_attr", "").strip(),
-            "fk_value": float(fields.get("fk_value", 0.0)),
-            "ik_value": float(fields.get("ik_value", 1.0)),
-            "extra_controls": [item.strip() for item in fields.get("extra_controls", []) if item.strip()],
-            "match_nodes": [item.strip() for item in fields.get("match_nodes", []) if item.strip()],
-            "ik_match_node": fields.get("ik_match_node", "").strip(),
-        }
-        return self._normalize_profile(profile)
+        keys = ("profile_name", "rig_root", "namespace_hint", "limb_type", "side", "chain_mode", "fk_controls",
+                "ik_controls", "ik_control", "pole_vector_control", "switch_attr", "fk_value", "ik_value",
+                "extra_controls", "match_nodes", "ik_match_node", "result_nodes", "detection_kind", "detection_evidence",
+                "manual_selection", "manual_node_ids")
+        return self._normalize_profile({key: fields[key] for key in keys if key in fields})
 
     def save_profile(self, fields):
         profile = self._profile_from_fields(fields)
         if not profile["profile_name"]:
             return False, "Give this saved switch a name first."
+        if profile.get("detection_kind") == "name_draft":
+            profile.pop("detection_kind")
+        validated, issues = self._validate_profile(profile, "ik_to_fk")
+        if issues:
+            return False, " ".join(issues)
+        if profile.get("manual_selection"):
+            profile = self._profile_from_fields(validated)
+            profile["manual_node_ids"] = {node: cmds.ls(node, uuid=True)[0] for node in _ikfk_profile_paths(profile)}
         profiles = self.profile_store.setdefault("profiles", [])
         replaced = False
         for index, existing in enumerate(profiles):
@@ -3700,24 +3775,26 @@ class AminateController(object):
 
     def _resolved_profile(self, profile):
         profile = self._normalize_profile(profile)
-        rig_root = _resolve_profile_node(profile.get("rig_root", ""), rig_root_hint=profile.get("rig_root", ""))
+        exact_paths = profile.get("manual_selection", False)
+        rig_root = _resolve_profile_node(profile["rig_root"], rig_root_hint=profile["rig_root"], exact_paths=exact_paths)
         resolved = dict(profile)
         resolved["_rig_root_resolved"] = bool(rig_root)
         resolved["rig_root"] = rig_root or profile.get("rig_root", "")
-        resolved["fk_controls"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("fk_controls", [])]
-        resolved["ik_controls"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("ik_controls", [])]
-        resolved["ik_control"] = _resolve_profile_node(profile.get("ik_control", ""), rig_root_hint=resolved["rig_root"])
-        resolved["pole_vector_control"] = _resolve_profile_node(profile.get("pole_vector_control", ""), rig_root_hint=resolved["rig_root"])
-        resolved["ik_controls"] = _dedupe_preserve_order(
-            [node_name for node_name in (resolved["ik_control"], resolved["pole_vector_control"]) if node_name]
-            + [node_name for node_name in resolved["ik_controls"] if node_name]
-        )
-        resolved["switch_attr"] = _resolve_profile_attr(profile.get("switch_attr", ""), rig_root_hint=resolved["rig_root"])
-        resolved["extra_controls"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("extra_controls", [])]
-        resolved["match_nodes"] = [_resolve_profile_node(node_name, rig_root_hint=resolved["rig_root"]) for node_name in profile.get("match_nodes", [])]
-        resolved["ik_match_node"] = _resolve_profile_node(
-            profile.get("ik_match_node", ""),
-            rig_root_hint=resolved["rig_root"],
+
+        def resolve(node):
+            return _resolve_profile_node(node, rig_root_hint=resolved["rig_root"], exact_paths=exact_paths)
+
+        for key in ("fk_controls", "ik_controls", "extra_controls", "match_nodes", "result_nodes"):
+            resolved[key] = [resolve(node) for node in profile[key]]
+        for key in ("ik_control", "pole_vector_control", "ik_match_node"):
+            resolved[key] = resolve(profile[key])
+        if not _is_generic_chain(profile):
+            resolved["ik_controls"] = _dedupe_preserve_order(
+                [node_name for node_name in (resolved["ik_control"], resolved["pole_vector_control"]) if node_name]
+                + [node_name for node_name in resolved["ik_controls"] if node_name]
+            )
+        resolved["switch_attr"] = _resolve_profile_attr(
+            profile["switch_attr"], rig_root_hint=resolved["rig_root"], exact_paths=exact_paths,
         )
         return resolved
 
@@ -3726,114 +3803,288 @@ class AminateController(object):
         profile = self._resolved_profile(profile)
         issues = []
         generic_chain = _is_generic_chain(requested_profile) or _is_generic_chain(profile)
-        if profile.get("rig_root") and not profile.get("_rig_root_resolved"):
+        manual = profile.get("manual_selection", False)
+        if manual and any(cmds.ls(node, uuid=True) != [identity]
+                          for node, identity in profile.get("manual_node_ids", {}).items()):
+            issues.append("A saved object changed identity. Pick the current rig controls again in Manual Setup.")
+        if profile.get("detection_kind") == "name_draft":
+            issues.append("Verify the suggested controls and endpoint values, then save the mapping before switching.")
+        if profile.get("detection_kind") == "graph" and (len(profile["result_nodes"]) < 3 or not all(profile["result_nodes"])):
+            issues.append("The detected driven joints could not be resolved. Detect the selected limb again.")
+        if profile.get("detection_kind") == "graph":
+            ids = profile.get("detection_evidence", {}).get("node_ids", {})
+            if not ids or any(cmds.ls(node, uuid=True) != [identity] for node, identity in ids.items()):
+                issues.append("The detected limb identity changed. Detect the selected limb again.")
+        if (manual or profile["rig_root"]) and not profile["_rig_root_resolved"]:
             issues.append("Profile rig root could not be resolved uniquely; choose the exact rig root for this character.")
-        if len([node_name for node_name in profile["fk_controls"] if node_name]) < 3:
-            issues.append("This saved switch needs at least 3 FK controls.")
+        if not all(profile["fk_controls"]) or len(profile["fk_controls"]) < (1 if generic_chain else 3):
+            issues.append("Resolve every FK control in the map." if generic_chain else "Resolve at least three FK controls for this limb.")
         if generic_chain:
-            if len(profile["fk_controls"]) != len(profile["ik_controls"]) or len(profile["fk_controls"]) != len(profile["match_nodes"]):
-                issues.append("Generic chain profiles need equal-length FK, IK, and match-node lists.")
-            if any(not node_name for node_name in profile["fk_controls"] + profile["ik_controls"] + profile["match_nodes"]):
-                issues.append("Generic chain profiles must resolve every paired control and match node inside the saved rig root.")
+            groups = (profile["fk_controls"], profile["ik_controls"], profile["match_nodes"])
+            if len({len(nodes) for nodes in groups}) != 1:
+                issues.append("Enter the same number of FK controls, IK controls, and pose sources in matching order.")
+            if not all(node for nodes in groups for node in nodes):
+                issues.append("Resolve every mapped control and pose source inside the rig.")
+            if len(set(node for nodes in groups for node in nodes)) != sum(map(len, groups)):
+                issues.append("Use distinct FK controls, IK controls, and pose sources for each mapped link.")
         else:
             if not profile["ik_control"]:
                 issues.append("Profile needs an IK control.")
             if not profile["pole_vector_control"]:
                 issues.append("Profile needs a pole-vector control.")
+            elif profile["ik_control"] == profile["pole_vector_control"]:
+                issues.append("Choose different hand/foot and elbow/knee controls.")
+            if manual and all(profile[key] for key in ("ik_control", "pole_vector_control")):
+                if len(set(profile["fk_controls"] + [profile["ik_control"], profile["pole_vector_control"]])) != 5:
+                    issues.append("Pick three distinct FK controls and two different IK controls.")
         if not profile["switch_attr"]:
             issues.append("Profile needs a switch attribute.")
-        if direction == "ik_to_fk" and not generic_chain and len([node_name for node_name in profile["match_nodes"] if node_name]) < 3:
+        if (manual or direction == "ik_to_fk") and not generic_chain and (
+            len(profile["match_nodes"]) < 3 or not all(profile["match_nodes"][:3])
+        ):
             issues.append("IK -> FK requires a detected or assigned match chain.")
+        if not all(profile["extra_controls"]):
+            issues.append("Resolve every extra control to key.")
+        if requested_profile["ik_match_node"] and not generic_chain and not profile["ik_match_node"]:
+            issues.append("The assigned hand/foot pose source could not be resolved.")
+        if not all(math.isfinite(profile[key]) for key in ("fk_value", "ik_value")) or math.isclose(
+            profile["fk_value"], profile["ik_value"], rel_tol=0.0, abs_tol=2e-6
+        ):
+            issues.append("Set distinct numeric FK and IK values.")
+        if not issues and not generic_chain:
+            self._validate_connected_mapping(profile, issues)
+        if not issues and manual and profile.get("detection_kind") != "graph":
+            profile["result_nodes"] = profile["match_nodes"]
+            unsafe_output = maya_ikfk_matching.unsafe_switch_output(profile)
+            if unsafe_output:
+                issues.append("Could not verify the switch output {0} belongs to this mapping.".format(unsafe_output))
         return profile, issues
 
-    def _key_switch_context(self, profile, source_value, current_time):
-        previous_time = current_time - 1.0
-        if profile["switch_attr"]:
-            node_name, attr_name = profile["switch_attr"].rsplit(".", 1)
-            cmds.currentTime(previous_time, edit=True)
-            cmds.setAttr(profile["switch_attr"], source_value)
-            cmds.setKeyframe(node_name, attribute=attr_name)
-        nodes = profile["fk_controls"] + profile.get("ik_controls", []) + profile["extra_controls"]
-        for node_name in _dedupe_preserve_order(nodes):
-            if node_name and cmds.objExists(node_name):
-                _set_keyable_channels(node_name, ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
-        cmds.currentTime(current_time, edit=True)
-
-    def _switch_generic_chain(self, profile, direction, current_time):
-        self._key_switch_context(profile, profile["fk_value"] if direction == "fk_to_ik" else profile["ik_value"], current_time)
-        if direction == "fk_to_ik":
-            pairs = zip(profile["ik_controls"], profile["match_nodes"])
-        else:
-            pairs = zip(profile["fk_controls"], profile["match_nodes"])
-        mismatches = []
-        for target_node, source_node in pairs:
-            copy_result = _copy_world_pose(target_node, source_node)
-            _set_keyable_channels(target_node, ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
-            if copy_result["mismatches"]:
-                mismatch_text = ", ".join(copy_result["mismatches"])
-                if copy_result["locked"]:
-                    mismatch_text += " (locked: {0})".format(", ".join(copy_result["locked"]))
-                mismatches.append("{0}: {1}".format(_short_name(target_node), mismatch_text))
-        node_name, attr_name = profile["switch_attr"].rsplit(".", 1)
-        cmds.setAttr(profile["switch_attr"], profile["ik_value"] if direction == "fk_to_ik" else profile["fk_value"])
-        cmds.setKeyframe(node_name, attribute=attr_name)
-        if mismatches:
-            return False, "Switched {0} on frame {1}, but exact world-pose matching was unavailable: {2}".format(
-                "FK -> IK" if direction == "fk_to_ik" else "IK -> FK",
-                int(current_time),
-                "; ".join(mismatches),
+    def _validate_connected_mapping(self, profile, issues):
+        controls = [*profile["fk_controls"], profile["ik_control"], profile["pole_vector_control"]]
+        root = profile["rig_root"]
+        graph = maya_ikfk_matching.detect([profile["pole_vector_control"]], root) if root else []
+        graph = [item for item in graph if item["switch_attr"] == profile["switch_attr"]]
+        if len(graph) != 1:
+            if len(graph) > 1:
+                issues.append("This switch drives more than one limb. Switching one mapped limb could move another.")
+            elif profile.get("detection_kind") == "graph":
+                issues.append("The connected limb mapping changed. Detect the selected limb again.")
+            return
+        connected = graph[0]
+        if any(not math.isclose(profile[key], connected[key], abs_tol=1e-6) for key in ("fk_value", "ik_value")):
+            issues.append("The mapped FK and IK values disagree with the connected limb.")
+        if profile.get("manual_selection") and (
+            controls != connected["fk_controls"] + connected["ik_controls"]
+            or profile["match_nodes"] != connected["match_nodes"]
+            or profile["ik_match_node"] not in ("", connected["ik_match_node"])
+        ):
+            issues.append("The selected controls or pose sources disagree with this connected limb.")
+            return
+        evidence_keys = ("handle", "branches", "driver_nodes", "fk_auxiliary_controls", "ik_auxiliary_controls")
+        if profile.get("detection_kind") == "graph" and (
+            profile["result_nodes"] != connected["result_nodes"] or any(
+                profile["detection_evidence"].get(key) != connected["detection_evidence"].get(key) for key in evidence_keys
             )
-        return True, "Switched {0} on frame {1}.".format(
-            "FK -> IK" if direction == "fk_to_ik" else "IK -> FK",
-            int(current_time),
-        )
+        ):
+            issues.append("The driven joints or their connected controls changed. Detect the selected limb again.")
+        if controls == connected["fk_controls"] + connected["ik_controls"]:
+            profile["detection_kind"] = "graph"
+            profile["result_nodes"] = connected["result_nodes"]
+            profile["detection_evidence"] = connected["detection_evidence"]
+        elif profile.get("detection_kind") == "graph":
+            issues.append("The connected control mapping changed. Detect the selected limb again.")
+        else:
+            profile["result_nodes"] = connected["result_nodes"]
+            profile["detection_evidence"] = connected["detection_evidence"]
+        unsafe_output = maya_ikfk_matching.unsafe_switch_output(profile)
+        if unsafe_output:
+            issues.append("Could not verify the switch output {0} belongs to this limb.".format(unsafe_output))
+
+    def switch_mode(self, profile):
+        """Read the configured endpoint without touching animation."""
+        plug = profile["switch_attr"]
+        value = cmds.getAttr(plug)
+        for mode in ("fk", "ik"):
+            if math.isclose(value, profile[mode + "_value"], rel_tol=0.0, abs_tol=1e-6):
+                return mode.upper()
+        return "Blend"
+
+    def _switch_pose_targets(self, profile, direction):
+        """Sample every source before a target or mode can drive it."""
+        if _is_generic_chain(profile):
+            controls = profile["ik_controls"] if direction == "fk_to_ik" else profile["fk_controls"]
+            return [
+                (target, _world_translation(source), _world_rotation(source))
+                for target, source in zip(controls, profile["match_nodes"])
+            ]
+        if direction == "ik_to_fk":
+            return [
+                (target, None, _world_rotation(source))
+                for target, source in zip(profile["fk_controls"][:3], profile["match_nodes"][:3])
+            ]
+        chain = profile["match_nodes"][:3]
+        if len(chain) != 3 or not all(chain):
+            chain = profile["fk_controls"][:3]
+        ik_source = profile["ik_match_node"]
+        if not ik_source and not profile.get("manual_selection"):
+            ik_source = _detect_ik_match_node(
+                _candidate_nodes_for_profile(rig_root_hint=profile["rig_root"]),
+                profile["ik_control"], profile["side"], profile["limb_type"],
+            )
+        ik_source = ik_source or chain[2]
+        return [
+            (profile["ik_control"], _world_translation(ik_source), _world_rotation(ik_source)),
+            (profile["pole_vector_control"], _pole_vector_position(*map(_world_translation, chain)), None),
+        ]
+
+    def _key_switch_guard(self, plug, previous_time):
+        had_curve = bool(cmds.keyframe(plug, query=True, keyframeCount=True))
+        if cmds.keyframe(plug, query=True, time=(previous_time, previous_time), keyframeCount=True):
+            written = True
+        elif had_curve:
+            written = cmds.setKeyframe(plug, time=previous_time, insert=True, insertBlend=False)
+        else:
+            written = cmds.setKeyframe(plug, time=previous_time, value=cmds.getAttr(plug, time=previous_time), insertBlend=False)
+        if not written:
+            raise RuntimeError("Could not key {0} before the switch.".format(plug))
+        node, attr = plug.rsplit(".", 1)
+        return _pivot_guard_tangent_snapshot(node, attr, previous_time, "in", had_curve)
+
+    def _switch_profile(self, profile, direction):
+        profile, issues = self._validate_profile(profile, direction)
+        if issues:
+            return False, " ".join(issues)
+        source_mode, target_mode = direction.split("_to_")
+        switch = profile["switch_attr"]
+        try:
+            active_mode = self.switch_mode(profile)
+            if active_mode == target_mode.upper():
+                return False, "This chain is already in {0}.".format(active_mode)
+            if active_mode != source_mode.upper():
+                return False, "The current switch value is between or outside the mapped endpoints. Set it to FK or IK first."
+            if not cmds.getAttr(switch, settable=True) or not cmds.getAttr(switch, keyable=True):
+                return False, "The switch setting is locked, driven, or not keyable."
+            if not cmds.undoInfo(query=True, state=True):
+                return False, "Enable Maya Undo before switching so a failed match can be rolled back."
+            if not cmds.undoInfo(query=True, infinity=True) and cmds.undoInfo(query=True, length=True) < 1:
+                return False, "Set Maya Undo to keep at least one operation before switching."
+            frame = float(cmds.currentTime(query=True))
+            connected = profile.get("detection_kind") == "graph"
+            desired = maya_ikfk_matching.snapshot(profile["result_nodes"])
+            controls = profile["fk_controls"] + profile["ik_controls"] + profile["extra_controls"]
+            before_meshes = maya_ikfk_matching.mesh_snapshot(profile["rig_root"], controls) if profile["rig_root"] else {}
+            poses = [] if connected else sorted(self._switch_pose_targets(profile, direction), key=lambda pose: pose[0].count("|"))
+            groups = maya_ikfk_matching.channel_groups(profile, direction) if connected else [
+                (target, tuple(prefix for prefix, values in (("translate", translation), ("rotate", rotation))
+                               if values is not None)) for target, translation, rotation in poses
+            ]
+            groups += [(node, ("translate", "rotate")) for node in profile["extra_controls"]]
+            channels = [target + "." + prefix + axis for target, prefixes in groups for prefix in prefixes for axis in "XYZ"]
+            writable = {
+                plug for plug in _dedupe_preserve_order(channels)
+                if cmds.getAttr(plug, settable=True) and cmds.getAttr(plug, keyable=True)
+            }
+            layered = maya_ikfk_matching.layered_channels([switch, *channels])
+            if layered:
+                return False, "Animation layers drive {0}. Switch on unlayered channels to preserve existing keys.".format(layered[0])
+        except Exception as exc:
+            return False, "Could not prepare this switch. {0}".format(exc)
+
+        chunk = "Aminate IK/FK Switch"
+        error = None
+        started = False
+        autokey = cmds.autoKeyframe(query=True, state=True)
+        cmds.undoInfo(openChunk=True, chunkName=chunk)
+        try:
+            if autokey:
+                cmds.autoKeyframe(state=False)
+                started = True
+            # Establish an undoable operation in this chunk before a partial key
+            # failure can leave the previous switch as the top undo item.
+            cmds.setAttr(switch, cmds.getAttr(switch))
+            started = True
+            previous_time = frame - 1.0
+            guards = [self._key_switch_guard(plug, previous_time) for plug in [switch] + sorted(writable)]
+            value = profile[target_mode + "_value"]
+            # Set the evaluated plug as well as its key, including when the
+            # animator reverses a switch at the same frame.
+            cmds.setAttr(switch, value)
+            if not cmds.setKeyframe(switch, time=frame, value=value, outTangentType="step", insertBlend=False):
+                raise RuntimeError("Could not key the switch setting.")
+            cmds.keyTangent(switch, edit=True, time=(previous_time, previous_time), outTangentType="step")
+            if self.switch_mode(profile) != target_mode.upper():
+                raise RuntimeError("The keyed switch setting did not reach the requested endpoint.")
+
+            if connected:
+                maya_ikfk_matching.match(profile, direction, desired, writable, frame, _pole_vector_position)
+            # Match after evaluating the target mode and its parent spaces.
+            for target, translation, rotation in poses:
+                target_channels = [plug for plug in channels if plug.rsplit(".", 1)[0] == target]
+                unkeyed = {plug: cmds.getAttr(plug) for plug in target_channels if plug not in writable}
+                for values, setter in ((translation, _set_world_translation), (rotation, _set_world_rotation)):
+                    if values is not None:
+                        try:
+                            setter(target, values)
+                        except RuntimeError:
+                            # Locked channels can still match when already in place.
+                            pass
+                for plug in target_channels:
+                    if plug in writable and not cmds.setKeyframe(plug, time=frame, insertBlend=False):
+                        raise RuntimeError("Could not key {0}.".format(plug))
+                for plug, value in unkeyed.items():
+                    if not math.isclose(cmds.getAttr(plug), value, rel_tol=0.0, abs_tol=1e-6):
+                        raise RuntimeError("{0} moved and could not be keyed.".format(plug))
+            pose_nodes = {pose[0] for pose in poses}
+            for plug in sorted(writable):
+                if plug.rsplit(".", 1)[0] not in pose_nodes and not cmds.setKeyframe(plug, time=frame, insertBlend=False):
+                    raise RuntimeError("Could not key {0}.".format(plug))
+
+            if self.switch_mode(profile) != target_mode.upper():
+                raise RuntimeError("The keyed switch setting did not reach the requested endpoint.")
+            for target, translation, rotation in poses:
+                mismatches = _pose_mismatches(
+                    target,
+                    translation if translation is not None else _world_translation(target),
+                    rotation if rotation is not None else _world_rotation(target),
+                )
+                if mismatches:
+                    raise RuntimeError("{0} could not match {1}. Check locked or driven channels and the mapping.".format(
+                        _short_name(target), ", ".join(mismatches),
+                    ))
+            for guard in guards:
+                _restore_pivot_guard_tangent(guard)
+            maya_ikfk_matching.validate_pose(profile["result_nodes"], desired)
+            maya_ikfk_matching.validate_meshes(before_meshes)
+        except Exception as exc:
+            error = exc
+        finally:
+            try:
+                if autokey:
+                    cmds.autoKeyframe(state=True)
+            finally:
+                cmds.undoInfo(closeChunk=True)
+
+        if error is not None:
+            try:
+                if started:
+                    if cmds.undoInfo(query=True, undoName=True) != chunk:
+                        raise RuntimeError("Maya did not retain the switch undo operation.")
+                    cmds.undo()
+                    if self.switch_mode(profile) != source_mode.upper():
+                        raise RuntimeError("The original switch value did not return.")
+                    maya_ikfk_matching.validate_pose(profile["result_nodes"], desired)
+                    maya_ikfk_matching.validate_meshes(before_meshes)
+            except Exception as exc:
+                return False, "Switch failed and Maya could not roll back. {0} Rollback error: {1}".format(error, exc)
+            return False, "Switch cancelled. {0}".format(error)
+        return True, "Switched to {0} on frame {1}.".format(target_mode.upper(), _frame_display(frame))
 
     def switch_fk_to_ik(self, profile):
-        profile, issues = self._validate_profile(profile, "fk_to_ik")
-        if issues:
-            return False, "; ".join(issues)
-        current_time = float(cmds.currentTime(query=True))
-        if _is_generic_chain(profile):
-            return self._switch_generic_chain(profile, "fk_to_ik", current_time)
-        self._key_switch_context(profile, profile["fk_value"], current_time)
-        source_points = profile["match_nodes"] if len([node_name for node_name in profile["match_nodes"] if node_name]) >= 3 else profile["fk_controls"]
-        source_points = source_points[:3]
-        start_point = _world_translation(source_points[0])
-        middle_point = _world_translation(source_points[1])
-        end_point = _world_translation(source_points[2])
-        ik_match_node = profile.get("ik_match_node") or _detect_ik_match_node(
-            _candidate_nodes_for_profile(rig_root_hint=profile.get("rig_root", "")),
-            profile["ik_control"],
-            profile.get("side", ""),
-            profile.get("limb_type", ""),
-        )
-        ik_pose_source = ik_match_node or source_points[2]
-        _set_world_translation(profile["ik_control"], _world_translation(ik_pose_source))
-        _set_world_rotation(profile["ik_control"], _world_rotation(ik_pose_source))
-        _set_world_translation(profile["pole_vector_control"], _pole_vector_position(start_point, middle_point, end_point))
-        _set_keyable_channels(profile["ik_control"], ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ"))
-        _set_keyable_channels(profile["pole_vector_control"], ("translateX", "translateY", "translateZ"))
-        node_name, attr_name = profile["switch_attr"].rsplit(".", 1)
-        cmds.setAttr(profile["switch_attr"], profile["ik_value"])
-        cmds.setKeyframe(node_name, attribute=attr_name)
-        return True, "Switched from FK to IK on frame {0}.".format(int(current_time))
+        return self._switch_profile(profile, "fk_to_ik")
 
     def switch_ik_to_fk(self, profile):
-        profile, issues = self._validate_profile(profile, "ik_to_fk")
-        if issues:
-            return False, "; ".join(issues)
-        current_time = float(cmds.currentTime(query=True))
-        if _is_generic_chain(profile):
-            return self._switch_generic_chain(profile, "ik_to_fk", current_time)
-        self._key_switch_context(profile, profile["ik_value"], current_time)
-        for fk_control, match_node in zip(profile["fk_controls"][:3], profile["match_nodes"][:3]):
-            if fk_control and match_node:
-                _set_world_rotation(fk_control, _world_rotation(match_node))
-                _set_keyable_channels(fk_control, ("rotateX", "rotateY", "rotateZ"))
-        node_name, attr_name = profile["switch_attr"].rsplit(".", 1)
-        cmds.setAttr(profile["switch_attr"], profile["fk_value"])
-        cmds.setKeyframe(node_name, attribute=attr_name)
-        return True, "Switched from IK to FK on frame {0}.".format(int(current_time))
+        return self._switch_profile(profile, "ik_to_fk")
 
 
 if QtWidgets:
@@ -4831,14 +5082,22 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                     pass
 
         def _build_parenting_tab(self):
+            from maya_aminate_ui import Disclosure
+            from maya_parent_manager_ui import ParentManagerPanel
+
             layout = QtWidgets.QVBoxLayout(self.parenting_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self._build_tab_intro(TAB_PARENTING))
+            self.parent_manager_panel = ParentManagerPanel(self.parenting_page)
+            layout.addWidget(self.parent_manager_panel)
+            previous = Disclosure("Previous Dynamic Parenting setups", parent=self.parenting_page)
             self.parenting_panel = self._embed_tool_panel(
                 maya_dynamic_parenting_tool.MayaDynamicParentingWindow(self.controller.dynamic_parenting_controller, parent=self.parenting_page),
                 self.parenting_page,
             )
-            layout.addWidget(self.parenting_panel, 1)
+            previous.content.addWidget(self.parenting_panel)
+            layout.addWidget(previous)
+            layout.addStretch(1)
 
         def _build_pivot_tab(self):
             layout = QtWidgets.QVBoxLayout(self.pivot_page)
@@ -4917,13 +5176,35 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             layout.addWidget(self.surface_contact_panel, 1)
 
         def _build_ikfk_tab(self):
+            import maya_aminate_ui
+
             layout = QtWidgets.QVBoxLayout(self.ikfk_page)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(8)
             layout.addWidget(self._build_tab_intro(TAB_IKFK))
-            summary = QtWidgets.QLabel("Pick one arm or leg, set it up once, then switch without a visible pop.")
-            summary.setWordWrap(True)
-            layout.addWidget(summary)
+            self.ikfk_manual_hint = QtWidgets.QLabel()
+            self.ikfk_manual_hint.setWordWrap(True)
+            layout.addWidget(self.ikfk_manual_hint)
+            self._ikfk_pick_buttons = {}
+            pick_fields = []
+
+            def pick_row(form, label, field, key, count=1, channel=False):
+                row = QtWidgets.QWidget()
+                row.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+                form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+                controls = QtWidgets.QHBoxLayout(row)
+                controls.setContentsMargins(0, 0, 0, 0)
+                button = QtWidgets.QPushButton("Use Selected Channel" if channel else "Use Selected")
+                button.setAccessibleName("Use Selected " + label)
+                button.setToolTip(field.toolTip())
+                button.clicked.connect(lambda: self._pick_ikfk_field(key, count, channel))
+                controls.addWidget(field, 1)
+                controls.addWidget(button)
+                form.addRow(label, row)
+                self._ikfk_pick_buttons[key] = button
+                pick_fields.append(field)
+                return row
+
             saved_group = QtWidgets.QGroupBox("Saved Switch")
             saved_layout = QtWidgets.QVBoxLayout(saved_group)
             self.profile_combo = QtWidgets.QComboBox()
@@ -4943,6 +5224,9 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.profile_name_line = QtWidgets.QLineEdit()
             self.rig_root_line = QtWidgets.QLineEdit()
             self.namespace_line = QtWidgets.QLineEdit()
+            self.ikfk_chain_mode_combo = QtWidgets.QComboBox()
+            self.ikfk_chain_mode_combo.addItem("Arm or leg", "limb")
+            self.ikfk_chain_mode_combo.addItem("Mapped chain", "generic")
             self.limb_type_combo = QtWidgets.QComboBox()
             self.limb_type_combo.addItems(["arm", "leg"])
             self.side_combo = QtWidgets.QComboBox()
@@ -4951,47 +5235,49 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.profile_name_line.setToolTip("A name so you can save and load this switch later.")
             self.rig_root_line.setToolTip("The main top object for this rig. This is usually filled in for you.")
             self.namespace_line.setToolTip("Only needed if the rig names have extra tags and auto-find needs help.")
-            self.switch_attr_line.setToolTip("The setting that changes the arm or leg between IK and FK.")
             meta_form.addRow("Switch Name", self.profile_name_line)
-            meta_form.addRow("Main Rig", self.rig_root_line)
+            pick_row(meta_form, "Main Rig", self.rig_root_line, "rig_root")
             meta_form.addRow("Limb Type", self.limb_type_combo)
             meta_form.addRow("Side", self.side_combo)
             meta_form.addRow("Name Tag", self.namespace_line)
-            meta_form.addRow("Switch Setting", self.switch_attr_line)
-            layout.addWidget(setup_group)
-
             fk_group = QtWidgets.QGroupBox("FK")
             fk_form = QtWidgets.QFormLayout(fk_group)
             self.fk_controls_line = QtWidgets.QLineEdit()
             self.fk_controls_line.setPlaceholderText("shoulder_ctrl, elbow_ctrl, wrist_ctrl")
-            self.fk_controls_line.setToolTip("The three FK controls for the arm or leg, in order from top to end.")
-            fk_form.addRow("FK Controls", self.fk_controls_line)
+            self.fk_controls_line.setToolTip("Select FK controls in Maya from shoulder or hip to wrist or ankle.")
+            pick_row(fk_form, "FK Controls", self.fk_controls_line, "fk_controls", count=3)
             self.fk_value_spin = QtWidgets.QDoubleSpinBox()
             self.fk_value_spin.setDecimals(3)
             self.fk_value_spin.setRange(-9999.0, 9999.0)
             self.fk_value_spin.setToolTip("The switch value that means FK is on.")
-            fk_form.addRow("FK Value", self.fk_value_spin)
-
             ik_group = QtWidgets.QGroupBox("IK")
             ik_form = QtWidgets.QFormLayout(ik_group)
             self.ik_controls_line = QtWidgets.QLineEdit()
             self.ik_controls_line.setPlaceholderText("ik_ctrl, pole_vector_ctrl")
-            self.ik_controls_line.setToolTip("The hand or foot control and the elbow or knee guide.")
-            ik_form.addRow("IK Controls", self.ik_controls_line)
+            self.ik_controls_line.setToolTip("For a mapped chain, list the IK controls in corresponding order.")
+            generic_row = pick_row(ik_form, "IK Controls", self.ik_controls_line, "ik_controls", count=None)
             self.ik_control_line = QtWidgets.QLineEdit()
             self.ik_control_line.setToolTip("Usually the hand or foot control.")
-            ik_form.addRow("Hand/Foot Control", self.ik_control_line)
+            limb_row = pick_row(ik_form, "Hand/Foot Control", self.ik_control_line, "ik_control")
+            self._ikfk_mode_rows = (
+                (generic_row, ik_form.labelForField(generic_row), False),
+                (limb_row, ik_form.labelForField(limb_row), True),
+            )
+            fallback_group = QtWidgets.QGroupBox()
+            fallback_form = QtWidgets.QFormLayout(fallback_group)
             self.pv_control_line = QtWidgets.QLineEdit()
             self.pv_control_line.setToolTip("The control that points the elbow or knee.")
-            ik_form.addRow("Elbow/Knee Guide", self.pv_control_line)
+            pole_row = pick_row(fallback_form, "Elbow/Knee Guide", self.pv_control_line, "pole_vector_control")
+            self._ikfk_mode_rows += ((pole_row, fallback_form.labelForField(pole_row), True),)
+            self.switch_attr_line.setToolTip("Select the switch control, then highlight its channel name in Maya's Channel Box.")
+            pick_row(fallback_form, "Switch Setting", self.switch_attr_line, "switch_attr", channel=True)
+            fallback_form.addRow("FK Value", self.fk_value_spin)
             self.ik_value_spin = QtWidgets.QDoubleSpinBox()
             self.ik_value_spin.setDecimals(3)
             self.ik_value_spin.setRange(-9999.0, 9999.0)
             self.ik_value_spin.setValue(1.0)
             self.ik_value_spin.setToolTip("The switch value that means IK is on.")
-            ik_form.addRow("IK Value", self.ik_value_spin)
-            layout.addWidget(fk_group)
-            layout.addWidget(ik_group)
+            fallback_form.addRow("IK Value", self.ik_value_spin)
 
             details_group = QtWidgets.QGroupBox("Advanced Matching")
             details_form = QtWidgets.QFormLayout(details_group)
@@ -5000,32 +5286,53 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.extra_controls_line.setToolTip("Any extra controls that should also get keys when you switch.")
             self.match_nodes_line = QtWidgets.QLineEdit()
             self.match_nodes_line.setPlaceholderText("match_shoulder, match_elbow, match_wrist")
-            self.match_nodes_line.setToolTip("The points the FK controls should copy when you switch.")
+            self.match_nodes_line.setToolTip("List one pose source per link in the same order as the mapped controls.")
             self.ik_match_node_line = QtWidgets.QLineEdit()
             self.ik_match_node_line.setPlaceholderText("optional IK hand/foot match control")
             self.ik_match_node_line.setToolTip("Optional rig-provided point whose full world pose the IK hand or foot control should copy.")
-            details_form.addRow("Match Controls", self.match_nodes_line)
-            details_form.addRow("IK Match Control", self.ik_match_node_line)
-            details_form.addRow("Extra Controls To Key", self.extra_controls_line)
-            layout.addWidget(details_group)
+            pick_row(fallback_form, "Pose Sources", self.match_nodes_line, "match_nodes", count=3)
+            pick_row(details_form, "IK Match Control", self.ik_match_node_line, "ik_match_node")
+            pick_row(details_form, "Extra Controls To Key", self.extra_controls_line, "extra_controls", count=None)
+            self._ikfk_details_section = maya_aminate_ui.Disclosure("Switch and pose details")
+            self._ikfk_details_section.content.addWidget(fallback_group)
+            advanced_section = maya_aminate_ui.Disclosure("Advanced mapping")
+            advanced_section.content.addWidget(setup_group)
+            advanced_section.content.addWidget(details_group)
+            layout.addWidget(self.ikfk_chain_mode_combo)
+            layout.addWidget(fk_group)
+            layout.addWidget(ik_group)
+            layout.addWidget(self._ikfk_details_section)
+            layout.addWidget(advanced_section)
             buttons = QtWidgets.QVBoxLayout()
             self.detect_profile_button = QtWidgets.QPushButton("Set Up From Selection")
             self.detect_profile_button.setProperty("aminateRole", "primary")
-            self.detect_profile_button.setToolTip("Detect the selected arm or leg. Complete setups are saved automatically.")
+            self.detect_profile_button.setToolTip("Select a limb control, then detect its connected IK/FK setup. Uncertain matches open manual setup.")
+            self.manual_setup_button = QtWidgets.QPushButton("Manual Setup")
+            setup_actions = QtWidgets.QHBoxLayout()
+            setup_actions.addWidget(self.detect_profile_button, 1)
+            setup_actions.addWidget(self.manual_setup_button, 1)
             self.save_profile_button = QtWidgets.QPushButton("Save Switch")
             self.save_profile_button.setToolTip("Save the current boxes as a switch you can load later.")
+            self.clear_ikfk_mapping_button = QtWidgets.QPushButton("Clear Mapping")
+            self.clear_ikfk_mapping_button.setToolTip("Clear these fields to map another limb or rig. Saved switches are kept.")
+            mapping_actions = QtWidgets.QHBoxLayout()
+            mapping_actions.addWidget(self.save_profile_button, 1)
+            mapping_actions.addWidget(self.clear_ikfk_mapping_button, 1)
             self.switch_fk_to_ik_button = QtWidgets.QPushButton("Switch FK -> IK")
             self.switch_fk_to_ik_button.setProperty("aminateRole", "primary")
             self.switch_fk_to_ik_button.setToolTip("Match the IK controls to the current FK pose and switch on this frame.")
             self.switch_ik_to_fk_button = QtWidgets.QPushButton("Switch IK -> FK")
             self.switch_ik_to_fk_button.setProperty("aminateRole", "primary")
             self.switch_ik_to_fk_button.setToolTip("Match the FK controls to the current IK pose and switch on this frame.")
-            buttons.addWidget(self.detect_profile_button)
-            buttons.addWidget(self.save_profile_button)
+            self.ikfk_state = QtWidgets.QLabel()
+            self.ikfk_state.setWordWrap(True)
+            buttons.addLayout(setup_actions)
+            buttons.addLayout(mapping_actions)
+            buttons.addWidget(self.ikfk_state)
             buttons.addWidget(self.switch_fk_to_ik_button)
             buttons.addWidget(self.switch_ik_to_fk_button)
             layout.addLayout(buttons)
-            self.ikfk_help = QtWidgets.QLabel("Select controls, then use Set Up From Selection.")
+            self.ikfk_help = QtWidgets.QLabel("The switch keys this frame and protects the previous frame. Use Saved switches to reuse a setup.")
             self.ikfk_help.setWordWrap(True)
             self.ikfk_help.setProperty("aminateRole", "muted")
             layout.addWidget(self.ikfk_help)
@@ -5033,11 +5340,27 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self.refresh_profiles_button.clicked.connect(self._populate_profile_names)
             self.load_profile_button.clicked.connect(self._load_selected_profile)
             self.detect_profile_button.clicked.connect(self._detect_profile)
+            self.manual_setup_button.clicked.connect(lambda: self._open_manual_ikfk_setup(mark_manual=True))
             self.save_profile_button.clicked.connect(self._save_profile)
+            self.clear_ikfk_mapping_button.clicked.connect(self._clear_ikfk_mapping)
             self.switch_fk_to_ik_button.clicked.connect(self._switch_fk_to_ik)
             self.switch_ik_to_fk_button.clicked.connect(self._switch_ik_to_fk)
-            import maya_aminate_ui
+            self.ikfk_chain_mode_combo.currentIndexChanged.connect(self._refresh_ikfk_mapping_fields)
+            for field in (self.rig_root_line, self.switch_attr_line, self.fk_controls_line,
+                          self.ik_control_line, self.ik_controls_line, self.pv_control_line, self.match_nodes_line,
+                          self.ik_match_node_line, self.extra_controls_line):
+                field.editingFinished.connect(self._bind_ikfk_switch)
+            for spin in (self.fk_value_spin, self.ik_value_spin):
+                spin.valueChanged.connect(self._ikfk_endpoint_edited)
+            self._ikfk_state_timer = QtCore.QTimer(self.ikfk_page)
+            self._ikfk_state_timer.setInterval(250)
+            self._ikfk_state_timer.timeout.connect(self._refresh_ikfk_visible_state)
+            self._ikfk_state_timer.start()
             maya_aminate_ui.apply(self, 'ikfk', locals())
+            for field in pick_fields:
+                field.setMinimumWidth(64)
+            self._refresh_ikfk_mapping_fields()
+            self._bind_ikfk_switch()
 
         def _build_rig_builder_tab(self):
             import maya_control_rig_ui
@@ -5441,8 +5764,8 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 "package_scene": "reference_manager",
                 "archive": "reference_manager",
                 "archive_scene": "reference_manager",
-                "parenting": "dynamic_parenting",
-                "dynamic_parenting": "dynamic_parenting",
+                "parenting": "parent_manager",
+                "dynamic_parenting": "parent_manager",
                 "contact": "hand_foot_hold",
                 "contact_hold": "hand_foot_hold",
                 "hold": "hand_foot_hold",
@@ -5607,11 +5930,12 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
             self._set_status("Jumped to frame {0}.".format(_frame_display(frame_value)), True)
 
         def _profile_fields(self):
-            return {
+            fields = {
                 "profile_name": self.profile_name_line.text(),
                 "rig_root": self.rig_root_line.text(),
                 "namespace_hint": self.namespace_line.text(),
                 "limb_type": self.limb_type_combo.currentText(),
+                "chain_mode": self.ikfk_chain_mode_combo.currentData(),
                 "side": self.side_combo.currentText(),
                 "fk_controls": [item.strip() for item in self.fk_controls_line.text().split(",") if item.strip()],
                 "ik_controls": [item.strip() for item in self.ik_controls_line.text().split(",") if item.strip()],
@@ -5624,23 +5948,163 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
                 "match_nodes": [item.strip() for item in self.match_nodes_line.text().split(",") if item.strip()],
                 "ik_match_node": self.ik_match_node_line.text(),
             }
+            # Keep graph evidence only while the mapping it describes is unchanged.
+            # Editing a control, source or endpoint must never reuse stale evidence.
+            original = getattr(self, "_ikfk_detected_profile", {})
+            signature = getattr(self, "_ikfk_detected_fields", {})
+            mapping_keys = set(fields) - {"profile_name", "namespace_hint"}
+            if signature and all(fields[key] == signature.get(key) for key in mapping_keys):
+                for key in ("detection_evidence", "result_nodes", "detection_kind"):
+                    if key in original:
+                        fields[key] = original[key]
+            elif original.get("detection_kind") == "name_draft":
+                fields["detection_kind"] = "name_draft"
+            if getattr(self, "_ikfk_manual_selection", False):
+                fields["manual_selection"] = True
+                paths = _ikfk_profile_paths(fields)
+                fields["manual_node_ids"] = {
+                    node: identity for node, identity in original.get("manual_node_ids", {}).items() if node in paths
+                }
+            if getattr(self, "_ikfk_endpoints_edited", False):
+                fields["manual_endpoints_edited"] = True
+            return fields
 
         def _populate_profile_fields(self, profile):
+            self._ikfk_detected_profile = {}
+            self._ikfk_detected_fields = {}
+            self._ikfk_manual_selection = profile.get("manual_selection", False)
+            self._ikfk_endpoints_edited = profile.get("manual_endpoints_edited", False)
             self.profile_name_line.setText(profile.get("profile_name", ""))
             self.rig_root_line.setText(profile.get("rig_root", ""))
             self.namespace_line.setText(profile.get("namespace_hint", ""))
             self.limb_type_combo.setCurrentText(profile.get("limb_type", "arm"))
+            self.ikfk_chain_mode_combo.setCurrentIndex(1 if _is_generic_chain(profile) else 0)
             self.side_combo.setCurrentText(profile.get("side", "left"))
             self.fk_controls_line.setText(", ".join(profile.get("fk_controls", [])))
             self.ik_controls_line.setText(", ".join(profile.get("ik_controls", [])))
             self.ik_control_line.setText(profile.get("ik_control", ""))
             self.pv_control_line.setText(profile.get("pole_vector_control", ""))
             self.switch_attr_line.setText(profile.get("switch_attr", ""))
-            self.fk_value_spin.setValue(float(profile.get("fk_value", 0.0)))
-            self.ik_value_spin.setValue(float(profile.get("ik_value", 1.0)))
+            for mode, spin, default in (("fk", self.fk_value_spin, 0.0), ("ik", self.ik_value_spin, 1.0)):
+                blocked = spin.blockSignals(True)
+                spin.setValue(float(profile.get(mode + "_value", default)))
+                spin.blockSignals(blocked)
             self.extra_controls_line.setText(", ".join(profile.get("extra_controls", [])))
             self.match_nodes_line.setText(", ".join(profile.get("match_nodes", [])))
             self.ik_match_node_line.setText(profile.get("ik_match_node", ""))
+            self._ikfk_detected_fields = self._profile_fields()
+            self._ikfk_detected_profile = dict(profile)
+            self._bind_ikfk_switch()
+
+        def _refresh_ikfk_mapping_fields(self):
+            limb_mode = self.ikfk_chain_mode_combo.currentData() == "limb"
+            for row, label, shown_in_limb in self._ikfk_mode_rows:
+                row.setVisible(limb_mode == shown_in_limb)
+                label.setVisible(limb_mode == shown_in_limb)
+            for field in (self.limb_type_combo, self.side_combo, self.ik_match_node_line,
+                          self._ikfk_pick_buttons["ik_match_node"]):
+                field.setEnabled(limb_mode)
+            self._refresh_ikfk_manual_hint()
+
+        def _ikfk_next_selection(self, fields):
+            generic = _is_generic_chain(fields)
+            fk_count = len(fields["fk_controls"])
+            if not fk_count or (not generic and fk_count != 3):
+                return ("Capture FK controls in chain order, one at a time or as an ordered selection."
+                        if generic else "Capture three FK controls from shoulder/hip to wrist/ankle, one at a time or as an ordered selection.")
+            if generic and len(fields["ik_controls"]) != fk_count:
+                return "Capture {0} corresponding IK controls in the same order ({1} captured).".format(
+                    fk_count, len(fields["ik_controls"])
+                )
+            if not generic and not fields["ik_control"]:
+                return "Select the IK hand or foot control and click Use Selected."
+            if not generic and not fields["pole_vector_control"]:
+                return "Select the elbow or knee guide and click Use Selected."
+            if not fields["switch_attr"]:
+                return "Select the switch control, highlight its channel name in the Channel Box, then click Use Selected Channel."
+            if len(fields["match_nodes"]) != fk_count:
+                return "Select one pose source per FK control in the same order and click Use Selected."
+            return ""
+
+        def _refresh_ikfk_manual_hint(self):
+            fields = self._profile_fields()
+            if fields.get("detection_kind") == "graph":
+                message = "The connections confirm the controls, switch values and pose sources."
+            elif fields.get("detection_kind") == "name_draft" and not self._ikfk_next_selection(fields):
+                message = "Review and save the suggested controls and values, or click Clear Mapping to pick them yourself."
+            else:
+                message = self._ikfk_next_selection(fields) or "Confirm the FK and IK values. Switch on this frame or save the setup for reuse."
+            self.ikfk_manual_hint.setText(message)
+
+        def _ikfk_endpoint_edited(self):
+            self._ikfk_endpoints_edited = True
+            self._refresh_ikfk_manual_hint()
+            self._refresh_ikfk_state()
+
+        def _open_manual_ikfk_setup(self, mark_manual=False):
+            if mark_manual:
+                self._ikfk_manual_selection = True
+            self._ikfk_setup_section.setExpanded(True)
+            fields = self._profile_fields()
+            self._ikfk_details_section.setExpanded(
+                bool(fields["ik_control"] or _is_generic_chain(fields)) and fields.get("detection_kind") != "graph"
+            )
+            self._bind_ikfk_switch()
+
+        def _clear_ikfk_mapping(self):
+            self._populate_profile_fields({"chain_mode": self.ikfk_chain_mode_combo.currentData(), "manual_selection": True})
+            self._open_manual_ikfk_setup()
+
+        def _pick_ikfk_field(self, key, count, channel):
+            try:
+                fields = self.controller.bind_manual_ikfk_selection(self._profile_fields(), key, count, channel)
+            except (ValueError, RuntimeError) as exc:
+                self.ikfk_manual_hint.setText(str(exc))
+                self._set_status(str(exc), False)
+                return
+            self._populate_profile_fields(fields)
+            if fields.get("detection_kind") != "graph" and (fields["ik_control"] or _is_generic_chain(fields)):
+                self._ikfk_details_section.setExpanded(True)
+            self._set_status(self.ikfk_manual_hint.text(), True)
+
+        def _bind_ikfk_switch(self):
+            self._ikfk_bound_switch = _resolve_profile_attr(
+                self.switch_attr_line.text().strip(), rig_root_hint=self.rig_root_line.text().strip(),
+                exact_paths=getattr(self, "_ikfk_manual_selection", False),
+            )
+            self._refresh_ikfk_manual_hint()
+            self._refresh_ikfk_state()
+
+        def _refresh_ikfk_visible_state(self):
+            if self.ikfk_page.isVisible():
+                self._refresh_ikfk_state()
+
+        def _refresh_ikfk_state(self):
+            plug = getattr(self, "_ikfk_bound_switch", "")
+            fields = self._profile_fields()
+            draft = fields.get("detection_kind") == "name_draft"
+            incomplete = fields.get("manual_selection") and self._ikfk_next_selection(fields)
+            mode = ""
+            if plug and cmds.objExists(plug) and abs(self.fk_value_spin.value() - self.ik_value_spin.value()) > 2e-6:
+                try:
+                    mode = self.controller.switch_mode({
+                        "switch_attr": plug, "fk_value": self.fk_value_spin.value(), "ik_value": self.ik_value_spin.value(),
+                    })
+                except (TypeError, RuntimeError):
+                    pass
+            if draft:
+                self.ikfk_state.setText("Review the suggested mapping in Set up rig, then save it.")
+                self.ikfk_state.setToolTip("Names alone do not verify an IK/FK setup.")
+            elif mode:
+                frame = _frame_display(cmds.currentTime(query=True))
+                label = self.profile_name_line.text().strip() or _short_name(plug.split(".", 1)[0])
+                self.ikfk_state.setText("{0}\n{1}  |  Frame {2}".format(label, mode, frame))
+                self.ikfk_state.setToolTip(plug)
+            else:
+                self.ikfk_state.setText("Select a limb control to detect its setup, or choose Manual Setup.")
+                self.ikfk_state.setToolTip("")
+            self.switch_fk_to_ik_button.setEnabled(mode == "FK" and not draft and not incomplete)
+            self.switch_ik_to_fk_button.setEnabled(mode == "IK" and not draft and not incomplete)
 
         def _populate_profile_names(self):
             if not hasattr(self, "profile_combo"):
@@ -5777,33 +6241,35 @@ QComboBox[aminateComboAffordance="true"] QAbstractItemView {
         def _detect_profile(self):
             profile, issues = self.controller.detect_profile()
             self._populate_profile_fields(profile)
-            lines = ["Setup detected from current selection."]
             if issues:
-                lines.extend("- " + issue for issue in issues)
-                lines.append("Fix highlighted details, then use Save Switch.")
-                self.ikfk_help.setText("\n".join(lines))
-                self._set_status("Setup found with details to check before saving.", False)
+                self._open_manual_ikfk_setup()
+                self.ikfk_help.setText("\n".join(issues))
+                self._set_status(issues[0], False)
                 return
-            success, message = self.controller.save_profile(self._profile_fields())
-            self._populate_profile_names()
-            if success:
-                lines.append("Complete setup saved. Switch buttons are ready.")
-            else:
-                lines.append(message)
-            self.ikfk_help.setText("\n".join(lines))
-            self._set_status(message, success)
+            self._ikfk_setup_section.setExpanded(False)
+            message = "Limb detected. Choose Switch to IK or FK."
+            self.ikfk_help.setText(message)
+            self._set_status(message, True)
 
         def _save_profile(self):
-            success, message = self.controller.save_profile(self._profile_fields())
+            fields = self._profile_fields()
+            success, message = self.controller.save_profile(fields)
             self._populate_profile_names()
+            if success:
+                self.profile_combo.setCurrentText(fields["profile_name"].strip())
+                loaded, profile = self.controller.load_profile(fields["profile_name"].strip())
+                if loaded:
+                    self._populate_profile_fields(profile)
             self._set_status(message, success)
 
         def _switch_fk_to_ik(self):
             success, message = self.controller.switch_fk_to_ik(self._profile_fields())
+            self._refresh_ikfk_state()
             self._set_status(message, success)
 
         def _switch_ik_to_fk(self):
             success, message = self.controller.switch_ik_to_fk(self._profile_fields())
+            self._refresh_ikfk_state()
             self._set_status(message, success)
 
         def _open_follow_url(self, url=None):

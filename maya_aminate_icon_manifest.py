@@ -57,14 +57,14 @@ WORKFLOW_ICON_MANIFEST = (
     },
     {
         "id": "dynamic_parenting",
-        "display_name": "Dynamic Parenting",
+        "display_name": "Parent Manager",
         "command": "workflow_dynamic_parenting",
         "tab": "dynamic_parenting",
         "label": "DP",
         "asset": "icon_dynamic_parenting.svg",
         "accent": "#A6D96A",
-        "purpose": "Create temporary parent relationships.",
-        "help": "Move a selected control without rebuilding the rig.",
+        "purpose": "Key which parent or attachment point an object follows.",
+        "help": "Attach, switch, or detach while preserving the pose.",
         "shortcut": None,
     },
     {

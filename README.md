@@ -2,17 +2,17 @@
 
 # Aminate
 
-## Version 0.3.13
+## Version 0.3.14
 
-Scene Helpers now exposes shortcut capture, **Apply Hotkey**, **Reset Default**, and the current binding directly under **Floating windows** for Tween Machine, Channel Box and Graph Editor. Drafts stay unapplied until you click Apply; conflicts preserve the saved binding.
+Aminate 0.3.14 is the current public release.
 
-Teacher-demo duplication now includes connected sibling geometry when you select a character's main control. It matches copied nodes safely and checks visible geometry before accepting an offset. Amanda's complete 87-mesh copy passed, including independent skin motion and source preservation. Complex rigs can use their global control to avoid deforming the copy. Unsupported offsets are rejected.
+- **Universal IK/FK:** detect a selected limb, or use **Manual Setup** to pick FK controls and the IK hand/foot control. Aminate fills verified details automatically and asks for missing selections. Pick controls one at a time when needed; save the mapping for reuse.
+- **Rig Scale:** use **Scale character** to multiply the current size, or **Add a scale control** to expose a reusable control. More rig structures are supported, with geometry checks and rollback when a setup cannot be verified.
+- **Parent Manager:** follow targets, save attach points, adjust follow changes, and inspect colour-coded timeline markers. Practice lessons are included.
 
-Tween Machine percentage clicks, slider clicks and drags automatically key selected controls, including with Maya Auto Key off. The timing and Timeline Notes fixes from 0.3.12 are included.
+Download **Aminate_v0.3.14.zip**, extract it, open the **aminate** folder, and drag **Aminate_v0_3_14_drag_this_file_into_Maya.py** into the Maya viewport. The legacy installer remains a fallback. Save and restart Maya after updating an already loaded Aminate session.
 
-Download the runtime ZIP, extract it, and drag **Aminate_v0_3_13_drag_this_file_into_Maya.py** into Maya. Save and restart Maya if Aminate was already loaded. The legacy installer remains available as a fallback.
-
-Validation includes offscreen interactions with the new shortcut editor and live checks of the new teacher-demo functions in the retained Maya 2026.2 session. The broad fresh-session tool audit below covers 0.3.12. The complete 0.3.13 UI still needs a fresh Maya start; current-pose geometry checks do not prove every third-party rig or animation.
+The IK/FK update was checked in Maya 2026.2 on representative character rigs, including manual setup, switching and undo/redo. Compatibility depends on the rig and pose; unsupported or ambiguous setups may need manual mapping or be refused. This is not a guarantee for every rig. Pencil and reference-video workflows remain in beta testing.
 
 ### Included from 0.3.12
 
