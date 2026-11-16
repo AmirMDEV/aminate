@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 0.3.17
+
+- Transfer matched animated custom channels, such as facial sliders, when enabled.
+- Sample changing animation layer and group weights, preserve fractional key times, and leave unmatched target channels alone.
+- Cancel before writing keys or undo the finished retarget in one step.
+
 ## Version 0.3.16
 
 - Show the current step while copying a rig for a teacher demo.

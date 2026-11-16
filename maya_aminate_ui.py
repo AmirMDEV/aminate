@@ -1,6 +1,8 @@
 """Shared compact task layouts. Moves existing widgets; never replaces callbacks."""
 from __future__ import absolute_import, division, print_function
 
+from time import monotonic
+
 try:
     from PySide6 import QtCore, QtWidgets
 except ImportError:
@@ -11,12 +13,19 @@ class OperationProgress(QtWidgets.QDialog):
     """Show actual work without starting a nested Maya event loop."""
 
     @classmethod
-    def for_operation(cls, owner, title, initial_message):
+    def for_operation(cls, owner, title, initial_message, cancellable=False):
         dialog = getattr(owner, "_aminate_operation_progress", None)
         if dialog is None:
             dialog = owner._aminate_operation_progress = cls(owner, title)
+        dialog.setWindowTitle(title)
+        dialog.bar.setAccessibleName(title + " progress")
         dialog.message.setText(initial_message)
         dialog.bar.setRange(0, 0)
+        dialog._can_cancel = bool(cancellable)
+        dialog._cancel_requested = False
+        dialog._next_input_poll = 0.0
+        dialog.cancel_button.setEnabled(cancellable)
+        dialog.cancel_button.setVisible(cancellable)
         return dialog
 
     def __init__(self, owner, title):
@@ -33,9 +42,17 @@ class OperationProgress(QtWidgets.QDialog):
         self.bar.setAccessibleName(title + " progress")
         self.bar.setFormat("%v / %m")
         self.bar.setRange(0, 0)
+        self._can_cancel = False
+        self._cancel_requested = False
+        self._next_input_poll = 0.0
+        self.cancel_button = QtWidgets.QPushButton("Cancel", self)
+        self.cancel_button.setAutoDefault(False)
+        self.cancel_button.hide()
+        self.cancel_button.clicked.connect(self.reject)
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.message)
         layout.addWidget(self.bar)
+        layout.addWidget(self.cancel_button, 0, QtCore.Qt.AlignRight)
 
     def __enter__(self):
         self.show()
@@ -46,11 +63,36 @@ class OperationProgress(QtWidgets.QDialog):
         return self.report
 
     def __exit__(self, *_args):
+        self.begin_write()
         self.hide()
 
     def reject(self):
-        # The current native Maya operation cannot be interrupted safely.
-        pass
+        if self._can_cancel:
+            self._cancel_requested = True
+            self.cancel_button.setEnabled(False)
+
+    def poll_cancel(self, force=False):
+        """Check for Cancel during read-only preparation, at most every 50 ms."""
+        if self._can_cancel and not self._cancel_requested:
+            now = monotonic()
+            if force or now >= self._next_input_poll:
+                self._next_input_poll = now + 0.05
+                # Application modality keeps scene widgets blocked while
+                # the Cancel button receives input. Only poll before writes.
+                QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeSocketNotifiers)
+        return self._cancel_requested
+
+    def prepare_write(self):
+        """Deliver any pending Cancel click before closing the read phase."""
+        if self.poll_cancel(force=True):
+            return False
+        self.begin_write()
+        return True
+
+    def begin_write(self):
+        """Disable cancellation before writes without dispatching queued events."""
+        self._can_cancel = False
+        self.cancel_button.setEnabled(False)
 
     def report(self, message, completed=0, total=0):
         if self.message.text() != message:
@@ -303,6 +345,10 @@ def apply(owner, key, local):
         owner.retarget_all_button.clicked.disconnect()
         owner.retarget_all_button.clicked.connect(lambda _checked=False: owner._retarget_selected_pairs() if scope.currentIndex() else owner._retarget_all_pairs())
         scope.currentIndexChanged.connect(lambda index: owner._task_sections[3].setExpanded(bool(index)))
+        owner.include_custom_channels = QtWidgets.QCheckBox('Include custom channels')
+        owner.include_custom_channels.setToolTip(
+            'Include matching animated numeric attributes, such as facial controls.')
+        local['options_row'].addWidget(owner.include_custom_channels, 2, 0, 1, 2)
     elif key == 'rotation':
         primary(owner.apply_recommended_button, 'Apply Recommended Fix')
     elif key == 'rig_scale':

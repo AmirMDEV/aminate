@@ -473,55 +473,80 @@ def _normal_match_key(node_name):
     return "".join(_match_core_tokens(_match_tokens(node_name)))
 
 
-def _source_key_times(source_node, attributes=None):
-    times = []
-    layers = (cmds.ls(type="animLayer") or []) if attributes else []
-    for attr_name in list(attributes or []):
-        plug = "{0}.{1}".format(source_node, attr_name)
-        if not cmds.objExists(plug):
+def _custom_channels(source, target):
+    source_attrs = cmds.listAttr(source, userDefined=True, keyable=True, scalar=True) or []
+    target_attrs = set(cmds.listAttr(target, userDefined=True, keyable=True, scalar=True) or [])
+    numeric_types = {"double", "float", "doubleAngle", "doubleLinear"}
+    return [
+        attr for attr in source_attrs
+        if attr in target_attrs
+        and cmds.getAttr(source + "." + attr, type=True) in numeric_types
+        and cmds.getAttr(source + "." + attr, type=True) == cmds.getAttr(target + "." + attr, type=True)
+    ]
+
+
+def _has_animation_layers(plug):
+    return bool(cmds.listConnections(plug, source=True, destination=False,
+                                     skipConversionNodes=True, type="animBlendNodeBase"))
+
+
+def _curve_times(plug):
+    return set(float(t) for t in (cmds.keyframe(plug, query=True, timeChange=True) or []))
+
+
+def _source_channel_times(plug, layers, weight_cache):
+    times = _curve_times(plug)
+    if not layers or not _has_animation_layers(plug):
+        return sorted(times)
+
+    weight_times = set()
+    for layer in layers:
+        curves = cmds.animLayer(layer, query=True, findCurveForPlug=plug) or []
+        for curve in curves:
+            times.update(_curve_times(curve))
+        # A layer with a constant channel value can still be animated by its
+        # own weight or an enclosing group's weight.
+        if not cmds.animLayer(layer, query=True, layeredPlug=plug):
             continue
-        try:
-            times.extend(
-                float(time_value)
-                for time_value in (
-                    cmds.keyframe(source_node, attribute=attr_name, query=True, timeChange=True) or []
+        parent = layer
+        while parent:
+            if parent not in weight_cache:
+                weight_cache[parent] = (
+                    _curve_times(parent + ".weight"),
+                    cmds.animLayer(parent, query=True, parent=True),
                 )
-            )
-        except Exception:
-            pass
-        # Maya's keyframe query on a layered channel can return only the
-        # current layer. Include the base and override/additive curve times
-        # before sampling the evaluated channel.
-        if layers and cmds.listConnections(plug, source=True, destination=False,
-                                           skipConversionNodes=True, type="animBlendNodeBase"):
-            for layer in layers:
-                curves = cmds.animLayer(layer, query=True, findCurveForPlug=plug) or []
-                if curves:
-                    times.extend(float(t) for t in (cmds.keyframe(curves, query=True, timeChange=True) or []))
-    if not attributes:
-        times.extend(float(time_value) for time_value in (cmds.keyframe(source_node, query=True, timeChange=True) or []))
-    unique_times = []
-    for time_value in sorted(times):
-        if unique_times and abs(float(time_value) - float(unique_times[-1])) <= 1.0e-6:
-            continue
-        unique_times.append(float(time_value))
-    return unique_times
+            keys, parent = weight_cache[parent]
+            weight_times.update(keys)
+
+    if weight_times:
+        times.update(weight_times)
+        # Multiplying changing curves by changing weights creates motion that
+        # can't be represented by just the original control and weight keys.
+        first, last = min(weight_times), max(weight_times)
+        times.update(range(math.ceil(first), math.floor(last) + 1))
+    return sorted(times)
 
 
-def _reduce_target_keys_to_source_times(source_node, target_node, bake_attrs, start_time, end_time):
-    keep_times = _source_key_times(source_node, attributes=bake_attrs)
-    if not keep_times:
-        return
-    for attr_name in bake_attrs:
-        target_times = cmds.keyframe(target_node, attribute=attr_name, query=True, timeChange=True) or []
-        for time_value in target_times:
-            if any(abs(float(time_value) - float(keep_time)) <= 1.0e-6 for keep_time in keep_times):
-                continue
-            if float(start_time) - 1.0e-3 <= float(time_value) <= float(end_time) + 1.0e-3:
-                try:
-                    cmds.cutKey(target_node, attribute=attr_name, time=(float(time_value), float(time_value)), clear=True)
-                except Exception:
-                    pass
+def _can_key_target(plug):
+    if not cmds.getAttr(plug, settable=True) or _has_animation_layers(plug):
+        return False
+    inputs = cmds.listConnections(plug, source=True, destination=False, skipConversionNodes=True) or []
+    return all(cmds.nodeType(node) in {"animCurveTA", "animCurveTL", "animCurveTT", "animCurveTU"}
+               for node in inputs)
+
+
+def _set_evaluation_time(frame):
+    # Use the normal Maya time command: setting time through MAnimControl can
+    # stall complex rigs in the GUI. Preserve the undo queue and re-enable it
+    # before any progress callback or scene write.
+    undo_enabled = cmds.undoInfo(query=True, state=True)
+    if undo_enabled:
+        cmds.undoInfo(stateWithoutFlush=False)
+    try:
+        cmds.currentTime(frame, edit=True)
+    finally:
+        if undo_enabled:
+            cmds.undoInfo(stateWithoutFlush=True)
 
 
 class FaceRetargetController(object):
@@ -532,6 +557,7 @@ class FaceRetargetController(object):
         self.maintain_offset = DEFAULT_MAINTAIN_OFFSET
         self.follow_translate = DEFAULT_FOLLOW_TRANSLATE
         self.follow_rotate = DEFAULT_FOLLOW_ROTATE
+        self.include_custom_channels = False
         self.reduce_keys = DEFAULT_REDUCE_KEYS
         self.value_tolerance = DEFAULT_VALUE_TOLERANCE
         self.report = {}
@@ -732,8 +758,8 @@ class FaceRetargetController(object):
             return False, "Pick the source controls first."
         if not self.target_nodes:
             return False, "Pick the target controls first."
-        if not self.follow_translate and not self.follow_rotate:
-            return False, "Turn on Follow Translation or Follow Rotation first."
+        if not (self.follow_translate or self.follow_rotate or self.include_custom_channels):
+            return False, "Turn on translation, rotation, or custom channels first."
         pair_count = min(len(self.source_nodes), len(self.target_nodes))
         if pair_count <= 0:
             return False, "Nothing to pair."
@@ -756,8 +782,8 @@ class FaceRetargetController(object):
             return False, "Pick the source controls first."
         if not self.target_nodes:
             return False, "Pick the target controls first."
-        if not self.follow_translate and not self.follow_rotate:
-            return False, "Turn on Follow Translation or Follow Rotation first."
+        if not (self.follow_translate or self.follow_rotate or self.include_custom_channels):
+            return False, "Turn on translation, rotation, or custom channels first."
         available_targets = [_node_long_name(node_name) for node_name in self.target_nodes if node_name and cmds.objExists(node_name)]
         if not available_targets:
             return False, "No valid target controls were found."
@@ -830,16 +856,18 @@ class FaceRetargetController(object):
             return start_time, end_time
         return math.floor(start_time + 0.0001), math.ceil(end_time - 0.0001)
 
-    def retarget_selected_pairs(self, progress=None):
+    def retarget_selected_pairs(self, progress=None, should_cancel=None, begin_write=None):
         if not self.selected_records:
             return False, "Pick one or more control pair rows first."
-        return self.retarget_and_bake(records=list(self.selected_records), action_label="selected", progress=progress)
+        return self.retarget_and_bake(records=list(self.selected_records), action_label="selected",
+                                      progress=progress, should_cancel=should_cancel, begin_write=begin_write)
 
     def retarget_selected_controls(self):
         return self.retarget_selected_pairs()
 
-    def retarget_all_pairs(self, progress=None):
-        return self.retarget_and_bake(records=_all_pair_records(), action_label="all", progress=progress)
+    def retarget_all_pairs(self, progress=None, should_cancel=None, begin_write=None):
+        return self.retarget_and_bake(records=_all_pair_records(), action_label="all",
+                                      progress=progress, should_cancel=should_cancel, begin_write=begin_write)
 
     def retarget_all_controls(self):
         return self.retarget_all_pairs()
@@ -868,161 +896,140 @@ class FaceRetargetController(object):
         self.analyze_setup()
         return True, "Deleted all {0} saved control pair(s).".format(deleted)
 
-    def retarget_and_bake(self, records=None, action_label="selected", progress=None):
-        records = list(records or (self.selected_records or _all_pair_records()))
+    def retarget_and_bake(self, records=None, action_label="selected", progress=None,
+                          should_cancel=None, begin_write=None):
+        if records is None:
+            records = self.selected_records or _all_pair_records()
+        records = list(records)
         if not records:
             return False, "Pair the source and target controls first."
-        entries = []
-        for record_node in records:
-            payload = _pair_record_payload(record_node)
-            if not payload:
-                continue
-            if not payload.get("source") or not payload.get("target"):
-                continue
-            if not cmds.objExists(payload["source"]) or not cmds.objExists(payload["target"]):
-                continue
-            entries.append(payload)
-        if not entries:
-            return False, "No valid control pair rows were found."
-        if not self.follow_translate and not self.follow_rotate:
-            return False, "Turn on Follow Translation or Follow Rotation first."
-
-        target_nodes = []
         bake_attrs = _bake_attributes({"follow_translate": self.follow_translate, "follow_rotate": self.follow_rotate})
-        if not bake_attrs:
-            return False, "There are no channels to bake."
+        if not (bake_attrs or self.include_custom_channels):
+            return False, "Turn on translation, rotation, or custom channels first."
 
+        cancelled = "Retarget cancelled. Target keys are unchanged."
+        frame_count = 0
         original_time = None
+        chunk_name = "Aminate Retarget " + uuid.uuid4().hex
+        chunk_open = False
         try:
-            cmds.undoInfo(openChunk=True)
-        except Exception:
-            pass
-
-        try:
-            try:
-                original_time = float(cmds.currentTime(query=True))
-            except Exception:
-                original_time = None
-
-            sampled_entries = []
-            entries_by_time = {}
+            layers = cmds.ls(type="animLayer") or []
+            weight_cache = {}
+            channels_by_target = {}
+            skipped = 0
             if progress:
-                progress("Finding authored keyframes…")
-            for payload in entries:
-                source_node = payload["source"]
-                target_node = payload["target"]
-                source_times = _source_key_times(source_node, attributes=bake_attrs)
-                if not source_times:
+                progress("Finding source keys and checking target channels…", 0, len(records))
+            for index, record in enumerate(records, 1):
+                if should_cancel and should_cancel():
+                    return False, cancelled
+                payload = _pair_record_payload(record) or {}
+                source, target = payload.get("source"), payload.get("target")
+                if not source or not target or source == target or not payload.get("enabled", True):
                     continue
-                baselines = {}
-                for attr_name in bake_attrs:
-                    source_attr = "{0}.{1}".format(source_node, attr_name)
-                    target_attr = "{0}.{1}".format(target_node, attr_name)
-                    if not cmds.objExists(source_attr) or not cmds.objExists(target_attr):
+                if not cmds.objExists(source) or not cmds.objExists(target):
+                    continue
+                attrs = bake_attrs + (_custom_channels(source, target) if self.include_custom_channels else [])
+                for attr in attrs:
+                    source_plug, target_plug = source + "." + attr, target + "." + attr
+                    if not cmds.objExists(source_plug):
                         continue
-                    baselines[attr_name] = None
-                item = {
-                        "source": source_node,
-                        "target": target_node,
-                        "times": source_times,
-                        "baselines": baselines,
-                        "samples": {},
-                    }
-                sampled_entries.append(item)
-                for time_value in source_times:
-                    entries_by_time.setdefault(time_value, []).append(item)
+                    times = _source_channel_times(source_plug, layers, weight_cache)
+                    if not times:
+                        continue
+                    item = (record, source_plug, target, attr, times)
+                    channels_by_target.setdefault(target_plug, []).append(item)
+                if progress:
+                    progress("Finding source keys and checking target channels…", index, len(records))
 
-            # Evaluate the production scene once per authored time, then sample
-            # every paired control at that time before writing any target keys.
-            # Keep normal Maya evaluation; update=False produces stale rig poses.
-            frame_total = len(entries_by_time)
-            if progress and frame_total:
+            channels_by_time = {}
+            by_pair = {}
+            for target_plug, candidates in channels_by_target.items():
+                if should_cancel and should_cancel():
+                    return False, cancelled
+                if len(candidates) != 1 or not cmds.objExists(target_plug) or not _can_key_target(target_plug):
+                    skipped += 1
+                    continue
+                record, source_plug, target, attr, times = candidates[0]
+                samples = {}
+                by_pair.setdefault(record, []).append((target, attr, times, samples))
+                for frame in times:
+                    channels_by_time.setdefault(frame, []).append((source_plug, samples))
+            if not by_pair:
+                if skipped:
+                    return False, "No target channels can be keyed. {0} unavailable or conflicting channel(s) skipped.".format(skipped)
+                return False, "No animated channels were found on the paired source controls."
+
+            # Maya needs normal time evaluation to update constraints, layers and
+            # expressions. Read every source before editing even one target.
+            original_time = float(cmds.currentTime(query=True))
+            frames = sorted(channels_by_time)
+            frame_total = len(frames)
+            if progress:
                 progress("Reading source frames…", 0, frame_total)
-            for frame_index, time_value in enumerate(sorted(entries_by_time), 1):
-                cmds.currentTime(time_value, edit=True)
-                for item in entries_by_time[time_value]:
-                    sample = {}
-                    for attr_name in item["baselines"]:
-                        try:
-                            sample[attr_name] = float(cmds.getAttr("{0}.{1}".format(item["source"], attr_name)))
-                        except Exception:
-                            pass
-                    item["samples"][time_value] = sample
-                if progress and (frame_index == frame_total or frame_index % max(1, frame_total // 100) == 0):
-                    progress("Reading source frames…", frame_index, frame_total)
+            for frame_count, frame in enumerate(frames, 1):
+                if should_cancel and should_cancel():
+                    return False, cancelled
+                _set_evaluation_time(frame)
+                for source_plug, samples in channels_by_time[frame]:
+                    value = float(cmds.getAttr(source_plug))
+                    if not math.isfinite(value):
+                        raise RuntimeError("Invalid source value on {0} at frame {1}.".format(source_plug, frame))
+                    samples[frame] = value
+                if progress and (frame_count == frame_total or frame_count % max(1, frame_total // 100) == 0):
+                    progress("Reading source frames…", frame_count, frame_total)
 
-            if not sampled_entries:
-                return False, "No authored translate or rotate keys were found on the paired source controls."
-
-            start_time = min(item["times"][0] for item in sampled_entries)
-            end_time = max(item["times"][-1] for item in sampled_entries)
-
-            pair_total = len(sampled_entries)
+            if should_cancel and should_cancel():
+                return False, cancelled
+            if begin_write and begin_write() is False:
+                return False, cancelled
+            if not cmds.undoInfo(query=True, state=True):
+                return False, "Turn on Maya Undo before retargeting so a failed write can be rolled back."
+            cmds.undoInfo(openChunk=True, chunkName=chunk_name)
+            chunk_open = True
+            pair_total = len(by_pair)
             if progress:
                 progress("Writing target control keys…", 0, pair_total)
-            for pair_index, item in enumerate(sampled_entries, 1):
-                source_node = item["source"]
-                target_node = item["target"]
-                target_nodes.append(target_node)
-                if source_node != target_node:
-                    for attr_name in item["baselines"]:
-                        try:
-                            cmds.cutKey(target_node, attribute=attr_name, time=(start_time, end_time), clear=True)
-                        except Exception:
-                            pass
-                for time_value in item["times"]:
-                    for attr_name, source_value in item["samples"].get(time_value, {}).items():
-                        try:
-                            cmds.setKeyframe(
-                                target_node,
-                                attribute=attr_name,
-                                time=time_value,
-                                value=source_value,
-                            )
-                        except Exception:
-                            pass
-                if progress:
-                    progress("Writing target control keys…", pair_index, pair_total)
-
-            if progress:
-                progress("Keeping the original key times…")
-            for item in sampled_entries:
-                _reduce_target_keys_to_source_times(
-                    item["source"],
-                    item["target"],
-                    bake_attrs,
-                    start_time,
-                    end_time,
-                )
-
-            if progress:
-                progress("Updating saved control pairs…")
-            for record_node in records:
-                payload = _pair_record_payload(record_node)
-                if not payload:
-                    continue
+            for index, (record, channels) in enumerate(by_pair.items(), 1):
+                for target, attr, times, samples in channels:
+                    previous = _curve_times(target + "." + attr)
+                    for frame, value in samples.items():
+                        if not cmds.setKeyframe(target, attribute=attr, time=frame, value=value, insertBlend=False):
+                            raise RuntimeError("Could not key {0}.{1} at frame {2}.".format(target, attr, frame))
+                    # Replace only this channel's transferred span. Keep old
+                    # keys outside it and leave unanimated channels alone.
+                    for frame in previous - samples.keys():
+                        if times[0] <= frame <= times[-1]:
+                            cmds.cutKey(target, attribute=attr, time=(frame, frame), clear=True)
+                payload = _pair_record_payload(record)
                 payload["baked"] = True
                 payload["state"] = "Baked"
-                _set_pair_record_payload(record_node, payload)
+                _set_pair_record_payload(record, payload)
+                if progress:
+                    progress("Writing target control keys…", index, pair_total)
+            cmds.undoInfo(closeChunk=True)
+            chunk_open = False
 
             self.analyze_setup()
-            return True, "Retargeted {0} control pair(s) at the source's authored keys from frames {1} to {2}.".format(
-                len(target_nodes),
-                _frame_label(start_time),
-                _frame_label(end_time),
-            )
+            message = "Retargeted {0} control pair(s) from frames {1} to {2}.".format(
+                pair_total, _frame_label(frames[0]), _frame_label(frames[-1]))
+            if skipped:
+                message += " Skipped {0} unavailable or conflicting target channel(s).".format(skipped)
+            return True, message
         except Exception as exc:
-            return False, "Retarget and bake failed: {0}".format(exc)
-        finally:
-            try:
+            rollback = ""
+            if chunk_open:
                 cmds.undoInfo(closeChunk=True)
-            except Exception:
-                pass
-            if original_time is not None:
-                try:
-                    cmds.currentTime(original_time, edit=True)
-                except Exception:
-                    pass
+                chunk_open = False
+                if cmds.undoInfo(query=True, undoName=True) == chunk_name:
+                    try:
+                        cmds.undo()
+                        rollback = " Target changes were rolled back."
+                    except Exception:
+                        rollback = " Maya could not roll back target changes."
+            return False, "Retarget failed: {0}{1}".format(exc, rollback)
+        finally:
+            if original_time is not None and frame_count:
+                _set_evaluation_time(original_time)
 
     def shutdown(self):
         self.source_nodes = []
@@ -1126,7 +1133,7 @@ if QtWidgets:
             self.follow_rotate_check.setChecked(DEFAULT_FOLLOW_ROTATE)
             self.reduce_keys_check = QtWidgets.QCheckBox("Source Keyframes Only")
             self.reduce_keys_check.setChecked(DEFAULT_REDUCE_KEYS)
-            self.reduce_keys_check.setToolTip("Aminate writes only the exact source-authored key times. It never bakes every frame.")
+            self.reduce_keys_check.setToolTip("Uses source key times. Animated layer weights also need frame samples during the blend.")
             self.reduce_keys_check.setEnabled(False)
             options_row.addWidget(self.maintain_offset_check, 0, 0)
             options_row.addWidget(self.follow_translate_check, 0, 1)
@@ -1254,7 +1261,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 0, 0, 1, 2)
-            self.version_label = QtWidgets.QLabel("Version 0.3.16")
+            self.version_label = QtWidgets.QLabel("Version 0.3.17")
             footer_layout.addWidget(self.version_label, 1, 0)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -1408,7 +1415,7 @@ if QtWidgets:
                 target_value = row["target"]
                 if not source_value and not target_value:
                     continue
-                if source_value and target_value:
+                if source_value and target_value and not _find_pair_record(source_value, target_value):
                     success, _message = self.controller.upsert_pair(source_value, target_value)
                     if success:
                         saved += 1
@@ -1571,6 +1578,7 @@ if QtWidgets:
             self.controller.maintain_offset = False
             self.controller.follow_translate = bool(self.follow_translate_check.isChecked())
             self.controller.follow_rotate = bool(self.follow_rotate_check.isChecked())
+            self.controller.include_custom_channels = self.include_custom_channels.isChecked()
             self.controller.reduce_keys = True
 
         def _set_status(self, message, success=True):
@@ -1655,10 +1663,12 @@ if QtWidgets:
             self._save_complete_rows()
             self.controller.set_selected_records(self._selected_table_records())
             from maya_aminate_ui import OperationProgress
-            with OperationProgress.for_operation(
-                self, "Controls Retargeter", "Checking the selected control pairs…"
-            ) as report:
-                success, message = self.controller.retarget_selected_pairs(progress=report)
+            dialog = OperationProgress.for_operation(
+                self, "Controls Retargeter", "Checking the selected control pairs…", cancellable=True
+            )
+            with dialog as report:
+                success, message = self.controller.retarget_selected_pairs(
+                    progress=report, should_cancel=dialog.poll_cancel, begin_write=dialog.prepare_write)
             self._sync_from_controller()
             self._set_status(message, success)
 
@@ -1666,10 +1676,12 @@ if QtWidgets:
             self._sync_to_controller()
             self._save_complete_rows()
             from maya_aminate_ui import OperationProgress
-            with OperationProgress.for_operation(
-                self, "Controls Retargeter", "Checking the saved control pairs…"
-            ) as report:
-                success, message = self.controller.retarget_all_pairs(progress=report)
+            dialog = OperationProgress.for_operation(
+                self, "Controls Retargeter", "Checking the saved control pairs…", cancellable=True
+            )
+            with dialog as report:
+                success, message = self.controller.retarget_all_pairs(
+                    progress=report, should_cancel=dialog.poll_cancel, begin_write=dialog.prepare_write)
             self._sync_from_controller()
             self._set_status(message, success)
 
