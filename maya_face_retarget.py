@@ -475,8 +475,10 @@ def _normal_match_key(node_name):
 
 def _source_key_times(source_node, attributes=None):
     times = []
+    layers = (cmds.ls(type="animLayer") or []) if attributes else []
     for attr_name in list(attributes or []):
-        if not cmds.objExists("{0}.{1}".format(source_node, attr_name)):
+        plug = "{0}.{1}".format(source_node, attr_name)
+        if not cmds.objExists(plug):
             continue
         try:
             times.extend(
@@ -487,6 +489,15 @@ def _source_key_times(source_node, attributes=None):
             )
         except Exception:
             pass
+        # Maya's keyframe query on a layered channel can return only the
+        # current layer. Include the base and override/additive curve times
+        # before sampling the evaluated channel.
+        if layers and cmds.listConnections(plug, source=True, destination=False,
+                                           skipConversionNodes=True, type="animBlendNodeBase"):
+            for layer in layers:
+                curves = cmds.animLayer(layer, query=True, findCurveForPlug=plug) or []
+                if curves:
+                    times.extend(float(t) for t in (cmds.keyframe(curves, query=True, timeChange=True) or []))
     if not attributes:
         times.extend(float(time_value) for time_value in (cmds.keyframe(source_node, query=True, timeChange=True) or []))
     unique_times = []
@@ -819,16 +830,16 @@ class FaceRetargetController(object):
             return start_time, end_time
         return math.floor(start_time + 0.0001), math.ceil(end_time - 0.0001)
 
-    def retarget_selected_pairs(self):
+    def retarget_selected_pairs(self, progress=None):
         if not self.selected_records:
             return False, "Pick one or more control pair rows first."
-        return self.retarget_and_bake(records=list(self.selected_records), action_label="selected")
+        return self.retarget_and_bake(records=list(self.selected_records), action_label="selected", progress=progress)
 
     def retarget_selected_controls(self):
         return self.retarget_selected_pairs()
 
-    def retarget_all_pairs(self):
-        return self.retarget_and_bake(records=_all_pair_records(), action_label="all")
+    def retarget_all_pairs(self, progress=None):
+        return self.retarget_and_bake(records=_all_pair_records(), action_label="all", progress=progress)
 
     def retarget_all_controls(self):
         return self.retarget_all_pairs()
@@ -857,7 +868,7 @@ class FaceRetargetController(object):
         self.analyze_setup()
         return True, "Deleted all {0} saved control pair(s).".format(deleted)
 
-    def retarget_and_bake(self, records=None, action_label="selected"):
+    def retarget_and_bake(self, records=None, action_label="selected", progress=None):
         records = list(records or (self.selected_records or _all_pair_records()))
         if not records:
             return False, "Pair the source and target controls first."
@@ -895,6 +906,8 @@ class FaceRetargetController(object):
 
             sampled_entries = []
             entries_by_time = {}
+            if progress:
+                progress("Finding authored keyframes…")
             for payload in entries:
                 source_node = payload["source"]
                 target_node = payload["target"]
@@ -922,7 +935,10 @@ class FaceRetargetController(object):
             # Evaluate the production scene once per authored time, then sample
             # every paired control at that time before writing any target keys.
             # Keep normal Maya evaluation; update=False produces stale rig poses.
-            for time_value in sorted(entries_by_time):
+            frame_total = len(entries_by_time)
+            if progress and frame_total:
+                progress("Reading source frames…", 0, frame_total)
+            for frame_index, time_value in enumerate(sorted(entries_by_time), 1):
                 cmds.currentTime(time_value, edit=True)
                 for item in entries_by_time[time_value]:
                     sample = {}
@@ -932,6 +948,8 @@ class FaceRetargetController(object):
                         except Exception:
                             pass
                     item["samples"][time_value] = sample
+                if progress and (frame_index == frame_total or frame_index % max(1, frame_total // 100) == 0):
+                    progress("Reading source frames…", frame_index, frame_total)
 
             if not sampled_entries:
                 return False, "No authored translate or rotate keys were found on the paired source controls."
@@ -939,7 +957,10 @@ class FaceRetargetController(object):
             start_time = min(item["times"][0] for item in sampled_entries)
             end_time = max(item["times"][-1] for item in sampled_entries)
 
-            for item in sampled_entries:
+            pair_total = len(sampled_entries)
+            if progress:
+                progress("Writing target control keys…", 0, pair_total)
+            for pair_index, item in enumerate(sampled_entries, 1):
                 source_node = item["source"]
                 target_node = item["target"]
                 target_nodes.append(target_node)
@@ -960,7 +981,11 @@ class FaceRetargetController(object):
                             )
                         except Exception:
                             pass
+                if progress:
+                    progress("Writing target control keys…", pair_index, pair_total)
 
+            if progress:
+                progress("Keeping the original key times…")
             for item in sampled_entries:
                 _reduce_target_keys_to_source_times(
                     item["source"],
@@ -970,6 +995,8 @@ class FaceRetargetController(object):
                     end_time,
                 )
 
+            if progress:
+                progress("Updating saved control pairs…")
             for record_node in records:
                 payload = _pair_record_payload(record_node)
                 if not payload:
@@ -1227,7 +1254,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 0, 0, 1, 2)
-            self.version_label = QtWidgets.QLabel("Version 0.3.15")
+            self.version_label = QtWidgets.QLabel("Version 0.3.16")
             footer_layout.addWidget(self.version_label, 1, 0)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -1627,14 +1654,22 @@ if QtWidgets:
             self._sync_to_controller()
             self._save_complete_rows()
             self.controller.set_selected_records(self._selected_table_records())
-            success, message = self.controller.retarget_selected_pairs()
+            from maya_aminate_ui import OperationProgress
+            with OperationProgress.for_operation(
+                self, "Controls Retargeter", "Checking the selected control pairs…"
+            ) as report:
+                success, message = self.controller.retarget_selected_pairs(progress=report)
             self._sync_from_controller()
             self._set_status(message, success)
 
         def _retarget_all_pairs(self):
             self._sync_to_controller()
             self._save_complete_rows()
-            success, message = self.controller.retarget_all_pairs()
+            from maya_aminate_ui import OperationProgress
+            with OperationProgress.for_operation(
+                self, "Controls Retargeter", "Checking the saved control pairs…"
+            ) as report:
+                success, message = self.controller.retarget_all_pairs(progress=report)
             self._sync_from_controller()
             self._set_status(message, success)
 

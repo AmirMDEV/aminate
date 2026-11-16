@@ -7,6 +7,66 @@ except ImportError:
     from PySide2 import QtCore, QtWidgets
 
 
+class OperationProgress(QtWidgets.QDialog):
+    """Show actual work without starting a nested Maya event loop."""
+
+    @classmethod
+    def for_operation(cls, owner, title, initial_message):
+        dialog = getattr(owner, "_aminate_operation_progress", None)
+        if dialog is None:
+            dialog = owner._aminate_operation_progress = cls(owner, title)
+        dialog.message.setText(initial_message)
+        dialog.bar.setRange(0, 0)
+        return dialog
+
+    def __init__(self, owner, title):
+        super(OperationProgress, self).__init__(owner)
+        self.setObjectName("aminateOperationProgress")
+        self.setWindowTitle(title)
+        self.setWindowModality(QtCore.Qt.ApplicationModal)
+        self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, False)
+        self.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
+        self.setMinimumWidth(320)
+        self.message = QtWidgets.QLabel(self)
+        self.message.setWordWrap(True)
+        self.bar = QtWidgets.QProgressBar(self)
+        self.bar.setAccessibleName(title + " progress")
+        self.bar.setFormat("%v / %m")
+        self.bar.setRange(0, 0)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.message)
+        layout.addWidget(self.bar)
+
+    def __enter__(self):
+        self.show()
+        # Expose the dialog before starting Maya's synchronous graph work.
+        # Subsequent updates paint only this dialog.
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.ExcludeUserInputEvents |
+                                              QtCore.QEventLoop.ExcludeSocketNotifiers)
+        return self.report
+
+    def __exit__(self, *_args):
+        self.hide()
+
+    def reject(self):
+        # The current native Maya operation cannot be interrupted safely.
+        pass
+
+    def report(self, message, completed=0, total=0):
+        if self.message.text() != message:
+            self.message.setText(message)
+        if self.bar.maximum() != total:
+            self.bar.setRange(0, total)
+        if total and self.bar.value() != completed:
+            self.bar.setValue(completed)
+        # Paint just this dialog. Processing the global event queue here can
+        # run unrelated scene callbacks before a graph transaction completes.
+        self.layout().activate()
+        self.repaint()
+        self.message.repaint()
+        self.bar.repaint()
+
+
 class Disclosure(QtWidgets.QWidget):
     def __init__(self, title, expanded=False, parent=None):
         super(Disclosure, self).__init__(parent)

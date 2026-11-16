@@ -1343,7 +1343,8 @@ def _offset_teacher_duplicate(root_node, offset_group, pairs, offset_x, preferre
     raise RuntimeError("The rig cannot be offset without changing its visible shape. The distorted copy was rejected.")
 
 
-def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X, preferred_control=None):
+def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X,
+                                         preferred_control=None, progress=None):
     root_node = _long_scene_name(root_node)
     root_base = _safe_scene_node_name(_node_base_name(root_node), "rig")
     offset_group = None
@@ -1355,6 +1356,8 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
     except Exception:
         pass
     try:
+        if progress:
+            progress("Copying the rig and its animation in Maya…")
         duplicate_nodes = cmds.duplicate(
             root_node,
             renameChildren=False,
@@ -1370,6 +1373,8 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
         if not source_meshes or len(duplicate_meshes) != len(source_meshes):
             raise RuntimeError("The copy contains {0} of {1} mesh shapes; the incomplete copy was rejected.".format(
                 len(duplicate_meshes), len(source_meshes)))
+        if progress:
+            progress("Matching rig controls and checking their keys…")
         pairs = _teacher_duplicate_hierarchy_pairs(root_node, duplicate_root)
         copied_attrs = _copy_hierarchy_keyframes(root_node, duplicate_root, pairs=pairs)
         duplicate_root, uuid_pairs = _rename_teacher_duplicate_hierarchy(root_node, duplicate_root, pairs=pairs)
@@ -1380,10 +1385,14 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
         duplicate_root = _long_scene_name((cmds.parent(duplicate_root, offset_group) or [duplicate_root])[0])
         _remove_nodes_from_display_layers([offset_group] + _dag_hierarchy_in_order(duplicate_root))
         current_pairs = _resolve_uuid_pairs(uuid_pairs)
+        if progress:
+            progress("Copying materials and checking the offset…")
         _copy_visual_state_for_pairs(current_pairs)
         copied_shading = _copy_shading_assignments_for_pairs(current_pairs)
         offset_detail = _offset_teacher_duplicate(root_node, offset_group, current_pairs, offset_x, preferred_control)
         disabled_skin_inherits = offset_detail["disabled_skin_geometry_inherits"]
+        if progress:
+            progress("Creating the demo layer and recording ownership…")
         layer_name = _create_teacher_duplicate_display_layer(offset_group)
         _teacher_demo_set_baseline(offset_group)
         owned_uuids = sorted(set(cmds.ls(cmds.ls(long=True) or [], uuid=True) or []) - original_uuids)
@@ -1419,6 +1428,8 @@ def _duplicate_rig_root_for_teacher_demo(root_node, offset_x=DEFAULT_TEACHER_RIG
         created_nodes = cmds.ls(list(created_uuids), long=True) if created_uuids else []
         if created_nodes:
             try:
+                if progress:
+                    progress("Removing the incomplete demo…")
                 cmds.delete(created_nodes)
             except Exception as cleanup_error:
                 return False, "Rig duplicate failed: {0}. Cleanup also failed: {1}".format(exc, cleanup_error), {}
@@ -7109,9 +7120,11 @@ class MayaTimingToolsController(object):
         self._emit_status(message, True)
         return True, message
 
-    def duplicate_selected_rig_for_teacher_demo(self, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X):
+    def duplicate_selected_rig_for_teacher_demo(self, offset_x=DEFAULT_TEACHER_RIG_DUPLICATE_OFFSET_X, progress=None):
         if not MAYA_AVAILABLE:
             return False, "This tool only works inside Maya.", {}
+        if progress:
+            progress("Finding the selected character rig…")
         selected_roots = _selected_transform_roots()
         try:
             roots = _dedupe_preserve_order([_teacher_demo_rig_root(node) for node in selected_roots])
@@ -7127,9 +7140,13 @@ class MayaTimingToolsController(object):
             message = "Select only one rig root group. Found {0} selected roots.".format(len(roots))
             self._emit_status(message, False)
             return False, message, {}
-        success, message, detail = _duplicate_rig_root_for_teacher_demo(
-            roots[0], offset_x=offset_x, preferred_control=selected_roots[0] if len(selected_roots) == 1 else None)
+        kwargs = {"offset_x": offset_x, "preferred_control": selected_roots[0] if len(selected_roots) == 1 else None}
+        if progress:
+            kwargs["progress"] = progress
+        success, message, detail = _duplicate_rig_root_for_teacher_demo(roots[0], **kwargs)
         if success:
+            if progress:
+                progress("Preparing the teacher demo edit log…")
             self.reset_teacher_demo_edit_log()
         self._emit_status(message, success)
         return success, message, detail
@@ -9711,7 +9728,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.15")
+            self.version_label = QtWidgets.QLabel("Version 0.3.16")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
@@ -10049,9 +10066,13 @@ if QtWidgets:
             self._set_status(message, success)
 
         def _duplicate_teacher_rig(self):
-            success, message, _detail = self.controller.duplicate_selected_rig_for_teacher_demo(
-                offset_x=self.teacher_rig_offset_spin.value()
-            )
+            from maya_aminate_ui import OperationProgress
+            with OperationProgress.for_operation(
+                self, "Duplicate Rig For Teacher Demo", "Finding the selected character rig…"
+            ) as report:
+                success, message, _detail = self.controller.duplicate_selected_rig_for_teacher_demo(
+                    offset_x=self.teacher_rig_offset_spin.value(), progress=report
+                )
             self._refresh_teacher_demo_edit_log()
             self._set_status(message, success)
 

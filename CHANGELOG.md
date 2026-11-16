@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 0.3.16
+
+- Show the current step while copying a rig for a teacher demo.
+- Show frame and control pair counts during retargeting. Keep base and animation layer key times, including fractional frames.
+
 ## Version 0.3.15
 
 - Preserve copied animation when duplicating a teacher demo. Text note pointers no longer interfere with resolving the rig from a selected control.

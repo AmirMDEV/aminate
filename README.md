@@ -2,15 +2,20 @@
 
 # Aminate
 
-## Version 0.3.15
+## Version 0.3.16
 
-Aminate 0.3.15 is the current public release.
+Aminate 0.3.16 is the current public release.
+
+- **Teacher Demo:** see which step Maya is working on while it duplicates the rig.
+- **Controls Retargeter:** see frame and control pair counts. Retargeting preserves key times from both base animation and animation layers, including fractional frames.
+
+Download **Aminate_v0.3.16.zip**, extract it, open the **aminate** folder, and drag **Aminate_v0_3_16_drag_this_file_into_Maya.py** into the Maya viewport. The legacy installer remains a fallback. Save and restart Maya after updating an already loaded Aminate session.
+
+### Included from 0.3.15
 
 - **Teacher Demo:** duplicate an animated rig while Scene Text Notes point to it. The copy preserves the animation graph Maya duplicates.
 - **Scene Text Notes:** key the text and pointer on or off together. Editing a note keeps its visibility keys.
 - **Delete Teacher Demo:** remove the demo and its helpers while keeping unrelated scene objects and layers.
-
-Download **Aminate_v0.3.15.zip**, extract it, open the **aminate** folder, and drag **Aminate_v0_3_15_drag_this_file_into_Maya.py** into the Maya viewport. The legacy installer remains a fallback. Save and restart Maya after updating an already loaded Aminate session.
 
 ### Included from 0.3.14
 
@@ -153,14 +158,14 @@ There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap an
 
 ## Install
 
-1. Download `Aminate_v0.3.15.zip` from the latest release.
+1. Download `Aminate_v0.3.16.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `Aminate_v0_3_15_drag_this_file_into_Maya.py` into the Maya viewport.
+5. Drag `Aminate_v0_3_16_drag_this_file_into_Maya.py` into the Maya viewport.
 6. In a fresh Maya session, Aminate opens after installation.
 7. If Aminate is already open, the installer preserves that session. Restart Maya before reopening Aminate so it loads the update.
-8. Optionally download `Aminate_v0.3.15_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
+8. Optionally download `Aminate_v0.3.16_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
 
 ## How To Use
 
