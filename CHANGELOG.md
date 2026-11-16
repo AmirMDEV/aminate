@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 0.3.15
+
+- Preserve copied animation when duplicating a teacher demo. Text note pointers no longer interfere with resolving the rig from a selected control.
+- Key the text and pointer together. Editing a note preserves its visibility keys.
+- Delete only marked teacher demos and their helpers. Keep unrelated objects and layers with similar names.
+
 ## Version 0.3.14
 
 - Add guided Manual Setup beside automatic IK/FK detection, with control selection and Channel Box capture.

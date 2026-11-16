@@ -2,15 +2,21 @@
 
 # Aminate
 
-## Version 0.3.14
+## Version 0.3.15
 
-Aminate 0.3.14 is the current public release.
+Aminate 0.3.15 is the current public release.
+
+- **Teacher Demo:** duplicate an animated rig while Scene Text Notes point to it. The copy preserves the animation graph Maya duplicates.
+- **Scene Text Notes:** key the text and pointer on or off together. Editing a note keeps its visibility keys.
+- **Delete Teacher Demo:** remove the demo and its helpers while keeping unrelated scene objects and layers.
+
+Download **Aminate_v0.3.15.zip**, extract it, open the **aminate** folder, and drag **Aminate_v0_3_15_drag_this_file_into_Maya.py** into the Maya viewport. The legacy installer remains a fallback. Save and restart Maya after updating an already loaded Aminate session.
+
+### Included from 0.3.14
 
 - **Universal IK/FK:** detect a selected limb, or use **Manual Setup** to pick FK controls and the IK hand/foot control. Aminate fills verified details automatically and asks for missing selections. Pick controls one at a time when needed; save the mapping for reuse.
 - **Rig Scale:** use **Scale character** to multiply the current size, or **Add a scale control** to expose a reusable control. More rig structures are supported, with geometry checks and rollback when a setup cannot be verified.
 - **Parent Manager:** follow targets, save attach points, adjust follow changes, and inspect colour-coded timeline markers. Practice lessons are included.
-
-Download **Aminate_v0.3.14.zip**, extract it, open the **aminate** folder, and drag **Aminate_v0_3_14_drag_this_file_into_Maya.py** into the Maya viewport. The legacy installer remains a fallback. Save and restart Maya after updating an already loaded Aminate session.
 
 The IK/FK update was checked in Maya 2026.2 on representative character rigs, including manual setup, switching and undo/redo. Compatibility depends on the rig and pose; unsupported or ambiguous setups may need manual mapping or be refused. This is not a guarantee for every rig. Pencil and reference-video workflows remain in beta testing.
 
@@ -147,14 +153,14 @@ There are 26 main tools, including Control Rig Builder, Multi-Performer Mocap an
 
 ## Install
 
-1. Download `Aminate_v0.3.9.zip` from the latest release.
+1. Download `Aminate_v0.3.15.zip` from the latest release.
 2. Unzip it.
 3. Open the `aminate` folder inside the extracted folder.
 4. Open Autodesk Maya.
-5. Drag `Aminate_v0_3_9_drag_this_file_into_Maya.py` into the Maya viewport.
+5. Drag `Aminate_v0_3_15_drag_this_file_into_Maya.py` into the Maya viewport.
 6. In a fresh Maya session, Aminate opens after installation.
 7. If Aminate is already open, the installer preserves that session. Restart Maya before reopening Aminate so it loads the update.
-8. Optionally download `Aminate_v0.3.9_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
+8. Optionally download `Aminate_v0.3.15_offline_tutorial.zip` from the same release, extract it, and double-click `tutorial.html` for the full offline step-by-step guide and FAQ.
 
 ## How To Use
 

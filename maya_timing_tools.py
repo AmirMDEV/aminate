@@ -479,6 +479,10 @@ def _dag_hierarchy_in_order(root_node):
 
 
 def _copy_keyed_attributes(source_node, target_node):
+    # Maya's upstream duplicate already copies the animation graph. Do not cut
+    # those keys: doing so can flatten layers and alter curve interpolation.
+    if not cmds.keyframe(source_node, query=True, keyframeCount=True):
+        return 0
     copied_attrs = 0
     attrs = set(cmds.listAttr(source_node, keyable=True) or [])
     attrs.update(cmds.listAttr(source_node, channelBox=True) or [])
@@ -491,19 +495,22 @@ def _copy_keyed_attributes(source_node, target_node):
                 continue
         except Exception:
             continue
+        if not cmds.keyframe(source_node, attribute=attr_name, query=True, keyframeCount=True):
+            continue
+        if cmds.keyframe(target_attr, query=True, keyframeCount=True):
+            copied_attrs += 1
+            continue
+        if cmds.connectionInfo(target_attr, isDestination=True):
+            continue
         try:
-            key_count = cmds.copyKey(source_node, attribute=attr_name)
+            key_count = cmds.copyKey(source_node, attribute=attr_name, animation="objects")
         except Exception:
             key_count = 0
         if not key_count:
             continue
         try:
-            cmds.cutKey(target_node, attribute=attr_name, clear=True)
-        except Exception:
-            pass
-        try:
-            cmds.pasteKey(target_node, attribute=attr_name, option="replaceCompletely")
-            copied_attrs += 1
+            if cmds.pasteKey(target_node, attribute=attr_name, option="replaceCompletely"):
+                copied_attrs += 1
         except Exception:
             pass
     return copied_attrs
@@ -794,74 +801,49 @@ def _rename_teacher_duplicate_hierarchy(source_root, duplicate_root, pairs=None)
 
 
 def _teacher_demo_duplicate_roots():
-    roots = []
-    candidates = []
-    try:
-        candidates.extend(cmds.ls("*.{0}".format(TEACHER_RIG_DUPLICATE_MARKER_ATTR), objectsOnly=True, long=True) or [])
-    except Exception:
-        pass
-    try:
-        candidates.extend(cmds.ls("*{0}*".format(TEACHER_RIG_DUPLICATE_SUFFIX), type="transform", long=True) or [])
-    except Exception:
-        pass
-    for node_name in _dedupe_preserve_order(candidates):
-        is_teacher_duplicate = False
-        if cmds.objExists(node_name + "." + TEACHER_RIG_DUPLICATE_MARKER_ATTR):
-            try:
-                is_teacher_duplicate = bool(cmds.getAttr(node_name + "." + TEACHER_RIG_DUPLICATE_MARKER_ATTR))
-            except Exception:
-                is_teacher_duplicate = True
-        if not is_teacher_duplicate and TEACHER_RIG_DUPLICATE_SUFFIX in _node_short_name(node_name):
-            is_teacher_duplicate = True
-        if is_teacher_duplicate:
-            roots.append(node_name)
-    top_roots = []
-    for candidate in roots:
-        has_teacher_parent = False
-        for other in roots:
-            if candidate != other and candidate.startswith(other + "|"):
-                has_teacher_parent = True
-                break
-        if not has_teacher_parent:
-            top_roots.append(candidate)
-    return _dedupe_preserve_order(top_roots)
+    return _marked_teacher_transforms(TEACHER_RIG_DUPLICATE_MARKER_ATTR)
 
 
-def _delete_teacher_demo_duplicate_layers():
-    deleted = 0
-    for layer_name in cmds.ls(TEACHER_RIG_DUPLICATE_LAYER_NAME + "*", type="displayLayer") or []:
-        if layer_name == "defaultLayer":
-            continue
-        try:
-            cmds.delete(layer_name)
-            deleted += 1
-        except Exception:
-            pass
-    return deleted
+def _marked_teacher_transforms(marker):
+    nodes = cmds.ls("*." + marker, recursive=True, objectsOnly=True, long=True, type="transform") or []
+    return [node for node in _dedupe_preserve_order(nodes) if cmds.getAttr(node + "." + marker)]
 
 
 def _delete_teacher_demo_duplicates():
     roots = _teacher_demo_duplicate_roots()
-    deleted = 0
+    nodes = list(roots)
+    layers = []
     for root_name in roots:
-        if not cmds.objExists(root_name):
-            continue
-        try:
-            owned_nodes = []
-            ownership_attr = root_name + "." + TEACHER_RIG_DUPLICATE_OWNED_UUIDS_ATTR
-            if cmds.objExists(ownership_attr):
-                identities = json.loads(cmds.getAttr(ownership_attr) or "[]")
-                if isinstance(identities, list) and identities and all(
-                        isinstance(value, str) and re.match(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$", value)
-                        for value in identities):
-                    owned_nodes = cmds.ls(identities, long=True) or []
-            cmds.delete(_dedupe_preserve_order([root_name] + owned_nodes))
-            deleted += 1
-        except Exception:
-            pass
-    deleted_layers = _delete_teacher_demo_duplicate_layers()
-    _delete_teacher_demo_edit_log_scene_nodes()
-    return deleted, deleted_layers
+        ownership_attr = root_name + "." + TEACHER_RIG_DUPLICATE_OWNED_UUIDS_ATTR
+        if cmds.objExists(ownership_attr):
+            identities = json.loads(cmds.getAttr(ownership_attr) or "[]")
+            if not isinstance(identities, list) or not all(
+                    isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value)
+                    for value in identities):
+                raise RuntimeError("Invalid ownership record on " + root_name)
+            owned = cmds.ls(identities, long=True) if identities else []
+            nodes.extend(owned or [])
+            layers.extend(node for node in (owned or []) if cmds.nodeType(node) == "displayLayer")
+        else:
+            # Older copies did not save UUIDs. Only take the layer associated
+            # with this marked root; a similar layer name is insufficient.
+            for layer in _display_layers_for_node(root_name):
+                if re.fullmatch(re.escape(TEACHER_RIG_DUPLICATE_LAYER_NAME) + r"\d*", _node_base_name(layer)):
+                    members = cmds.editDisplayLayerMembers(layer, query=True, fullNames=True) or []
+                    if {_long_scene_name(member) for member in members} == {root_name}:
+                        layers.append(layer)
+                        nodes.append(layer)
+    logs = _marked_teacher_transforms(TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR)
+    nodes = _dedupe_preserve_order(nodes + logs)
+    if nodes:
+        uuids = cmds.ls(nodes, uuid=True) or []
+        locked = cmds.lockNode(nodes, query=True, lock=True) or []
+        if any(locked):
+            raise RuntimeError("Unlock the teacher demo nodes before deleting the demo.")
+        cmds.delete(nodes)
+        if uuids and cmds.ls(uuids, long=True):
+            raise RuntimeError("Some teacher demo nodes could not be removed. Undo to restore the demo before retrying.")
+    return len(roots), len(set(layers))
 
 
 def _teacher_demo_student_name(node_name):
@@ -1049,8 +1031,9 @@ def _teacher_demo_edit_log_lines(order, records):
 def _teacher_demo_edit_log_root():
     if not MAYA_AVAILABLE or not cmds:
         return ""
-    if cmds.objExists(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME):
-        log_root = _long_scene_name(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME)
+    existing = _marked_teacher_transforms(TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR)
+    if existing:
+        log_root = existing[0]
     else:
         parent_root = _ensure_scene_helpers_root()
         log_root = cmds.createNode("transform", name=TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME, parent=parent_root)
@@ -1111,18 +1094,7 @@ def _delete_teacher_demo_edit_log_scene_nodes():
     if not MAYA_AVAILABLE or not cmds:
         return 0
     deleted = 0
-    candidates = []
-    if cmds.objExists(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME):
-        candidates.append(TEACHER_RIG_DUPLICATE_EDIT_LOG_GROUP_NAME)
-    for node_name in cmds.ls(type="transform", long=True) or []:
-        if not cmds.objExists(node_name + "." + TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR):
-            continue
-        try:
-            if bool(cmds.getAttr(node_name + "." + TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR)):
-                candidates.append(node_name)
-        except Exception:
-            pass
-    for node_name in _dedupe_preserve_order(candidates):
+    for node_name in _marked_teacher_transforms(TEACHER_RIG_DUPLICATE_EDIT_LOG_MARKER_ATTR):
         if not cmds.objExists(node_name):
             continue
         try:
@@ -1243,6 +1215,10 @@ def _teacher_demo_rig_root(node_name):
             if cmds.getAttr(local_plug, type=True) == "message":
                 continue
             remote = _long_scene_name(remote_plug.split(".", 1)[0])
+            # A note pointer follows the rig. Its helper transforms are
+            # consumers, not part of the character we are copying.
+            if remote.startswith("|" + SCENE_TEXT_NOTE_GROUP_NAME + "|"):
+                continue
             if remote != candidate and not remote.startswith(candidate + "|"):
                 endpoints.append(remote)
         if endpoints:
@@ -1914,7 +1890,7 @@ def _rebuild_scene_text_note_text(note_node, update_wrap_box=True):
         enabled=bool(data.get("wrap_enabled", SCENE_TEXT_NOTE_DEFAULT_WRAP_ENABLED)),
     )
     _set_display_color(note_node, data.get("color") or SCENE_TEXT_NOTE_DEFAULT_COLOR)
-    _force_scene_text_note_visible(note_node)
+    _force_scene_text_note_visible(text_holder)
     if update_wrap_box:
         _create_or_update_scene_text_note_wrap_box_control(note_node)
     return text_holder
@@ -2085,6 +2061,7 @@ def _rebuild_scene_text_note_line(note_node):
     except Exception:
         pass
     line_group = _long_scene_name(line_group)
+    cmds.connectAttr(note_node + ".visibility", line_group + ".visibility")
     _set_display_color(line_curve, data.get("color") or SCENE_TEXT_NOTE_DEFAULT_COLOR)
     _ensure_string_attr(note_node, SCENE_TEXT_NOTE_LINE_ATTR, line_group)
     return line_group
@@ -7404,8 +7381,14 @@ class MayaTimingToolsController(object):
         except Exception:
             pass
         try:
-            cmds.setAttr(note_node + ".visibility", bool(visible))
+            line_node = _scene_text_note_data(note_node).get("line")
+            if line_node and cmds.objExists(line_node):
+                source = note_node + ".visibility"
+                destination = line_node + ".visibility"
+                if not cmds.isConnected(source, destination) and not cmds.connectionInfo(destination, isDestination=True):
+                    cmds.connectAttr(source, destination)
             cmds.setKeyframe(note_node, attribute="visibility", time=frame, value=1 if visible else 0)
+            cmds.dgdirty(note_node + ".visibility")
             message = "Keyed {0} {1} on frame {2:g}.".format(
                 _node_short_name(note_node),
                 "on" if visible else "off",
@@ -9728,7 +9711,7 @@ if QtWidgets:
             self.brand_label.linkActivated.connect(self._open_follow_url)
             self.brand_label.setWordWrap(True)
             footer_layout.addWidget(self.brand_label, 1)
-            self.version_label = QtWidgets.QLabel("Version 0.3.14")
+            self.version_label = QtWidgets.QLabel("Version 0.3.15")
             footer_layout.addWidget(self.version_label)
             self.donate_button = QtWidgets.QPushButton("Donate")
             _style_donate_button(self.donate_button)
